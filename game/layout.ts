@@ -30,6 +30,6 @@ export const TARGETS: Record<TargetId, { label: string; point: Point; action: st
   exit: { label: '출입구', point: START, action: '퇴근하기' },
 };
 export const WEAPONS = {
-  punch: { label: '펀치', interval: 0.3 }, hammer: { label: '뿅망치', interval: 0.7 }, fan: { label: '서류 부채', interval: 0.5 },
+  punch: { label: '펀치', interval: 0.55 }, hammer: { label: '뿅망치', interval: 0.85 }, fan: { label: '서류 부채', interval: 0.7 },
 } as const;
 export const SNACKS = { cookie: '쿠키', choco: '초코바', cracker: '크래커' } as const;

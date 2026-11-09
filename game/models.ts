@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import type { Actor, GameState, Weapon } from './types.ts';
+import type { Actor, GameState, Snack, Weapon } from './types.ts';
+import { DESKS, WEAPONS } from './layout.ts';
 
 const mats = new Map<string, THREE.MeshStandardMaterial>();
 const geos = new Map<string, THREE.BufferGeometry>();
@@ -83,7 +84,7 @@ export function desk(parent: THREE.Object3D, x: number, z: number, index: number
   return { group: g, chair: ch, screen };
 }
 
-type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; mug: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
+type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; snacks: Record<Snack, THREE.Group>; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
 export function createActor(parent: THREE.Object3D, role: number, name: string): Rig {
   const root = new THREE.Group(); parent.add(root); const body = new THREE.Group(); root.add(body);
   const boss = role === 1; const shirt = ['#4e8a7e', '#2f4355', '#c48d6b', '#7e8da5', '#bbab78'][role] ?? '#9fa8b4'; const skin = ['#f0c5a2', '#e7ba94', '#eec09c', '#e5b692', '#f0cbad'][role] ?? '#edc3a0';
@@ -109,41 +110,133 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   sphere(weapons.punch, .13, '#eeb48a', 0, 0, 0, 1.08, .9, 1.1);
   cylinder(weapons.hammer, .028, .028, .42, '#ad7b4d', 0, .12); const hammer = cylinder(weapons.hammer, .17, .17, .40, '#e8aa61', 0, .39); hammer.rotation.z = Math.PI / 2;
   cylinder(weapons.fan, .018, .018, .29, '#b49365', 0, .10); for (let i = 0; i < 6; i++) { const p = box(weapons.fan, .12, .37, .025, i % 2 ? '#f0e5cb' : '#fff8e6', 0, .31, i * .004, .005); p.rotation.z = (i - 2.5) * .20; }
+  weapons.hammer.rotation.z = Math.PI; weapons.fan.rotation.z = Math.PI;
+  const snacks = { cookie: new THREE.Group(), choco: new THREE.Group(), cracker: new THREE.Group() };
+  for (const [kind, item] of Object.entries(snacks)) { item.name = `held-${kind}`; item.visible = false; hand.add(item); }
+  const cookie = cylinder(snacks.cookie, .135, .135, .045, '#d8a058'); cookie.rotation.x = Math.PI / 2;
+  for (let i = 0; i < 7; i++) { const angle = i * 2.4; sphere(snacks.cookie, .017, '#654532', Math.sin(angle) * .087, Math.cos(angle) * .087, .026, 1, 1, .35); }
+  box(snacks.choco, .14, .27, .055, '#694535', 0, 0, 0, .015);
+  box(snacks.choco, .153, .14, .065, '#b17a87', 0, -.065, 0, .012);
+  for (let i = 0; i < 2; i++) box(snacks.choco, .12, .006, .003, '#a07550', 0, .04 + i * .065, .029, 0);
+  box(snacks.cracker, .23, .23, .045, '#e2c183', 0, 0, 0, .023);
+  for (const x of [-.055, .055]) for (const y of [-.055, .055]) sphere(snacks.cracker, .012, '#ad8b50', x, y, .024, 1, 1, .25);
   const actorMug = mug(arms[1], 0, -.33, .10, '#e6b77e'); actorMug.visible = false;
+  actorMug.name = 'held-coffee'; actorMug.scale.setScalar(1.2);
+  const steam = new THREE.Group(); steam.name = 'coffee-steam'; actorMug.add(steam);
+  for (let i = 0; i < 3; i++) sphere(steam, .025, '#faf5df', (i - 1) * .035, .22 + i * .05, 0, .7, 1.8, .7);
+  steam.visible = false;
+  const crumbs = new THREE.Group(); crumbs.name = 'snack-crumbs'; body.add(crumbs); crumbs.visible = false;
+  for (let i = 0; i < 4; i++) box(crumbs, .025, .026, .021, i % 2 ? '#b88147' : '#edc98a', (i - 1.5) * .04, 1.2, .36, .003);
   const label = spriteLabel(root, name, boss ? '#795349' : '#325852', boss ? .82 : .86); label.position.y = 2.04;
   const effect = new THREE.Group(); effect.position.y = 1.90; root.add(effect); const stars: THREE.Mesh[] = [];
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
-  return { root, body, head, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, mug: actorMug, label, effect, stars, isBoss: boss, lastName: name };
+  return { root, body, head, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, snacks, mug: actorMug, steam, crumbs, label, effect, stars, isBoss: boss, lastName: name };
 }
 export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
-  const reduced = state.settings.reducedMotion; const walk = a.moving || a.pose === 'walk'; const seated = ['sit', 'type', 'sleep', 'spin', 'drink', 'eat'].includes(a.pose) && (!['drink', 'eat'].includes(a.pose) || (a.id === 'player' && state.seat !== null));
+  const reduced = state.settings.reducedMotion; const player = a.id === 'player'; const walk = a.moving || a.pose === 'walk';
+  const atDesk = !player && DESKS.some(d => d.owner === a.id && Math.hypot(a.x - d.x, a.z - d.z - 1.05) < .2);
+  const seated = !walk && (player ? state.seat !== null : ['sit', 'type', 'sleep', 'lean'].includes(a.pose) || (atDesk && ['drink', 'eat'].includes(a.pose)));
+  const activity = player && state.activity?.kind === a.pose ? state.activity : null;
+  const progress = activity ? THREE.MathUtils.clamp(1 - activity.remaining / activity.duration, 0, 1) : .5;
+  const ease = (start: number, end: number) => THREE.MathUtils.smoothstep(progress, start, end);
+  const lift = ease(.02, .3) * (1 - ease(.75, 1));
   r.root.position.set(a.x, 0, a.z); r.root.rotation.y = a.angle;
   const wave = Math.sin(time * 9 + (a.id.length % 3)); r.body.position.y = seated ? -.17 : walk && !reduced ? Math.abs(wave) * .035 : 0;
-  r.body.rotation.set(0, 0, 0); r.head.rotation.set(0, Math.sin(time * .7) * .025, 0); r.leftArm.rotation.set(0, 0, .07); r.rightArm.rotation.set(0, 0, -.07);
+  r.body.position.x = r.body.position.z = 0; r.body.scale.set(1, 1, 1);
+  r.body.rotation.set(0, 0, 0); r.head.rotation.set(0, reduced ? 0 : Math.sin(time * .7) * .025, 0); r.leftArm.rotation.set(0, 0, .07); r.rightArm.rotation.set(0, 0, -.07);
+  r.leftArm.scale.set(1, 1, 1); r.rightArm.scale.set(1, 1, 1); r.hand.rotation.set(0, 0, 0);
+  r.mug.position.set(0, -.33, .10); r.mug.rotation.set(0, 0, 0); r.steam.visible = r.crumbs.visible = false;
+  Object.values(r.snacks).forEach(item => { item.visible = false; item.scale.setScalar(1); item.rotation.set(0, 0, 0); });
+  Object.values(r.weapons).forEach(item => { item.visible = false; });
   r.legs.forEach((leg, i) => { leg.rotation.x = seated ? -1.42 : walk ? wave * .42 * (i ? -1 : 1) : 0; r.calves[i].rotation.x = seated ? 1.44 : 0; });
   if (walk) { r.leftArm.rotation.x = -wave * .32; r.rightArm.rotation.x = wave * .32; }
   if (a.pose === 'type') { r.leftArm.rotation.x = -1.0 + Math.sin(time * 13) * .08; r.rightArm.rotation.x = -1.0 + Math.cos(time * 13) * .08; r.head.rotation.x = .13; }
   if (a.pose === 'sleep') { r.head.rotation.x = .36 + Math.sin(time * 1.5) * .05; r.body.rotation.x = .15; r.leftArm.rotation.x = -.7; r.rightArm.rotation.x = -.7; }
-  if (a.pose === 'drink') { r.rightArm.rotation.x = -2.12 + Math.sin(time * 2) * .06; r.head.rotation.x = -.12; }
-  if (a.pose === 'eat') r.rightArm.rotation.x = -1.85 + Math.sin(time * 4) * .14;
-  if (['take', 'brew'].includes(a.pose)) r.rightArm.rotation.x = -1.3;
+  if (a.pose === 'lean') {
+    r.body.rotation.x = -.16; r.body.position.z = .14; r.head.rotation.x = -.1;
+    r.leftArm.rotation.set(-2.45, -.15, .45); r.rightArm.rotation.set(-2.45, .15, -.45);
+  }
   if (a.pose === 'watch' || a.pose === 'scold') { r.rightArm.rotation.x = -.8; r.rightArm.rotation.z = -.8; }
   if (a.pose === 'spin' && !reduced) r.body.rotation.y = time * 6;
-  const carryingCoffee = a.id === 'player' && state.inventory.coffee > 0 && ['idle', 'walk', 'sit', 'lean'].includes(a.pose);
-  r.mug.visible = a.pose === 'drink' || carryingCoffee;
-  if (carryingCoffee) r.rightArm.rotation.x = -.72;
-  Object.values(r.weapons).forEach(w => { w.visible = false; });
+  const carryingCoffee = player && state.inventory.coffee > 0 && ['idle', 'walk', 'sit', 'lean'].includes(a.pose);
+  r.mug.visible = carryingCoffee || a.pose === 'drink';
+  if (carryingCoffee) { r.rightArm.rotation.set(-.85, 0, -.07); }
+  if (a.pose === 'brew' && activity) {
+    const reach = ease(.04, .28) * (1 - ease(.69, .93));
+    r.rightArm.rotation.set(-.35 - reach * 1.13, 0, -.08);
+    r.rightArm.scale.y = 1 + reach * .12; r.body.rotation.x = reach * .09;
+    r.leftArm.rotation.x = -.4 - reach * .55; r.head.rotation.x = .1 * reach;
+    r.mug.visible = progress > .18;
+    // The cup remains upright while the arm reaches under the machine and returns.
+    r.steam.visible = progress > .5 && !reduced;
+    if (progress > .93) r.rightArm.rotation.x = -.85;
+  }
+  if (a.pose === 'take' && activity?.snack) {
+    const reach = ease(.02, .3) * (1 - ease(.56, .95));
+    r.rightArm.rotation.set(-.2 - reach * 1.35, 0, -.12 - .15 * ease(.6, .95));
+    r.rightArm.scale.y = 1 + reach * .14; r.body.rotation.x = reach * .12;
+    r.head.rotation.x = .14; r.leftArm.rotation.x = -.35;
+    const snack = r.snacks[activity.snack]; snack.visible = progress >= .28 && progress < .97;
+    snack.scale.setScalar(1 - ease(.82, 1) * .9);
+    r.mug.visible = false;
+  }
+  if (a.pose === 'drink') {
+    const amount = activity ? lift : .9;
+    r.rightArm.rotation.set(-.85 - amount * 1.3, 0, -.07 - amount * .35);
+    r.head.rotation.x = -.1 * amount; r.leftArm.rotation.x = -.3;
+    if (!reduced && amount > .9) r.head.rotation.x += Math.sin(progress * Math.PI * 8) * .025;
+  }
+  if (a.pose === 'eat' && activity?.snack) {
+    const bite = !reduced && progress > .33 && progress < .73 ? Math.sin(progress * Math.PI * 12) * .06 : 0;
+    r.rightArm.rotation.set(-.4 - lift * 1.8 + bite, 0, -.07 - lift * .38);
+    r.leftArm.rotation.x = -.25; r.head.rotation.x = lift * .04;
+    const snack = r.snacks[activity.snack]; snack.visible = progress < .96;
+    snack.scale.setScalar(progress > .54 ? .68 : 1);
+    r.crumbs.visible = !reduced && progress > .36 && progress < .76;
+    r.crumbs.children.forEach((crumb, i) => { const fall = (progress * 3 + i * .22) % 1; crumb.position.set((i - 1.5) * .055, 1.34 - fall * .28, .35 + fall * .08); });
+    r.mug.visible = false;
+  }
+  r.mug.quaternion.copy(r.rightArm.quaternion).invert();
+  if (a.pose === 'drink') r.mug.rotation.x -= lift * .24;
+  r.steam.children.forEach((puff, i) => { const rise = (progress * 2 + i / 3) % 1; puff.position.y = .20 + rise * .22; puff.scale.setScalar(.65 + rise * .5); });
   const hitAge = state.lastHit ? state.elapsed - state.lastHit.at : 10;
-  const hit = hitAge >= 0 && hitAge < 2;
-  if (a.id === 'player' && hit && hitAge < .27) { r.rightArm.rotation.x = -1.3 - Math.sin(hitAge / .27 * Math.PI) * .8; r.rightArm.rotation.z = -.3; r.weapons[state.lastHit!.weapon].visible = true; }
-  r.body.scale.set(1, 1, 1); r.effect.visible = r.isBoss && hit;
+  const swingDuration = state.lastHit ? WEAPONS[state.lastHit.weapon].interval : .55;
+  if (player && a.pose === 'hit' && hitAge >= 0 && hitAge < swingDuration && state.lastHit) {
+    const p = hitAge / swingDuration, windup = THREE.MathUtils.smoothstep(p, 0, .23), strike = THREE.MathUtils.smoothstep(p, .23, .43), recover = THREE.MathUtils.smoothstep(p, .62, 1);
+    const weapon = state.lastHit.weapon; const finish = 1 - recover;
+    const gap = Math.hypot(state.boss.x - a.x, state.boss.z - a.z);
+    r.weapons[weapon].visible = true; r.mug.visible = false;
+    r.leftArm.rotation.set(-.8, 0, .3); r.body.position.z = reduced ? 0 : Math.sin(p * Math.PI) * .12;
+    if (weapon === 'punch') {
+      r.rightArm.rotation.set(THREE.MathUtils.lerp(-.55 - .3 * windup, -1.55, strike) * finish, -.35 * (1 - strike), -.5 * (1 - strike) - .05);
+      r.rightArm.scale.y = 1 + .38 * strike * finish;
+      r.body.rotation.y = (reduced ? .05 : .17) * (windup - 2 * strike) * finish;
+      r.body.position.z = THREE.MathUtils.clamp(gap - 1.05, .05, .55) * strike * finish;
+      if (!seated) { r.legs[0].rotation.x = -.35 * strike * finish; r.calves[0].rotation.x = .25 * strike * finish; }
+    } else if (weapon === 'hammer') {
+      r.rightArm.rotation.set(THREE.MathUtils.lerp(-1.1 - 1.8 * windup, -1.85, strike) * finish, 0, -.16);
+      r.leftArm.rotation.x = -.8 - .65 * windup * finish;
+      r.body.rotation.x = (reduced ? .04 : .13) * strike * finish;
+      // Keep functional reach when reduced motion removes the extra body sway.
+      r.body.position.z = THREE.MathUtils.clamp(gap - 1.3, 0, .2) * strike * finish;
+    } else {
+      const sweep = reduced ? -.3 : Math.sin(strike * Math.PI * 2.6) * .7;
+      r.rightArm.rotation.set((-1.0 - .35 * windup) * finish, sweep * finish, -.25);
+      r.hand.rotation.z = (reduced ? .15 : Math.sin(p * Math.PI * 4) * .35) * finish;
+      r.body.rotation.y = sweep * .16 * finish;
+      r.body.position.z = (THREE.MathUtils.clamp(gap - 1.25, 0, .35) + .1) * strike * finish;
+    }
+  }
+  const reactionAge = hitAge - swingDuration * .43;
+  const hit = reactionAge >= 0 && hitAge < 2;
+  r.effect.visible = r.isBoss && hit;
   if (r.isBoss && hit) {
-    const amount = Math.exp(-hitAge * 2.6); const weapon = state.lastHit!.weapon;
-    if (weapon === 'punch') { r.head.rotation.z = Math.sin(hitAge * 27) * amount * (reduced ? .08 : .38); r.body.rotation.x = -.12 * amount; }
-    if (weapon === 'hammer') { const squash = Math.sin(Math.min(hitAge * 8, Math.PI)) * amount; r.body.scale.set(1 + squash * .15, 1 - squash * .18, 1 + squash * .15); r.body.position.y += Math.max(0, Math.sin(hitAge * 12)) * amount * (reduced ? .04 : .20); }
-    if (weapon === 'fan') { r.head.rotation.y = reduced ? .18 * amount : Math.sin(hitAge * 17) * amount * .9; r.body.rotation.z = Math.sin(hitAge * 15) * amount * .08; }
-    r.stars.forEach((s, i) => { const a = i / r.stars.length * Math.PI * 2 + (reduced ? 0 : hitAge * 3); s.position.set(Math.cos(a) * .49, Math.sin(a * 2) * .10, Math.sin(a) * .49); const size = Math.max(.1, amount * 1.5); s.scale.set(size, weapon === 'fan' ? size * 1.55 : size, weapon === 'fan' ? .45 : 1); s.rotation.z = a; s.rotation.x = weapon === 'fan' && !reduced ? hitAge * 9 + i : 0; });
+    const amount = THREE.MathUtils.smoothstep(reactionAge, 0, .07) * Math.exp(-reactionAge * 2.6); const weapon = state.lastHit!.weapon;
+    if (weapon === 'punch') { r.head.rotation.z = Math.sin(reactionAge * 27) * amount * (reduced ? .08 : .38); r.body.rotation.x = -.12 * amount; }
+    if (weapon === 'hammer') { const squash = Math.sin(Math.min(reactionAge * 8, Math.PI)) * amount; r.body.scale.set(1 + squash * .15, 1 - squash * .18, 1 + squash * .15); r.body.position.y += Math.max(0, Math.sin(reactionAge * 12)) * amount * (reduced ? .04 : .20); }
+    if (weapon === 'fan') { r.head.rotation.y = reduced ? .18 * amount : Math.sin(reactionAge * 17) * amount * .9; r.body.rotation.z = Math.sin(reactionAge * 15) * amount * .08; }
+    r.stars.forEach((s, i) => { const a = i / r.stars.length * Math.PI * 2 + (reduced ? 0 : reactionAge * 3); s.position.set(Math.cos(a) * .49, Math.sin(a * 2) * .10, Math.sin(a) * .49); const size = Math.max(.1, amount * 1.5); s.scale.set(size, weapon === 'fan' ? size * 1.55 : size, weapon === 'fan' ? .45 : 1); s.rotation.z = a; s.rotation.x = weapon === 'fan' && !reduced ? reactionAge * 9 + i : 0; });
   }
   if (a.name !== r.lastName) { r.label.material.map?.dispose(); r.label.material.map = labelTexture(a.name, '#fffbee', '#325852'); r.label.material.needsUpdate = true; r.lastName = a.name; }
 }
