@@ -1,5 +1,5 @@
-import type { Actor, Command, GameEngine, GameEvent, GameState, PersistedState, Point, Pose, Snack } from './types.ts';
-import { BOUNDS, DESKS, OBSTACLES, ROOF_BOUNDS, ROOF_REST, ROOF_START, SNACKS, START, TARGETS, WEAPONS, isRoofTarget } from './layout.ts';
+import type { Actor, Command, Floor, GameEngine, GameEvent, GameState, PersistedState, Point, Pose, RoofWallSide, Snack } from './types.ts';
+import { BOUNDS, DESKS, OBSTACLES, ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, ROOF_START, ROOF_WALLS, SNACKS, START, TARGETS, WEAPONS, isRoofTarget, roofWallForTarget } from './layout.ts';
 import { readSavedState, toPersistedState } from './storage.ts';
 
 const RADIUS = .22;
@@ -7,17 +7,20 @@ const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
 const face = (actor: Actor, point: Point) => { actor.angle = Math.atan2(point.x - actor.x, point.z - actor.z); };
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
-const valid = (p: Point) => Number.isFinite(p.x) && Number.isFinite(p.z)
-  && p.x >= BOUNDS.minX + RADIUS && p.x <= BOUNDS.maxX - RADIUS
-  && p.z >= BOUNDS.minZ + RADIUS && p.z <= BOUNDS.maxZ - RADIUS
-  && !OBSTACLES.some(o => Math.abs(p.x - o.x) < o.w / 2 + RADIUS && Math.abs(p.z - o.z) < o.d / 2 + RADIUS);
-function lineClear(a: Point, b: Point, avoid?: Point) {
-  if (!valid(a) || !valid(b)) return false;
+const valid = (p: Point, floor: Floor = 'office') => {
+  const bounds = floor === 'rooftop' ? ROOF_BOUNDS : BOUNDS, obstacles = floor === 'rooftop' ? ROOF_OBSTACLES : OBSTACLES;
+  return Number.isFinite(p.x) && Number.isFinite(p.z)
+    && p.x >= bounds.minX + RADIUS && p.x <= bounds.maxX - RADIUS
+    && p.z >= bounds.minZ + RADIUS && p.z <= bounds.maxZ - RADIUS
+    && !obstacles.some(o => Math.abs(p.x - o.x) < o.w / 2 + RADIUS && Math.abs(p.z - o.z) < o.d / 2 + RADIUS);
+};
+function lineClear(a: Point, b: Point, avoid?: Point, floor: Floor = 'office') {
+  if (!valid(a, floor) || !valid(b, floor)) return false;
   const dx = b.x - a.x, dz = b.z - a.z;
   // Sampling can skip a narrow diagonal intersection with a desk corner.
   // Clip the entire segment against each expanded rectangle instead, so a
   // route and any shorter per-frame portion of it agree on collision safety.
-  for (const obstacle of OBSTACLES) {
+  for (const obstacle of floor === 'rooftop' ? ROOF_OBSTACLES : OBSTACLES) {
     let enter = 0, leave = 1, intersects = true;
     for (const [origin, delta, min, max] of [
       [a.x, dx, obstacle.x - obstacle.w / 2 - RADIUS, obstacle.x + obstacle.w / 2 + RADIUS],
@@ -47,23 +50,37 @@ function lineClear(a: Point, b: Point, avoid?: Point) {
 // encounter clearance, so the player cannot approach through the boss's body.
 const GRID = .3, NX = 55, NZ = 35;
 const nodes: Point[] = Array.from({ length: NX * NZ }, (_, i) => ({ x: -8.1 + (i % NX) * GRID, z: -5.1 + Math.floor(i / NX) * GRID }));
-const openNodes = nodes.map(valid);
-function nearest(p: Point, visibleFrom?: Point, avoid?: Point): number {
+// The expanded roof includes slim corridors outside the planters. Its grid
+// reaches those corridors; the office keeps its established furniture grid.
+const roofNX = 87, roofNZ = 57;
+const roofNodes = Array.from({ length: roofNX * roofNZ }, (_, i) => {
+  const x = i % roofNX, z = Math.floor(i / roofNX);
+  return { x: x === 0 ? -8.66 : x === roofNX - 1 ? 8.66 : -8.6 + x * .2,
+    z: z === 0 ? -5.66 : z === roofNZ - 1 ? 5.66 : -5.6 + z * .2 };
+});
+const navigation = {
+  office: { nodes, NX, NZ, open: nodes.map(p => valid(p)) },
+  rooftop: { nodes: roofNodes, NX: roofNX, NZ: roofNZ, open: roofNodes.map(p => valid(p, 'rooftop')) },
+};
+function nearest(p: Point, visibleFrom?: Point, avoid?: Point, floor: Floor = 'office'): number {
   let best = -1, score = Infinity;
+  const { nodes, open: openNodes } = navigation[floor];
   for (let i = 0; i < nodes.length; i++) if (openNodes[i] && (!avoid || distance(nodes[i], avoid) >= BOSS_CLEARANCE)) {
     const d = distance(p, nodes[i]);
-    if (d < score && (!visibleFrom || lineClear(visibleFrom, nodes[i], avoid))) { best = i; score = d; }
+    if (d < score && (!visibleFrom || lineClear(visibleFrom, nodes[i], avoid, floor))) { best = i; score = d; }
   }
   return best;
 }
-function route(start: Point, requested: Point, avoid?: Point): Point[] {
+function route(start: Point, requested: Point, avoid?: Point, floor: Floor = 'office'): Point[] {
   if (!Number.isFinite(requested.x) || !Number.isFinite(requested.z)) return [];
-  const bounded = { x: clamp(requested.x, BOUNDS.minX + RADIUS, BOUNDS.maxX - RADIUS), z: clamp(requested.z, BOUNDS.minZ + RADIUS, BOUNDS.maxZ - RADIUS) };
-  const goalIndex = nearest(bounded, undefined, avoid);
+  const bounds = floor === 'rooftop' ? ROOF_BOUNDS : BOUNDS;
+  const { nodes, NX, NZ, open: openNodes } = navigation[floor];
+  const bounded = { x: clamp(requested.x, bounds.minX + RADIUS, bounds.maxX - RADIUS), z: clamp(requested.z, bounds.minZ + RADIUS, bounds.maxZ - RADIUS) };
+  const goalIndex = nearest(bounded, undefined, avoid, floor);
   if (goalIndex < 0) return [];
-  const goal = valid(bounded) && (!avoid || distance(bounded, avoid) >= BOSS_CLEARANCE) ? bounded : nodes[goalIndex];
-  if (lineClear(start, goal, avoid)) return [{ ...goal }];
-  const first = nearest(start, start, avoid), last = nearest(goal, goal, avoid);
+  const goal = valid(bounded, floor) && (!avoid || distance(bounded, avoid) >= BOSS_CLEARANCE) ? bounded : nodes[goalIndex];
+  if (lineClear(start, goal, avoid, floor)) return [{ ...goal }];
+  const first = nearest(start, start, avoid, floor), last = nearest(goal, goal, avoid, floor);
   if (first < 0 || last < 0) return [];
   const cost = new Map<number, number>([[first, 0]]), previous = new Map<number, number>();
   const frontier = new Set([first]);
@@ -80,7 +97,7 @@ function route(start: Point, requested: Point, avoid?: Point): Point[] {
       let from = start, index = 0;
       while (index < path.length) {
         let end = path.length - 1;
-        while (end > index && !lineClear(from, path[end], avoid)) end--;
+        while (end > index && !lineClear(from, path[end], avoid, floor)) end--;
         result.push({ ...path[end] }); from = path[end]; index = end + 1;
       }
       return result;
@@ -90,8 +107,8 @@ function route(start: Point, requested: Point, avoid?: Point): Point[] {
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if ((!dx && !dz) || x + dx < 0 || x + dx >= NX || z + dz < 0 || z + dz >= NZ) continue;
       const next = current + dx + dz * NX;
-      if (!openNodes[next] || (avoid && distance(nodes[next], avoid) < BOSS_CLEARANCE) || !lineClear(nodes[current], nodes[next], avoid)) continue;
-      const candidate = cost.get(current)! + Math.hypot(dx, dz) * GRID;
+      if (!openNodes[next] || (avoid && distance(nodes[next], avoid) < BOSS_CLEARANCE) || !lineClear(nodes[current], nodes[next], avoid, floor)) continue;
+      const candidate = cost.get(current)! + distance(nodes[current], nodes[next]);
       if (candidate < (cost.get(next) ?? Infinity)) { cost.set(next, candidate); previous.set(next, current); frontier.add(next); }
     }
   }
@@ -135,7 +152,7 @@ function initialState(saved?: PersistedState): GameState {
     floor: 'office', transition: null,
     player: actor('player', p?.name ?? '김사원', START), boss: actor('boss', '박부장', TARGETS.boss.point),
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
-    target: null, ready: false, destination: null, seat: null, deskMode: null, activity: null, roofRest: null, candyInMouth: false,
+    target: null, ready: false, destination: null, seat: null, deskMode: null, activity: null, roofRest: null, roofWallSide: null, candyInMouth: false,
     inventory: { cookie: p?.snacks.cookie ?? 0, choco: p?.snacks.choco ?? 0, cracker: p?.snacks.cracker ?? 0, coffee: 0 },
     weapon: p?.weapon ?? 'punch', settings: p?.settings ?? { sound: false, volume: .4, reducedMotion: false, quality: 'auto' },
     warning: 0, scold: 0, bossPhase: 'routine', lastHit: null, event: null, message: '', messageUntil: 0,
@@ -149,7 +166,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
   let path: Point[] = [], bossPath: Point[] = [], axis = { x: 0, z: 0 }, followClock = 0;
   let followedBoss: Point = { ...state.boss };
   let officeReturn: Point = { ...START };
-  let pendingRest: 'bench' | 'wall' | null = null;
+  let pendingRest: { place: 'bench' | 'wall'; wall?: RoofWallSide } | null = null;
   let eventId = 0, lastAttack = -Infinity, attackUntil = 0, hitUntil = 0, recoverUntil = 0, immunityUntil = 0;
   let nextObservation = 10, patrolIndex = 0, patrolWait = 0, coworkerPhase = -1, coworkerPath: Point[] = [];
   const patrol: Point[] = [{ x: 3.5, z: 3.25 }, { x: -3.8, z: 4 }, { x: -6, z: -3.55 }, { x: 3.5, z: .3 }];
@@ -166,7 +183,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     const p = state.player;
     p.moving = false;
     p.pose = state.roofRest === 'wall' ? 'wallLean' : state.seat === 'desk' ? state.deskMode === 'sleep' ? 'sleep' : 'type' : state.seat ? 'sit' : 'idle';
-    if (state.roofRest) p.angle = ROOF_REST[state.roofRest].angle;
+    if (state.roofRest) p.angle = state.roofRest === 'wall' ? ROOF_WALLS[state.roofWallSide ?? 'north'].angle : ROOF_REST.bench.angle;
     else if (state.seat) p.angle = Math.PI;
   };
   const endObservation = () => {
@@ -175,12 +192,13 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
   };
   const stand = () => {
     if (state.seat === 'roof-bench') Object.assign(state.player, ROOF_REST.bench.point);
-    state.seat = null; state.roofRest = null; state.deskMode = null; restorePose(); endObservation();
+    state.seat = null; state.roofRest = null; state.roofWallSide = null; state.deskMode = null; restorePose(); endObservation();
   };
   const cancel = () => { state.activity = null; path = []; pendingRest = null; state.destination = null; axis = { x: 0, z: 0 }; restorePose(); };
-  const rest = (place: 'bench' | 'wall') => {
+  const rest = (place: 'bench' | 'wall', wall: RoofWallSide = 'north') => {
     cancel(); stand(); state.roofRest = place; state.seat = place === 'bench' ? 'roof-bench' : null;
-    Object.assign(state.player, place === 'bench' ? ROOF_REST.bench.seat : ROOF_REST.wall.point);
+    state.roofWallSide = place === 'wall' ? wall : null;
+    Object.assign(state.player, place === 'bench' ? ROOF_REST.bench.seat : ROOF_WALLS[wall].point);
     restorePose(); event(place === 'bench' ? '잠깐 앉아서, 바람만 쐬어요.' : '기대도 괜찮아요. 여기서는 힘 빼고.');
   };
   const canReachBoss = () => {
@@ -189,10 +207,9 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     return state.floor === 'office' && !state.transition && gap >= 1.05 && gap <= BOSS_REACH && lateralGap >= .9 && lineClear(state.player, state.boss);
   };
   const ready = () => { state.ready = !state.transition && !!state.target && isRoofTarget(state.target) === (state.floor === 'rooftop') && (state.target === 'boss' ? canReachBoss() : distance(state.player, TARGETS[state.target].point) <= 1.2); };
-  const roofValid = (point: Point) => Number.isFinite(point.x) && Number.isFinite(point.z) && point.x >= ROOF_BOUNDS.minX + RADIUS && point.x <= ROOF_BOUNDS.maxX - RADIUS && point.z >= ROOF_BOUNDS.minZ + RADIUS && point.z <= ROOF_BOUNDS.maxZ - RADIUS;
   const walk = (point: Point) => {
     cancel(); stand();
-    path = state.floor === 'office' ? route(state.player, point) : Number.isFinite(point.x) && Number.isFinite(point.z) ? [{ x: clamp(point.x, ROOF_BOUNDS.minX + RADIUS, ROOF_BOUNDS.maxX - RADIUS), z: clamp(point.z, ROOF_BOUNDS.minZ + RADIUS, ROOF_BOUNDS.maxZ - RADIUS) }] : [];
+    path = route(state.player, point, undefined, state.floor);
     state.destination = path.length ? { ...path[path.length - 1] } : null;
   };
   const followBoss = () => {
@@ -244,18 +261,26 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
             else { begin('candy', 1.2); if (!state.roofRest) state.player.angle = .3; }
           }
           break;
-        case 'rest':
+        case 'rest': {
           if (state.floor !== 'rooftop') break;
-          if (state.roofRest === command.place) break;
-          state.target = command.place === 'bench' ? 'roofBench' : 'roofWall';
-          walk(ROOF_REST[command.place].point); pendingRest = command.place;
+          const wall = command.wall ?? 'north';
+          if (state.roofRest === command.place && (command.place === 'bench' || state.roofWallSide === wall)) break;
+          state.target = command.place === 'bench' ? 'roofBench' : ROOF_WALLS[wall].target;
+          walk(command.place === 'bench' ? ROOF_REST.bench.point : ROOF_WALLS[wall].point);
+          if (path.length) pendingRest = { place: command.place, wall };
           break;
-        case 'select':
+        }
+        case 'select': {
           if (isRoofTarget(command.target) !== (state.floor === 'rooftop')) break;
           state.target = command.target;
           if (command.target === 'boss') { cancel(); stand(); followBoss(); }
-          else walk(TARGETS[command.target].point);
+          else {
+            walk(TARGETS[command.target].point);
+            const wall = roofWallForTarget(command.target);
+            if (wall && path.length) pendingRest = { place: 'wall', wall };
+          }
           break;
+        }
         case 'move': state.target = null; walk(command.point); break;
         case 'axis': {
           const x = Number.isFinite(command.x) ? clamp(command.x, -1, 1) : 0, z = Number.isFinite(command.z) ? clamp(command.z, -1, 1) : 0;
@@ -275,7 +300,8 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           if (busy()) break;
           ready();
           if (!state.ready || !state.target) { event('조금 더 가까이 가 주세요.'); break; }
-          if (state.target === 'roofBench' || state.target === 'roofWall') rest(state.target === 'roofBench' ? 'bench' : 'wall');
+          if (state.target === 'roofBench') rest('bench');
+          else if (roofWallForTarget(state.target)) rest('wall', roofWallForTarget(state.target)!);
           else if (state.target === 'desk') { cancel(); state.seat = 'desk'; state.deskMode = 'work'; Object.assign(state.player, TARGETS.desk.point); restorePose(); event('자리에 앉았어요. 오늘도 적당히 힘내요.'); }
           else if (state.target === 'coffee') begin('brew', 3.2);
           else if (state.target === 'lounge') {
@@ -306,7 +332,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           lastAttack = state.elapsed; attackUntil = state.elapsed + WEAPONS[state.weapon].interval; state.player.pose = 'hit';
           state.warning = state.scold = 0; state.bossPhase = 'hit'; state.boss.pose = 'hit'; state.boss.moving = false; bossPath = [];
           hitUntil = state.elapsed + 2; state.lastHit = { id: (state.lastHit?.id ?? 0) + 1, weapon: state.weapon, at: state.elapsed };
-          event('앗! 장난은 살살 해 주세요.', state.weapon); break;
+          event(state.weapon === 'fan' ? '나 안 해! 오늘의 서류는 여기까지.' : '앗! 장난은 살살 해 주세요.', state.weapon); break;
       }
     }
     ready(); notify();
@@ -389,7 +415,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
       if (axis.x || axis.z) {
         const length = Math.max(1, Math.hypot(axis.x, axis.z)), dx = axis.x / length * 2.6 * dt, dz = axis.z / length * 2.6 * dt;
         const p = state.player, old = { x: p.x, z: p.z };
-        const canWalk = state.floor === 'rooftop' ? roofValid : valid;
+        const canWalk = (point: Point) => valid(point, state.floor);
         if (canWalk({ x: p.x + dx, z: p.z })) p.x += dx;
         if (canWalk({ x: p.x, z: p.z + dz })) p.z += dz;
         p.moving = distance(old, p) > .00001;
@@ -404,7 +430,11 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           if (blocked || (followClock <= 0 && (moved || (!path.length && needsGap)))) followBoss();
         }
         travel(state.player, path, 2.6, dt);
-        if (!path.length && pendingRest) rest(pendingRest);
+        if (!path.length && pendingRest) {
+          const pending = pendingRest, point = pending.place === 'bench' ? ROOF_REST.bench.point : ROOF_WALLS[pending.wall ?? 'north'].point;
+          if (distance(state.player, point) < .05) rest(pending.place, pending.wall);
+          else pendingRest = null;
+        }
         if (!state.player.moving) {
           state.destination = null; if (state.player.pose !== 'lean' || state.seat !== 'lounge') restorePose();
           if (state.target === 'boss' && !state.seat) face(state.player, state.boss);

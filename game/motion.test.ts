@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createActor, animateActor } from './models.ts';
 import { createGameEngine } from './engine.ts';
-import { ROOF_REST, WEAPONS } from './layout.ts';
+import { ROOF_REST, ROOF_WALLS, WEAPONS, WEAPON_IMPACT } from './layout.ts';
 import type { Activity, GameState, Snack, Weapon } from './types.ts';
 
 // Only label rasterization needs a DOM; geometry, transforms and props stay real.
@@ -116,6 +116,33 @@ test('the toy hammer crosses sideways into its strike instead of chopping in one
   assert.ok(Math.abs(impact.x - windup.x) > .22, 'hammer needs a readable diagonal side sweep');
 });
 
+test('the paper stack has substantial layered pages and drops from overhead into one downward slam', () => {
+  const { state, rig, render } = setup();
+  state.player.x = state.player.z = 0; state.player.angle = 0; state.player.pose = 'hit';
+  state.boss.x = 0; state.boss.z = 1.5; state.lastHit = { id: 1, at: 12, weapon: 'fan' };
+  const stack = rig.weapons.fan.getObjectByName('paper-stack-core');
+  assert.ok(stack, 'the old folded fan is replaced with a rectangular stack');
+  const sheets = rig.weapons.fan.children.filter(object => object.name.startsWith('paper-layer-'));
+  assert.ok(sheets.length >= 6, 'the stack visibly has multiple paper edges');
+  for (const reduced of [false, true]) {
+    state.settings.reducedMotion = reduced;
+    state.elapsed = 12 + WEAPONS.fan.interval * .23; render();
+    const lifted = position(stack);
+    state.elapsed = 12 + WEAPONS.fan.interval * WEAPON_IMPACT; render();
+    const impact = position(stack);
+    assert.ok(lifted.y > 1.9, 'the whole bundle lifts above the player head');
+    assert.ok(lifted.y - impact.y > .5, 'the papers come down instead of waving sideways');
+    assert.ok(impact.z - lifted.z > .45, 'the downward swing travels forward to the boss');
+    state.elapsed = 12 + WEAPONS.fan.interval * .53; render();
+    const loose = rig.weapons.fan.getObjectByName('loose-paper-0');
+    assert.ok(loose, 'one loose top page reads as paper, not a rigid board');
+    assert.equal(Math.abs(loose.rotation.x) > .02, !reduced, 'paper flutter obeys reduced motion');
+    state.player.pose = 'idle'; render();
+    assert.equal(loose.rotation.x, 0, 'the next action starts from a flat stack');
+    state.player.pose = 'hit';
+  }
+});
+
 test('a small round candy unwraps, enters at the lips, then leaves only its stick and releases the hand', () => {
   const { state, rig, render } = setup();
   state.floor = 'rooftop';
@@ -201,6 +228,23 @@ test('rooftop bench pants meet the seat and wall rest touches the wall without p
   }
 });
 
+test('wall rest preserves back and shoe contact while keeping head and candy inside all four walls', () => {
+  const { state, rig, render } = setup(); state.floor = 'rooftop'; state.roofRest = 'wall'; state.player.pose = 'wallLean'; state.candyInMouth = true;
+  for (const wall of Object.values(ROOF_WALLS)) for (const reduced of [false, true]) {
+    state.settings.reducedMotion = reduced; Object.assign(state.player, wall.point); state.player.angle = wall.angle; render();
+    const inward = new THREE.Vector3(Math.sin(wall.angle), 0, Math.cos(wall.angle));
+    const plane = new THREE.Vector3(wall.center.x, 0, wall.center.z).dot(inward) + wall.depth / 2;
+    const back = rig.body.localToWorld(new THREE.Vector3(0, 1.1, -.17));
+    assert.ok(Math.abs(back.dot(inward) - plane) < .015, `${wall.label}: back meets inside wall surface`);
+    const head = new THREE.Box3().setFromObject(rig.head, true), shoe = new THREE.Box3().setFromObject(rig.calves[1].children[1], true);
+    const closest = (box: THREE.Box3) => Math.abs(inward.x) > .5 ? inward.x > 0 ? box.min.x : -box.max.x : inward.z > 0 ? box.min.z : -box.max.z;
+    assert.ok(closest(head) >= plane - .015, `${wall.label}: head does not pass through wall`);
+    assert.ok(Math.abs(closest(shoe) - plane) < .025, `${wall.label}: lifted shoe rests on wall`);
+    const stem = rig.root.getObjectByName('mouth-candy-stem')!;
+    assert.ok(stem.localToWorld(new THREE.Vector3(0, -.145, 0)).distanceTo(position(rig.mouth)) < .002);
+  }
+});
+
 test('all weapons stay visible through their full swing and reset after recovery', () => {
   const { state, rig, render } = setup();
   for (const weapon of ['punch', 'hammer', 'fan'] as Weapon[]) {
@@ -238,17 +282,17 @@ test('chosen props are readable while waiting beside the boss and clear when lea
   }
 });
 
-test('the actual folded paper surface reaches the boss with reduced motion at maximum attack range', () => {
+test('actual paper stack surfaces contact the boss at the shared impact beat in both motion modes', () => {
   const { state, rig, render } = setup();
   const bossRig = createActor(new THREE.Group(), 1, state.boss.name);
   state.player.x = state.player.z = 0; state.player.angle = 0; state.player.pose = 'hit';
   state.boss.x = 0; state.boss.z = 1.5; state.boss.angle = Math.PI; state.boss.pose = 'hit';
-  state.settings.reducedMotion = true; state.lastHit = { id: 1, at: 12, weapon: 'fan' };
+  state.lastHit = { id: 1, at: 12, weapon: 'fan' };
   const sphere = bossRig.head.children.find(object => object instanceof THREE.Mesh && object.geometry.type === 'SphereGeometry') as THREE.Mesh<THREE.SphereGeometry>;
   const zero = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), closest = new THREE.Vector3(), triangle = new THREE.Triangle();
-  let contact = false;
-  for (let sample = 1; sample < 100 && !contact; sample++) {
-    state.elapsed = 12 + WEAPONS.fan.interval * sample / 100; render();
+  for (const reduced of [false, true]) {
+    state.settings.reducedMotion = reduced; let contact = false;
+    state.elapsed = 12 + WEAPONS.fan.interval * WEAPON_IMPACT; render();
     animateActor(bossRig, state.boss, state, state.elapsed); bossRig.root.updateMatrixWorld(true);
     const inverse = sphere.matrixWorld.clone().invert();
     rig.weapons.fan.traverse(object => {
@@ -262,8 +306,8 @@ test('the actual folded paper surface reaches the boss with reduced motion at ma
         contact ||= closest.length() <= sphere.geometry.parameters.radius;
       }
     });
+    assert.ok(contact, `visible paper geometry must touch the actual head at impact, reduced motion ${reduced}`);
   }
-  assert.ok(contact, 'visible paper geometry must touch the actual head, not merely its bounding box');
 });
 
 test('reduced motion preserves informative cup/snack poses without drifting while simulation is paused', () => {

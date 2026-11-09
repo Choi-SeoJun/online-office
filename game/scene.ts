@@ -8,6 +8,7 @@ import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId | null {
   let ancestor: THREE.Object3D | null = object;
   while (ancestor) {
+    if (ancestor.userData.pointerPassthrough) return null;
     const target = ancestor.userData.target as TargetId | undefined;
     if (target && target in TARGETS && isRoofTarget(target) === (floor === 'rooftop')) return target;
     ancestor = ancestor.parent;
@@ -15,24 +16,24 @@ export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId |
   return null;
 }
 
-function batchArchitecture(group: THREE.Group) {
+export function batchArchitecture(group: THREE.Group) {
   group.updateMatrixWorld(true);
-  const batches = new Map<string, { material: THREE.MeshStandardMaterial; geometries: THREE.BufferGeometry[]; target?: TargetId; ground: boolean; castShadow: boolean; receiveShadow: boolean }>();
+  const batches = new Map<string, { material: THREE.MeshStandardMaterial; geometries: THREE.BufferGeometry[]; target?: TargetId; ground: boolean; pointerPassthrough: boolean; castShadow: boolean; receiveShadow: boolean }>();
   const originals: THREE.Mesh[] = [];
   group.traverse(object => {
     if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial) || object.material.map) return;
     let ancestor: THREE.Object3D | null = object, target: TargetId | undefined;
     while (ancestor) { if (ancestor.userData.dynamic) return; if (ancestor.userData.target) target = ancestor.userData.target as TargetId; ancestor = ancestor.parent; }
-    const ground = !!object.userData.ground;
-    const key = `${object.material.uuid}/${target ?? ''}/${ground}/${object.castShadow}/${object.receiveShadow}`;
-    if (!batches.has(key)) batches.set(key, { material: object.material, geometries: [], target, ground, castShadow: object.castShadow && !ground, receiveShadow: object.receiveShadow });
+    const ground = !!object.userData.ground, pointerPassthrough = !!object.userData.pointerPassthrough;
+    const key = `${object.material.uuid}/${target ?? ''}/${ground}/${pointerPassthrough}/${object.castShadow}/${object.receiveShadow}`;
+    if (!batches.has(key)) batches.set(key, { material: object.material, geometries: [], target, ground, pointerPassthrough, castShadow: object.castShadow && !ground, receiveShadow: object.receiveShadow });
     let geometry = object.geometry.clone();
     if (geometry.index) { const unindexed = geometry.toNonIndexed(); geometry.dispose(); geometry = unindexed; }
     geometry.applyMatrix4(object.matrixWorld); batches.get(key)!.geometries.push(geometry); originals.push(object);
   });
   batches.forEach(batch => {
     const geometry = mergeGeometries(batch.geometries, false);
-    if (geometry) { const mesh = new THREE.Mesh(geometry, batch.material); mesh.castShadow = batch.castShadow; mesh.receiveShadow = batch.receiveShadow; mesh.userData.target = batch.target; mesh.userData.ground = batch.ground; group.add(mesh); }
+    if (geometry) { const mesh = new THREE.Mesh(geometry, batch.material); mesh.castShadow = batch.castShadow; mesh.receiveShadow = batch.receiveShadow; mesh.userData.target = batch.target; mesh.userData.ground = batch.ground; mesh.userData.pointerPassthrough = batch.pointerPassthrough; group.add(mesh); }
     batch.geometries.forEach(g => g.dispose());
   });
   originals.forEach(mesh => mesh.removeFromParent());

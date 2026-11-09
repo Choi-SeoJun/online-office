@@ -1,4 +1,5 @@
-import type { GameState } from './types.ts';
+import type { GameState, Weapon } from './types.ts';
+import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
 
 /** Original synthesized office and rooftop sound; no downloads or background timers. */
 export function createOfficeAudio() {
@@ -6,6 +7,9 @@ export function createOfficeAudio() {
   let keyNoise: AudioBuffer | null = null, currentState: GameState | null = null;
   let wind: AudioBufferSourceNode | null = null, windHighpass: BiquadFilterNode | null = null, windLowpass: BiquadFilterNode | null = null, windLevel: GainNode | null = null;
   let windActive = false, nextWindUpdate = 0;
+  let impactNoise: AudioBuffer | null = null, paperNoise: AudioBuffer | null = null;
+  let hitKey: string | null = null, impactDone = false;
+  const impactVoices = new Set<() => void>();
   let lastEvent = 0, nextTyping = 0, burstLeft = 0, directUntil = 0, lastDirect = -Infinity, disposed = false;
   function start() {
     if (disposed) return;
@@ -28,6 +32,64 @@ export function createOfficeAudio() {
     gain.gain.setValueAtTime(level, t); gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
     oscillator.connect(gain).connect(master); oscillator.start(t); oscillator.stop(t + duration);
     oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+  }
+  function stopImpacts() { for (const stop of [...impactVoices]) stop(); }
+  function playImpactVoice(source: AudioScheduledSourceNode, nodes: AudioNode[], duration: number) {
+    if (!context) return;
+    let ended = false;
+    const cleanup = () => {
+      if (ended) return;
+      ended = true; source.disconnect(); for (const node of nodes) node.disconnect(); impactVoices.delete(stop);
+    };
+    const stop = () => { if (!ended) { source.stop(); cleanup(); } };
+    impactVoices.add(stop); source.onended = cleanup;
+    source.start(context.currentTime); source.stop(context.currentTime + duration);
+  }
+  function impactTone(frequency: number, end: number, duration: number, level: number, type: OscillatorType) {
+    if (!context || !master) return;
+    const at = context.currentTime, source = context.createOscillator(), gain = context.createGain();
+    source.type = type; source.frequency.setValueAtTime(frequency, at); source.frequency.exponentialRampToValueAtTime(end, at + duration);
+    gain.gain.setValueAtTime(level, at); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    source.connect(gain).connect(master); playImpactVoice(source, [gain], duration);
+  }
+  function impactTexture(frequency: number, duration: number, level: number, filterType: BiquadFilterType, flutter = false) {
+    if (!context || !master) return;
+    if (!impactNoise || !paperNoise) {
+      const length = Math.ceil(context.sampleRate * .32);
+      impactNoise = context.createBuffer(1, length, context.sampleRate); paperNoise = context.createBuffer(1, length, context.sampleRate);
+      const noise = impactNoise.getChannelData(0), paper = paperNoise.getChannelData(0);
+      for (let i = 0; i < length; i++) {
+        const time = i / context.sampleRate, sample = Math.random() * 2 - 1;
+        noise[i] = sample;
+        // Short uneven flutter gives the stack a paper tail rather than a beep.
+        paper[i] = sample * (.25 + .75 * Math.sin(time * 95) ** 2);
+      }
+    }
+    const at = context.currentTime, source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
+    source.buffer = flutter ? paperNoise : impactNoise;
+    filter.type = filterType; filter.frequency.value = frequency; filter.Q.value = .6;
+    gain.gain.setValueAtTime(level, at); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    source.connect(filter).connect(gain).connect(master); playImpactVoice(source, [filter, gain], duration);
+  }
+  function impact(weapon: Weapon) {
+    if (weapon === 'punch') {
+      impactTone(125, 42, .14, .30, 'triangle'); impactTexture(850, .08, .18, 'lowpass');
+    } else if (weapon === 'hammer') {
+      impactTone(620, 145, .25, .23, 'sine'); impactTone(145, 48, .12, .14, 'triangle'); impactTexture(1200, .06, .11, 'lowpass');
+    } else {
+      impactTone(175, 58, .15, .21, 'triangle'); impactTexture(1800, .11, .30, 'bandpass'); impactTexture(2200, .26, .12, 'highpass', true);
+    }
+  }
+  function syncImpact(state: GameState, enabled: boolean) {
+    const hit = state.lastHit, key = hit ? `${hit.id}:${hit.at}:${hit.weapon}` : null;
+    if (key !== hitKey) { stopImpacts(); hitKey = key; impactDone = false; }
+    const active = enabled && inOffice(state) && !state.transition && state.player.pose === 'hit' && !state.activity && context?.state === 'running';
+    if (!active) { if (hit) impactDone = true; stopImpacts(); return; }
+    if (!hit || impactDone) return;
+    const age = state.elapsed - hit.at, duration = WEAPONS[hit.weapon].interval;
+    if (age < 0 || age >= duration) { impactDone = true; return; }
+    // Consume only the current contact. No wall-clock timers or missed-hit backlog.
+    if (age + 1e-8 >= duration * WEAPON_IMPACT) { impactDone = true; impact(hit.weapon); }
   }
   const inOffice = (state: GameState) => !('floor' in state) || state.floor !== 'rooftop';
   const audible = (state: GameState) => !disposed && state.entered && !state.paused && state.settings.sound && state.settings.volume > 0 && !document.hidden;
@@ -97,13 +159,11 @@ export function createOfficeAudio() {
     if (master && context) master.gain.setTargetAtTime(enabled ? Math.min(1, Math.max(0, state.settings.volume)) : 0, context.currentTime, 0.04);
     if (humLevel && context) humLevel.gain.setTargetAtTime(inOffice(state) ? .008 : 0, context.currentTime, .15);
     syncWind(state, enabled);
+    syncImpact(state, enabled);
     if (!enabled) { lastEvent = state.event?.id ?? lastEvent; nextTyping = state.elapsed + .08; burstLeft = 0; return; }
     if (state.event && state.event.id !== lastEvent) {
       lastEvent = state.event.id;
       switch (state.event.kind) {
-        case 'punch': tone(95, .11, .25, 'triangle', 40); break;
-        case 'hammer': tone(480, .24, .21, 'sine', 110); tone(145, .11, .12, 'triangle', 50); break;
-        case 'fan': tone(300, .12, .1, 'sawtooth', 75); break;
         case 'coffee': tone(160, .4, .06, 'triangle', 80); break;
         case 'snack': tone(950, .09, .05, 'square', 300); break;
         case 'sip': tone(420, .16, .04, 'sine', 620); break;
@@ -120,10 +180,10 @@ export function createOfficeAudio() {
   }
   return { start, sync, typeKey, dispose() {
     if (disposed) return;
-    disposed = true; currentState = null;
+    disposed = true; currentState = null; stopImpacts();
     hum?.stop(); hum?.disconnect(); humLevel?.disconnect();
     wind?.stop(); wind?.disconnect(); windHighpass?.disconnect(); windLowpass?.disconnect(); windLevel?.disconnect();
     master?.disconnect(); if (context) void context.close().catch(() => {});
-    context = null; master = null; keyNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;
+    context = null; master = null; keyNoise = null; impactNoise = null; paperNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;
   } };
 }

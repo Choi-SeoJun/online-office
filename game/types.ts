@@ -1,6 +1,7 @@
 export type Point = { x: number; z: number };
 export type Floor = 'office' | 'rooftop';
-export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copier' | 'exit' | 'roofBench' | 'roofWall';
+export type RoofWallSide = 'north' | 'south' | 'east' | 'west';
+export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copier' | 'exit' | 'roofBench' | 'roofWall' | 'roofWallSouth' | 'roofWallEast' | 'roofWallWest';
 export type Weapon = 'punch' | 'hammer' | 'fan';
 export type Snack = 'cookie' | 'choco' | 'cracker';
 export type DeskMode = 'work' | 'shopping' | 'game' | 'sleep';
@@ -16,7 +17,7 @@ export type GameState = {
   player: Actor; boss: Actor; coworkers: Actor[];
   target: TargetId | null; ready: boolean; destination: Point | null;
   seat: 'desk' | 'lounge' | 'roof-bench' | null; deskMode: DeskMode | null;
-  roofRest: 'bench' | 'wall' | null; candyInMouth: boolean;
+  roofRest: 'bench' | 'wall' | null; roofWallSide: RoofWallSide | null; candyInMouth: boolean;
   activity: Activity | null; inventory: Inventory; weapon: Weapon; settings: Settings;
   warning: number; scold: number; bossPhase: 'routine' | 'watch' | 'scold' | 'hit' | 'recover';
   lastHit: { id: number; weapon: Weapon; at: number } | null;
@@ -27,7 +28,7 @@ export type Command =
   | { type: 'enter'; name?: string } | { type: 'exit' } | { type: 'pause'; value: boolean }
   | { type: 'select'; target: TargetId } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
   | { type: 'interact' } | { type: 'stand' } | { type: 'cancel' }
-  | { type: 'travel'; floor: Floor } | { type: 'candy' } | { type: 'rest'; place: 'bench' | 'wall' }
+  | { type: 'travel'; floor: Floor } | { type: 'candy' } | { type: 'rest'; place: 'bench' | 'wall'; wall?: RoofWallSide }
   | { type: 'desk'; mode: DeskMode } | { type: 'spin' }
   | { type: 'weapon'; weapon: Weapon } | { type: 'attack' }
   | { type: 'take'; snack: Snack } | { type: 'eat'; snack: Snack } | { type: 'drink' }

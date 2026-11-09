@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOfficeAudio } from './audio.ts';
 import { createGameEngine } from './engine.ts';
+import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
+import type { GameState, Weapon } from './types.ts';
 
 // Node has no Web Audio device. This boundary double records emitted voices,
 // while the real audio scheduler, mute logic and synthesis run unchanged.
@@ -164,4 +166,87 @@ test('wind gusts stay calm, reuse resources on round trips and stop on disposal'
     assert.equal(device.contexts[0].state, 'closed');
     sound.start(); sound.sync(engine.state); assert.equal(device.nodes.length, nodeCount);
   } finally { sound.dispose(); device.restore(); }
+});
+
+function hit(state: GameState, weapon: Weapon, id = 1) {
+  state.player.pose = 'hit'; state.lastHit = {id,weapon,at:state.elapsed};
+  state.event = {id,kind:weapon,text:'타격',at:state.elapsed};
+}
+
+test('each weapon sounds once at visible contact, not when its windup starts', () => {
+  for (const weapon of Object.keys(WEAPONS) as Weapon[]) {
+    const device=audioDevice(), sound=createOfficeAudio(), engine=createGameEngine();
+    try {
+      engine.dispatch({type:'enter'});engine.state.settings.sound=true;sound.start();sound.sync(engine.state);
+      const before=device.voices.length;hit(engine.state,weapon);sound.sync(engine.state);
+      assert.equal(device.voices.length,before,'starting the swing is not its impact');
+      engine.state.elapsed=WEAPONS[weapon].interval*WEAPON_IMPACT-.002;sound.sync(engine.state);
+      assert.equal(device.voices.length,before);
+      engine.state.elapsed+=.004;device.contexts[0].currentTime=engine.state.elapsed;sound.sync(engine.state);
+      const impact=device.voices.slice(before);assert.ok(impact.length>=2,'layer impact body and texture');
+      assert.ok(impact.some(v=>v.kind==='noise'),'the impact needs a physical texture');
+      assert.ok(impact.some(v=>v.kind==='tone'),'the impact needs a low body or rubber tone');
+      assert.ok(impact.every(v=>v.at===device.contexts[0].currentTime && v.until-v.at<=.35));
+      const after=device.voices.length;for(let i=0;i<20;i++)sound.sync(engine.state);
+      assert.equal(device.voices.length,after,'render frames cannot replay a hit');
+      engine.state.elapsed=WEAPONS[weapon].interval+.1;engine.state.player.pose='idle';sound.sync(engine.state);
+      assert.equal(device.voices.length,after,'completed strikes cannot replay');
+    } finally {sound.dispose();device.restore();}
+  }
+});
+
+test('interrupted impacts never catch up after mute, pause, travel, cancellation or a hidden tab', () => {
+  const interruptions: {name:string;on:(state:GameState,doc:{hidden:boolean})=>void;off:(state:GameState,doc:{hidden:boolean})=>void}[]=[
+    {name:'mute',on:s=>{s.settings.sound=false;},off:s=>{s.settings.sound=true;}},
+    {name:'volume',on:s=>{s.settings.volume=0;},off:s=>{s.settings.volume=.4;}},
+    {name:'pause',on:s=>{s.paused=true;},off:s=>{s.paused=false;}},
+    {name:'hidden tab',on:(_,d)=>{d.hidden=true;},off:(_,d)=>{d.hidden=false;}},
+    {name:'transition',on:s=>{s.transition={from:'office',to:'rooftop',remaining:1,duration:1};},off:s=>{s.transition=null;}},
+    {name:'exit',on:s=>{s.entered=false;},off:s=>{s.entered=true;}},
+    {name:'cancel',on:s=>{s.player.pose='idle';},off:s=>{s.player.pose='hit';}},
+  ];
+  for(const interruption of interruptions){
+    const device=audioDevice(),sound=createOfficeAudio(),engine=createGameEngine();
+    try{
+      engine.dispatch({type:'enter'});engine.state.settings.sound=true;sound.start();sound.sync(engine.state);
+      hit(engine.state,'fan');sound.sync(engine.state);const before=device.voices.length;
+      interruption.on(engine.state,device.document);sound.sync(engine.state);
+      engine.state.elapsed=WEAPONS.fan.interval*WEAPON_IMPACT+.01;interruption.off(engine.state,device.document);sound.sync(engine.state);
+      assert.equal(device.voices.length,before,interruption.name);
+      engine.state.elapsed+=1;hit(engine.state,'fan',2);sound.sync(engine.state);
+      engine.state.elapsed+=WEAPONS.fan.interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
+      assert.ok(device.voices.length>before,'a later deliberate hit still works');
+      const sources=device.nodes.filter(n=>n.onended);interruption.on(engine.state,device.document);sound.sync(engine.state);
+      assert.ok(sources.every(n=>n.disconnected),'an interruption releases active impact voices');
+    }finally{sound.dispose();device.restore();}
+  }
+});
+
+test('paper slap, rubber pop and punch have distinct bounded textures and reusable noise', () => {
+  const device=audioDevice(),sound=createOfficeAudio(),engine=createGameEngine();
+  try{
+    engine.dispatch({type:'enter'});engine.state.settings.sound=true;sound.start();sound.sync(engine.state);
+    const profiles: string[]=[];
+    for(const [index,weapon] of (Object.keys(WEAPONS) as Weapon[]).entries()){
+      engine.state.elapsed=index*2;hit(engine.state,weapon,index+1);sound.sync(engine.state);
+      const first=device.nodes.length;engine.state.elapsed+=WEAPONS[weapon].interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
+      const nodes=device.nodes.slice(first);
+      profiles.push(JSON.stringify(nodes.filter(n=>n.kind==='filter'||n.kind==='tone').map(n=>({kind:n.kind,type:n.type,frequency:n.frequency.schedule[0]?.value??n.frequency.value}))));
+      const sources=nodes.filter(n=>n.onended);assert.ok(sources.length<=4,'only a few short voices per impact');
+      for(const source of sources)source.onended?.();assert.ok(nodes.every(n=>n.disconnected),'natural completion releases the entire voice chain');
+    }
+    assert.equal(new Set(profiles).size,3,'each object has its own material sound');
+    const bufferCount=device.buffers.length;
+    for(let i=0;i<20;i++){
+      engine.state.elapsed+=2;hit(engine.state,'fan',i+10);sound.sync(engine.state);
+      engine.state.elapsed+=WEAPONS.fan.interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
+      for(const node of device.nodes)node.onended?.();
+    }
+    assert.equal(device.buffers.length,bufferCount,'hits reuse their noise data');
+    engine.dispatch({type:'reset'});sound.sync(engine.state);
+    engine.dispatch({type:'enter'});engine.state.settings.sound=true;hit(engine.state,'fan');sound.sync(engine.state);
+    const before=device.voices.length;engine.state.elapsed+=WEAPONS.fan.interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
+    assert.ok(device.voices.length>before,'resetting hit IDs must not suppress a fresh game');
+    const live=device.nodes.filter(n=>n.onended&&!n.disconnected);sound.dispose();assert.ok(live.every(n=>n.disconnected));
+  }finally{sound.dispose();device.restore();}
 });

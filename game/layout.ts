@@ -1,14 +1,22 @@
-import type { Point, TargetId } from './types.ts';
+import type { Point, RoofWallSide, TargetId } from './types.ts';
 
 export const BOUNDS = { minX: -8.6, maxX: 8.6, minZ: -5.6, maxZ: 5.6 };
 export const START: Point = { x: 1.8, z: 5.0 };
-export const ROOF_BOUNDS = { minX: -6.8, maxX: 6.8, minZ: -4.3, maxZ: 4.3 };
+export const ROOF_BOUNDS = { minX: -8.9, maxX: 8.9, minZ: -5.9, maxZ: 5.9 };
 export const ROOF_START: Point = { x: 0, z: 2.4 };
+export const ROOF_WALLS = {
+  north: { target: 'roofWall', label: '뒤쪽 벽', point: { x: -4.3, z: -5.51 }, center: { x: 0, z: -6 }, width: 18.1, depth: .18, height: 1.8, front: -5.91, angle: 0 },
+  south: { target: 'roofWallSouth', label: '앞쪽 벽', point: { x: 0, z: 5.51 }, center: { x: 0, z: 6 }, width: 18.1, depth: .18, height: 1.8, front: 5.91, angle: Math.PI },
+  east: { target: 'roofWallEast', label: '오른쪽 벽', point: { x: 8.51, z: .4 }, center: { x: 9, z: 0 }, width: 12.1, depth: .18, height: 1.8, front: 8.91, angle: -Math.PI / 2 },
+  west: { target: 'roofWallWest', label: '왼쪽 벽', point: { x: -8.51, z: .4 }, center: { x: -9, z: 0 }, width: 12.1, depth: .18, height: 1.8, front: -8.91, angle: Math.PI / 2 },
+} as const;
+export const roofWallForTarget = (target: TargetId): RoofWallSide | null => (Object.keys(ROOF_WALLS) as RoofWallSide[]).find(side => ROOF_WALLS[side].target === target) ?? null;
+export const ROOF_BIN = { x: -8, z: -2.9, w: .66, d: .66 };
 export const ROOF_REST = {
   bench: { point: { x: 1.2, z: -3.95 }, seat: { x: 1.2, z: -4.65 }, seatTop: 0.6175, angle: 0 },
-  wall: { point: { x: -4.3, z: -4.05 }, center: { x: -4.3, z: -4.55 }, width: 3.1, depth: 0.2, height: 1.8, front: -4.45, angle: 0 },
+  wall: ROOF_WALLS.north,
 } as const;
-export const isRoofTarget = (target: TargetId) => target === 'roofBench' || target === 'roofWall';
+export const isRoofTarget = (target: TargetId) => target === 'roofBench' || roofWallForTarget(target) !== null;
 export const DESKS = [
   { x: -6, z: -1.2, owner: 'colleague-0' },
   { x: -2, z: -1.2, owner: 'colleague-1' },
@@ -18,6 +26,12 @@ export const DESKS = [
   { x: 2, z: 2.2, owner: 'player' },
 ] as const;
 export type Obstacle = { x: number; z: number; w: number; d: number };
+export const ROOF_OBSTACLES: Obstacle[] = [
+  { x: -7.8, z: -4.85, w: 1.78, d: 1.74 },
+  { x: 1.2, z: -4.65, w: 3.1, d: .7 },
+  ...[-7.8, 7.8].flatMap(x => [-1.3, 2.2, 4.8].map(z => ({ x, z, w: 1.05, d: 1.2 }))),
+  ROOF_BIN,
+];
 export const OBSTACLES: Obstacle[] = [
   ...DESKS.map(d => ({ x: d.x, z: d.z, w: 2.55, d: 1.2 })),
   { x: -6, z: -4.7, w: 3.0, d: 1.2 },
@@ -36,9 +50,13 @@ export const TARGETS: Record<TargetId, { label: string; point: Point; action: st
   copier: { label: '복사기', point: { x: -6.4, z: 4.6 }, action: '구경하기' },
   exit: { label: '출입구', point: START, action: '퇴근하기' },
   roofBench: { label: '옥상 벤치', point: ROOF_REST.bench.point, action: '벤치에 앉기' },
-  roofWall: { label: '옥상 벽', point: ROOF_REST.wall.point, action: '벽에 기대기' },
+  roofWall: { label: '뒤쪽 벽', point: ROOF_WALLS.north.point, action: '벽에 기대기' },
+  roofWallSouth: { label: '앞쪽 벽', point: ROOF_WALLS.south.point, action: '벽에 기대기' },
+  roofWallEast: { label: '오른쪽 벽', point: ROOF_WALLS.east.point, action: '벽에 기대기' },
+  roofWallWest: { label: '왼쪽 벽', point: ROOF_WALLS.west.point, action: '벽에 기대기' },
 };
 export const WEAPONS = {
-  punch: { label: '펀치', interval: 0.55 }, hammer: { label: '뿅망치', interval: 0.85 }, fan: { label: '서류 부채', interval: 0.7 },
+  punch: { label: '펀치', interval: 0.55 }, hammer: { label: '뿅망치', interval: 0.85 }, fan: { label: '서류 뭉치', interval: 0.9 },
 } as const;
+export const WEAPON_IMPACT = .43;
 export const SNACKS = { cookie: '쿠키', choco: '초코바', cracker: '크래커' } as const;
