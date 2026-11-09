@@ -4,6 +4,11 @@ export const BOUNDS = { minX: -8.6, maxX: 8.6, minZ: -5.6, maxZ: 5.6 };
 export const START: Point = { x: 1.8, z: 5.0 };
 export const ROOF_BOUNDS = { minX: -6.8, maxX: 6.8, minZ: -4.3, maxZ: 4.3 };
 export const ROOF_START: Point = { x: 0, z: 2.4 };
+export const ROOF_REST = {
+  bench: { point: { x: 1.2, z: -3.95 }, seat: { x: 1.2, z: -4.65 }, seatTop: 0.6175, angle: 0 },
+  wall: { point: { x: -4.3, z: -4.05 }, center: { x: -4.3, z: -4.55 }, width: 3.1, depth: 0.2, height: 1.8, front: -4.45, angle: 0 },
+} as const;
+export const isRoofTarget = (target: TargetId) => target === 'roofBench' || target === 'roofWall';
 export const DESKS = [
   { x: -6, z: -1.2, owner: 'colleague-0' },
   { x: -2, z: -1.2, owner: 'colleague-1' },
@@ -30,6 +35,8 @@ export const TARGETS: Record<TargetId, { label: string; point: Point; action: st
   lounge: { label: '탕비실', point: { x: 6.8, z: 3.4 }, action: '잠깐 앉기' },
   copier: { label: '복사기', point: { x: -6.4, z: 4.6 }, action: '구경하기' },
   exit: { label: '출입구', point: START, action: '퇴근하기' },
+  roofBench: { label: '옥상 벤치', point: ROOF_REST.bench.point, action: '벤치에 앉기' },
+  roofWall: { label: '옥상 벽', point: ROOF_REST.wall.point, action: '벽에 기대기' },
 };
 export const WEAPONS = {
   punch: { label: '펀치', interval: 0.55 }, hammer: { label: '뿅망치', interval: 0.85 }, fan: { label: '서류 부채', interval: 0.7 },

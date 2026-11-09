@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createRooftop, transitionOrbit } from './rooftop.ts';
+import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
+import { targetForFloor } from './scene.ts';
+import { ROOF_REST } from './layout.ts';
 
 // Label rasterization is the only browser dependency of the real roof geometry.
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
@@ -14,12 +16,52 @@ test('roof walking space reaches real ground without intersecting decoration', (
   const roof = createRooftop(new THREE.Group());
   roof.updateMatrixWorld(true);
   const ray = new THREE.Raycaster();
-  for (const x of [-6.58, -4, 0, 4, 6.58]) for (const z of [-4.08, -2, 0, 2, 4.08]) {
+  for (const x of [-6.58, -4.3, -2.75, 0, 1.2, 2.75, 4, 6.58]) for (const z of [-4.29, -4.08, -2, 0, 2, 4.08]) {
     ray.set(new THREE.Vector3(x, 8, z), new THREE.Vector3(0, -1, 0));
     const hit = ray.intersectObject(roof, true)[0];
     assert.ok(hit?.object.userData.ground, `walking point ${x}, ${z} must stay clear of furniture`);
     assert.ok(Math.abs(hit.point.y) < .1, 'walking surface aligns with character feet');
   }
+});
+
+test('bench seat supports the seated player and can be selected from the walking space', () => {
+  const roof = createRooftop(new THREE.Group()); roof.updateMatrixWorld(true);
+  const seat = ROOF_REST.bench.seat;
+  // The seat uses wooden slats: sample the hip footprint, not the gap between slats.
+  const ray = new THREE.Raycaster(new THREE.Vector3(seat.x, 2, seat.z + .06), new THREE.Vector3(0, -1, 0));
+  const hit = ray.intersectObject(roof, true)[0];
+  assert.ok(hit && Math.abs(hit.point.y - .6175) < .002, 'the player must sit on the real bench seat, not above the floor');
+  assert.equal(targetForFloor(hit.object, 'rooftop'), 'roofBench');
+  const approach = new THREE.Vector3(1.2, 1.3, -3.95);
+  ray.set(approach, new THREE.Vector3(1.2, .58, -4.65).sub(approach).normalize());
+  assert.equal(targetForFloor(ray.intersectObject(roof, true)[0].object, 'rooftop'), 'roofBench');
+  assert.equal(targetForFloor(hit.object, 'office'), null, 'roof furniture never captures office clicks');
+});
+
+test('leaning wall offers a real back support at the resting position', () => {
+  const roof = createRooftop(new THREE.Group()); roof.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster(new THREE.Vector3(-4.3, 1.35, -4.05), new THREE.Vector3(0, 0, -1));
+  const hit = ray.intersectObject(roof, true)[0];
+  assert.ok(hit && Math.abs(hit.point.z - (-4.45)) < .002, 'leaning upper back has a wall immediately behind it');
+  assert.equal(targetForFloor(hit.object, 'rooftop'), 'roofWall');
+  assert.equal(targetForFloor(hit.object, 'office'), null);
+  const officeProp = new THREE.Group(); officeProp.userData.target = 'desk';
+  assert.equal(targetForFloor(officeProp, 'rooftop'), null, 'office props cannot become roof targets');
+  assert.equal(targetForFloor(officeProp, 'office'), 'desk');
+});
+
+test('roof wind detail follows simulation time and becomes still with reduced motion', () => {
+  const roof = createRooftop(new THREE.Group());
+  const ribbon = roof.getObjectByName('roof-wind-ribbon');
+  assert.ok(ribbon, 'a small wind detail makes the quiet rooftop breeze visible');
+  animateRooftop(roof, 1.2, false); const first = ribbon.quaternion.clone();
+  animateRooftop(roof, 2.5, false);
+  assert.ok(first.angleTo(ribbon.quaternion) > .01, 'wind detail gently moves as simulation time advances');
+  const paused = ribbon.quaternion.clone(); animateRooftop(roof, 2.5, false);
+  assert.ok(paused.angleTo(ribbon.quaternion) < 1e-7, 'paused simulation does not advance the breeze');
+  animateRooftop(roof, 4, true); const reduced = ribbon.quaternion.clone();
+  animateRooftop(roof, 5, true);
+  assert.ok(reduced.angleTo(ribbon.quaternion) < 1e-7, 'reduced motion keeps the detail still');
 });
 
 test('floor transition turns in one direction and returns to the original heading', () => {

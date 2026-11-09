@@ -1,11 +1,20 @@
 import * as THREE from 'three';
 import { box, cylinder, plant, plaque, sphere } from './models.ts';
+import { ROOF_REST } from './layout.ts';
 
 /** Uses simulation progress, so hidden tabs and paused games freeze the turn. */
 export function transitionOrbit(transition: { remaining: number; duration: number } | null, reducedMotion: boolean) {
   if (!transition || reducedMotion) return 0;
   const progress = THREE.MathUtils.clamp(1 - transition.remaining / transition.duration, 0, 1);
   return THREE.MathUtils.smoothstep(progress, 0, 1) * Math.PI * 2;
+}
+
+/** Simulation time freezes the breeze together with the rest of the game. */
+export function animateRooftop(roof: THREE.Group, elapsed: number, reducedMotion: boolean) {
+  const ribbon = roof.getObjectByName('roof-wind-ribbon');
+  if (!ribbon) return;
+  ribbon.rotation.y = reducedMotion ? 0 : Math.sin(elapsed * .74) * .12;
+  ribbon.rotation.z = reducedMotion ? -.06 : -.06 + Math.sin(elapsed * 1.1) * .09 + Math.sin(elapsed * 2.3) * .025;
 }
 
 /** Rooftop decoration stays outside the engine's clear walking rectangle. */
@@ -36,9 +45,25 @@ export function createRooftop(parent: THREE.Object3D) {
   box(stairs, .69, .46, .012, '#bbd6d0', 0, 1.63, .85, .02);
   box(stairs, .13, .045, .09, '#ddc896', .34, 1.02, .87, .01);
   plaque(stairs, '사무실', .82, .21, 0, 2.45, .835, '#ddd5c1', '#537064');
+  // A sheltered wall continues the stairwell, leaving room to lean against it.
+  const wallRest = ROOF_REST.wall;
+  const wall = new THREE.Group(); wall.name = 'roof-rest-wall'; wall.userData.target = 'roofWall';
+  wall.position.set(wallRest.center.x, 0, wallRest.center.z); roof.add(wall);
+  box(wall, wallRest.width, wallRest.height, wallRest.depth, '#d9d1bc', 0, wallRest.height / 2, 0, .015);
+  box(wall, wallRest.width + .08, .085, wallRest.depth + .06, '#a9b9a7', 0, wallRest.height + .025, 0, .018);
+  const wallLeft = wallRest.center.x - wallRest.width / 2, stairsRight = -7.8 + 1.65 / 2;
+  const connectorWidth = wallLeft - stairsRight + .02;
+  box(wall, connectorWidth, wallRest.height, wallRest.depth, '#d9d1bc', (wallLeft + stairsRight) / 2 - wallRest.center.x, wallRest.height / 2, 0, .015);
+  box(wall, connectorWidth, .085, wallRest.depth + .06, '#a9b9a7', (wallLeft + stairsRight) / 2 - wallRest.center.x, wallRest.height + .025, 0, .018);
+  // One quiet cloth strip shows the breeze without filling the open roof.
+  cylinder(wall, .018, .018, .65, '#718477', wallRest.width / 2 - .2, wallRest.height + .32, 0);
+  const ribbon = new THREE.Group(); ribbon.name = 'roof-wind-ribbon'; ribbon.userData.dynamic = true;
+  ribbon.position.set(wallRest.width / 2 - .2, wallRest.height + .55, 0); wall.add(ribbon);
+  box(ribbon, .65, .12, .018, '#d4b183', .32, 0, 0, .012);
+  box(ribbon, .10, .12, .020, '#eee0be', .54, 0, 0, .008);
   // A bench, candy tin and a folded jacket suggest somebody's quiet break.
-  const bench = new THREE.Group(); bench.position.set(1.2, 0, -5.16); roof.add(bench);
-  for (let i = 0; i < 4; i++) box(bench, 3.1, .075, .14, i % 2 ? '#b69067' : '#c6a377', 0, .58, -.23 + i * .155, .015);
+  const bench = new THREE.Group(); bench.name = 'roof-rest-bench'; bench.userData.target = 'roofBench'; bench.position.set(ROOF_REST.bench.seat.x, 0, ROOF_REST.bench.seat.z); roof.add(bench);
+  for (let i = 0; i < 4; i++) box(bench, 3.1, .075, .14, i % 2 ? '#b69067' : '#c6a377', 0, ROOF_REST.bench.seatTop - .0375, -.23 + i * .155, .015);
   for (let i = 0; i < 3; i++) box(bench, 3.1, .13, .07, '#b9966e', 0, .89 + i * .17, -.32, .015);
   for (const x of [-1.19, 1.19]) {
     box(bench, .075, .51, .63, '#627d70', x, .28, 0);

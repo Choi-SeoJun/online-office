@@ -1,9 +1,11 @@
 import type { GameState } from './types.ts';
 
-/** Original synthesized office sound; no downloads or background timers. */
+/** Original synthesized office and rooftop sound; no downloads or background timers. */
 export function createOfficeAudio() {
   let context: AudioContext | null = null, master: GainNode | null = null, hum: OscillatorNode | null = null, humLevel: GainNode | null = null;
   let keyNoise: AudioBuffer | null = null, currentState: GameState | null = null;
+  let wind: AudioBufferSourceNode | null = null, windHighpass: BiquadFilterNode | null = null, windLowpass: BiquadFilterNode | null = null, windLevel: GainNode | null = null;
+  let windActive = false, nextWindUpdate = 0;
   let lastEvent = 0, nextTyping = 0, burstLeft = 0, directUntil = 0, lastDirect = -Infinity, disposed = false;
   function start() {
     if (disposed) return;
@@ -30,6 +32,44 @@ export function createOfficeAudio() {
   const inOffice = (state: GameState) => !('floor' in state) || state.floor !== 'rooftop';
   const audible = (state: GameState) => !disposed && state.entered && !state.paused && state.settings.sound && state.settings.volume > 0 && !document.hidden;
   const working = (state: GameState) => inOffice(state) && state.seat === 'desk' && state.deskMode === 'work' && state.player.pose === 'type' && !state.activity;
+  function prepareWind() {
+    if (wind || !context || !master) return;
+    // Allocate once on the first audible rooftop visit. Correlated stereo noise
+    // is softened before filtering so the breeze has width without sharp hiss.
+    const length = Math.ceil(context.sampleRate * 8), buffer = context.createBuffer(2, length, context.sampleRate);
+    const left = buffer.getChannelData(0), right = buffer.getChannelData(1), smoothing = Math.exp(-2 * Math.PI * 650 / context.sampleRate);
+    let common = 0, sideLeft = 0, sideRight = 0;
+    for (let i = 0; i < length; i++) {
+      common = smoothing * common + (1 - smoothing) * (Math.random() * 2 - 1);
+      sideLeft = smoothing * sideLeft + (1 - smoothing) * (Math.random() * 2 - 1);
+      sideRight = smoothing * sideRight + (1 - smoothing) * (Math.random() * 2 - 1);
+      left[i] = common * .7 + sideLeft * .3; right[i] = common * .7 + sideRight * .3;
+    }
+    for (const data of [left, right]) {
+      // Remove the endpoint drift across the full loop rather than cutting at
+      // a random sample. The high-pass removes this inaudible slow correction.
+      const drift = data[length - 1] - data[0]; let peak = 0;
+      for (let i = 0; i < length; i++) { data[i] -= drift * i / (length - 1); peak = Math.max(peak, Math.abs(data[i])); }
+      if (peak > .8) for (let i = 0; i < length; i++) data[i] *= .8 / peak;
+    }
+    wind = context.createBufferSource(); wind.buffer = buffer; wind.loop = true;
+    windHighpass = context.createBiquadFilter(); windHighpass.type = 'highpass'; windHighpass.frequency.value = 90; windHighpass.Q.value = .5;
+    windLowpass = context.createBiquadFilter(); windLowpass.type = 'lowpass'; windLowpass.frequency.value = 800; windLowpass.Q.value = .5;
+    windLevel = context.createGain(); windLevel.gain.value = 0;
+    wind.connect(windHighpass).connect(windLowpass).connect(windLevel).connect(master); wind.start();
+  }
+  function syncWind(state: GameState, enabled: boolean) {
+    const active = enabled && !inOffice(state) && !state.transition;
+    if (active) prepareWind();
+    if (!context || !windLevel || !windLowpass) return;
+    const at = context.currentTime, changed = active !== windActive;
+    if (!changed && (!active || at < nextWindUpdate)) return;
+    if (changed) windLevel.gain.cancelScheduledValues(at);
+    const gust = .08 + Math.sin(state.elapsed * .31) * .025 + Math.sin(state.elapsed * .73 + 1.4) * .01;
+    windLevel.gain.setTargetAtTime(active ? gust : 0, at, active ? .7 : enabled ? .16 : .04);
+    if (active) windLowpass.frequency.setTargetAtTime(800 + Math.sin(state.elapsed * .23) * 180, at, 1.2);
+    windActive = active; nextWindUpdate = at + .25;
+  }
   function clickNoise(at: number, level: number, pitch: number) {
     if (!context || !master || !keyNoise) return;
     const source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
@@ -56,6 +96,7 @@ export function createOfficeAudio() {
     const enabled = audible(state);
     if (master && context) master.gain.setTargetAtTime(enabled ? Math.min(1, Math.max(0, state.settings.volume)) : 0, context.currentTime, 0.04);
     if (humLevel && context) humLevel.gain.setTargetAtTime(inOffice(state) ? .008 : 0, context.currentTime, .15);
+    syncWind(state, enabled);
     if (!enabled) { lastEvent = state.event?.id ?? lastEvent; nextTyping = state.elapsed + .08; burstLeft = 0; return; }
     if (state.event && state.event.id !== lastEvent) {
       lastEvent = state.event.id;
@@ -77,5 +118,12 @@ export function createOfficeAudio() {
     burstLeft--;
     nextTyping = state.elapsed + (burstLeft ? .08 + Math.random() * .13 : .35 + Math.random() * .55);
   }
-  return { start, sync, typeKey, dispose() { if (disposed) return; disposed = true; currentState = null; hum?.stop(); hum?.disconnect(); humLevel?.disconnect(); master?.disconnect(); if (context) void context.close().catch(() => {}); context = null; master = null; keyNoise = null; } };
+  return { start, sync, typeKey, dispose() {
+    if (disposed) return;
+    disposed = true; currentState = null;
+    hum?.stop(); hum?.disconnect(); humLevel?.disconnect();
+    wind?.stop(); wind?.disconnect(); windHighpass?.disconnect(); windLowpass?.disconnect(); windLevel?.disconnect();
+    master?.disconnect(); if (context) void context.close().catch(() => {});
+    context = null; master = null; keyNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;
+  } };
 }

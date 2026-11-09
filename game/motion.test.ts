@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createActor, animateActor } from './models.ts';
 import { createGameEngine } from './engine.ts';
-import { WEAPONS } from './layout.ts';
+import { ROOF_REST, WEAPONS } from './layout.ts';
 import type { Activity, GameState, Snack, Weapon } from './types.ts';
 
 // Only label rasterization needs a DOM; geometry, transforms and props stay real.
@@ -116,29 +116,89 @@ test('the toy hammer crosses sideways into its strike instead of chopping in one
   assert.ok(Math.abs(impact.x - windup.x) > .22, 'hammer needs a readable diagonal side sweep');
 });
 
-test('a rooftop candy unwraps, meets the lips from every facing, lowers and clears on cancellation', () => {
+test('a small round candy unwraps, enters at the lips, then leaves only its stick and releases the hand', () => {
   const { state, rig, render } = setup();
+  state.floor = 'rooftop';
   activity(state, 'candy', .05); render();
   const candy = rig.root.getObjectByName('held-candy');
   const wrapper = rig.root.getObjectByName('candy-wrapper');
-  assert.ok(candy?.visible && wrapper?.visible, 'the first beat shows a wrapped lollipop');
+  const sweet = rig.root.getObjectByName('candy-sweet') as THREE.Mesh<THREE.SphereGeometry>;
+  const mouthStick = rig.root.getObjectByName('mouth-candy-stick');
+  assert.ok(candy?.visible && wrapper?.visible, 'the first beat shows the wrapped candy');
+  assert.equal(sweet?.geometry.type, 'SphereGeometry', 'candy is a small round hard sweet');
+  assert.ok(sweet.geometry.parameters.radius < .09, 'the sweet is smaller than the old broad lollipop');
+  assert.ok(mouthStick && !mouthStick.visible);
   const low = position(candy);
   for (const reduced of [false, true]) for (const angle of [0, .7, Math.PI, 4.2]) {
     state.settings.reducedMotion = reduced; state.player.angle = angle;
-    activity(state, 'candy', .55); render();
+    activity(state, 'candy', .66); render();
     assert.equal(wrapper.visible, false, 'the wrapper is gone before sucking');
-    const sweet = candy.localToWorld(new THREE.Vector3(0, .16, -.04));
-    const mouth = rig.head.localToWorld(new THREE.Vector3(0, -.12, .304));
-    assert.ok(sweet.distanceTo(mouth) < .035, 'the candy touches the mouth instead of an eye or ear');
-    const grip = candy.localToWorld(new THREE.Vector3(0, -.04, 0));
-    assert.ok(grip.distanceTo(position(rig.hand)) < .015, 'the stick stays held during the sucking pose');
+    assert.ok(position(sweet).distanceTo(position(rig.mouth)) < .015, 'the candy enters at the lips');
+    const grip = candy.localToWorld(new THREE.Vector3(0, -.06, 0));
+    assert.ok(grip.distanceTo(position(rig.hand)) < .015, 'the stick stays gripped during insertion');
+    activity(state, 'candy', .99); render();
+    assert.equal(candy.visible, false, 'the colored sweet disappears inside the mouth');
+    assert.equal(mouthStick.visible, true, 'only the thin stick remains visible');
+    assert.ok(position(rig.hand).distanceTo(position(rig.mouth)) > .4, 'the hand releases the candy');
+    assert.equal(rig.rightArm.scale.y, 1, 'the resting arm has its normal length');
   }
-  state.player.angle = 0; activity(state, 'candy', .55); render(); const held = position(candy);
+  state.player.angle = 0; activity(state, 'candy', .66); render(); const held = position(candy);
   assert.ok(held.distanceTo(low) > .15, 'the candy visibly lifts from the hand');
-  activity(state, 'candy', .99); render(); assert.ok(position(candy).distanceTo(held) > .15, 'the candy lowers at the end');
   state.activity = null; state.player.pose = 'idle'; render();
-  assert.equal(candy.visible, false); assert.equal(wrapper.visible, false);
-  assert.equal(rig.rightArm.scale.y, 1, 'relaxed candy reach must not leak into walking');
+  assert.equal(candy.visible, false); assert.equal(wrapper.visible, false); assert.equal(mouthStick.visible, false);
+});
+
+test('a persistent candy stick stays between the lips while resting or walking without a raised hand', () => {
+  const { state, rig, render } = setup();
+  state.floor = 'rooftop'; state.candyInMouth = true;
+  for (const reduced of [false, true]) for (const rest of [null, 'bench', 'wall'] as const) for (const angle of [0, 1.2, Math.PI]) {
+    state.settings.reducedMotion = reduced; state.roofRest = rest; state.player.angle = angle;
+    state.seat = rest === 'bench' ? 'roof-bench' : null;
+    state.player.pose = rest === 'wall' ? 'wallLean' : rest === 'bench' ? 'sit' : 'walk';
+    state.player.moving = rest === null; render();
+    const stick = rig.root.getObjectByName('mouth-candy-stick');
+    const stem = rig.root.getObjectByName('mouth-candy-stem');
+    assert.ok(stick?.visible && stem);
+    const lipEnd = stem.localToWorld(new THREE.Vector3(0, -.145, 0));
+    const outerEnd = stem.localToWorld(new THREE.Vector3(0, .145, 0));
+    assert.ok(lipEnd.distanceTo(position(rig.mouth)) < .002, 'actual stick endpoint touches the lips');
+    assert.ok(Math.abs(outerEnd.distanceTo(position(rig.mouth)) - .29) < .002, 'the visible stick extends out of the mouth');
+    assert.equal(rig.candy.visible, false, 'there is no colored sweet outside the mouth');
+    assert.ok(position(rig.hand).distanceTo(position(rig.mouth)) > .4, 'hand remains away from the face');
+    assert.equal(rig.rightArm.scale.y, 1);
+  }
+  state.candyInMouth = false; state.roofRest = null; state.seat = null; state.player.pose = 'idle'; state.player.moving = false; render();
+  assert.equal(rig.root.getObjectByName('mouth-candy-stick')?.visible, false);
+  assert.equal(rig.body.rotation.x, 0); assert.equal(rig.head.position.z, 0);
+  assert.equal(rig.legs[1].rotation.x, 0); assert.equal(rig.calves[1].rotation.x, 0);
+});
+
+test('rooftop bench pants meet the seat and wall rest touches the wall without putting the head through it', () => {
+  const { state, rig, render } = setup();
+  state.floor = 'rooftop';
+  for (const reduced of [false, true]) for (const rest of ['bench', 'wall'] as const) for (const candy of [null, .1, .66, .99] as const) {
+    state.settings.reducedMotion = reduced; state.roofRest = rest; state.seat = rest === 'bench' ? 'roof-bench' : null;
+    const target = rest === 'bench' ? ROOF_REST.bench.seat : ROOF_REST.wall.point;
+    state.player.x = target.x; state.player.z = target.z; state.player.angle = 0;
+    state.player.pose = rest === 'bench' ? 'sit' : 'wallLean'; state.activity = null;
+    if (candy !== null) activity(state, 'candy', candy);
+    render();
+    if (rest === 'bench') {
+      const thigh = rig.legs[0].children[0];
+      const pantsBottom = new THREE.Box3().setFromObject(thigh, true).min.y;
+      assert.ok(Math.abs(pantsBottom - ROOF_REST.bench.seatTop) < .01, 'actual pants surface rests on the bench');
+      assert.ok(rig.legs[0].rotation.x < -1.4, 'inserting candy keeps the seated legs');
+    } else {
+      const back = rig.body.localToWorld(new THREE.Vector3(0, 1.1, -.17));
+      assert.ok(Math.abs(back.z - ROOF_REST.wall.front) < .015, 'upper back touches the real wall plane');
+      const headBack = new THREE.Box3().setFromObject(rig.head, true).min.z;
+      assert.ok(headBack >= ROOF_REST.wall.front - .015, 'the oversized head stays in front of the wall');
+      const shoe = rig.calves[1].children[1];
+      const shoeBack = new THREE.Box3().setFromObject(shoe, true).min.z;
+      assert.ok(Math.abs(shoeBack - ROOF_REST.wall.front) < .025, 'the bent leg rests its shoe against the wall');
+      assert.ok(rig.calves[1].rotation.x > 1.6, 'one knee visibly bends');
+    }
+  }
 });
 
 test('all weapons stay visible through their full swing and reset after recovery', () => {

@@ -1,10 +1,10 @@
 export type Point = { x: number; z: number };
 export type Floor = 'office' | 'rooftop';
-export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copier' | 'exit';
+export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copier' | 'exit' | 'roofBench' | 'roofWall';
 export type Weapon = 'punch' | 'hammer' | 'fan';
 export type Snack = 'cookie' | 'choco' | 'cracker';
 export type DeskMode = 'work' | 'shopping' | 'game' | 'sleep';
-export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'hit' | 'watch' | 'scold' | 'candy';
+export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'wallLean' | 'hit' | 'watch' | 'scold' | 'candy';
 export type Actor = Point & { id: string; name: string; angle: number; pose: Pose; moving: boolean };
 export type Settings = { sound: boolean; volume: number; reducedMotion: boolean; quality: 'auto' | 'low' | 'high' };
 export type Inventory = Record<Snack, number> & { coffee: number };
@@ -15,7 +15,8 @@ export type GameState = {
   floor: Floor; transition: { from: Floor; to: Floor; remaining: number; duration: number } | null;
   player: Actor; boss: Actor; coworkers: Actor[];
   target: TargetId | null; ready: boolean; destination: Point | null;
-  seat: 'desk' | 'lounge' | null; deskMode: DeskMode | null;
+  seat: 'desk' | 'lounge' | 'roof-bench' | null; deskMode: DeskMode | null;
+  roofRest: 'bench' | 'wall' | null; candyInMouth: boolean;
   activity: Activity | null; inventory: Inventory; weapon: Weapon; settings: Settings;
   warning: number; scold: number; bossPhase: 'routine' | 'watch' | 'scold' | 'hit' | 'recover';
   lastHit: { id: number; weapon: Weapon; at: number } | null;
@@ -26,7 +27,7 @@ export type Command =
   | { type: 'enter'; name?: string } | { type: 'exit' } | { type: 'pause'; value: boolean }
   | { type: 'select'; target: TargetId } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
   | { type: 'interact' } | { type: 'stand' } | { type: 'cancel' }
-  | { type: 'travel'; floor: Floor } | { type: 'candy' }
+  | { type: 'travel'; floor: Floor } | { type: 'candy' } | { type: 'rest'; place: 'bench' | 'wall' }
   | { type: 'desk'; mode: DeskMode } | { type: 'spin' }
   | { type: 'weapon'; weapon: Weapon } | { type: 'attack' }
   | { type: 'take'; snack: Snack } | { type: 'eat'; snack: Snack } | { type: 'drink' }
