@@ -1,5 +1,5 @@
 import type { Actor, Command, GameEngine, GameEvent, GameState, PersistedState, Point, Pose, Snack } from './types.ts';
-import { BOUNDS, DESKS, OBSTACLES, SNACKS, START, TARGETS, WEAPONS } from './layout.ts';
+import { BOUNDS, DESKS, OBSTACLES, ROOF_BOUNDS, ROOF_START, SNACKS, START, TARGETS, WEAPONS } from './layout.ts';
 import { readSavedState, toPersistedState } from './storage.ts';
 
 const RADIUS = .22;
@@ -132,6 +132,7 @@ function initialState(saved?: PersistedState): GameState {
   const p = saved && readSavedState({ getItem: () => JSON.stringify(saved) });
   return {
     entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원',
+    floor: 'office', transition: null,
     player: actor('player', p?.name ?? '김사원', START), boss: actor('boss', '박부장', TARGETS.boss.point),
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
     target: null, ready: false, destination: null, seat: null, deskMode: null, activity: null,
@@ -147,6 +148,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
   const listeners = new Set<() => void>();
   let path: Point[] = [], bossPath: Point[] = [], axis = { x: 0, z: 0 }, followClock = 0;
   let followedBoss: Point = { ...state.boss };
+  let officeReturn: Point = { ...START };
   let eventId = 0, lastAttack = -Infinity, attackUntil = 0, hitUntil = 0, recoverUntil = 0, immunityUntil = 0;
   let nextObservation = 10, patrolIndex = 0, patrolWait = 0, coworkerPhase = -1, coworkerPath: Point[] = [];
   const patrol: Point[] = [{ x: 3.5, z: 3.25 }, { x: -3.8, z: 4 }, { x: -6, z: -3.55 }, { x: 3.5, z: .3 }];
@@ -174,10 +176,15 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
   const canReachBoss = () => {
     const gap = distance(state.player, state.boss);
     const lateralGap = Math.abs(.832 * (state.player.x - state.boss.x) - .555 * (state.player.z - state.boss.z));
-    return gap >= 1.05 && gap <= BOSS_REACH && lateralGap >= .9 && lineClear(state.player, state.boss);
+    return state.floor === 'office' && !state.transition && gap >= 1.05 && gap <= BOSS_REACH && lateralGap >= .9 && lineClear(state.player, state.boss);
   };
-  const ready = () => { state.ready = !!state.target && (state.target === 'boss' ? canReachBoss() : distance(state.player, TARGETS[state.target].point) <= 1.2); };
-  const walk = (point: Point) => { cancel(); stand(); path = route(state.player, point); state.destination = path.length ? { ...path[path.length - 1] } : null; };
+  const ready = () => { state.ready = state.floor === 'office' && !state.transition && !!state.target && (state.target === 'boss' ? canReachBoss() : distance(state.player, TARGETS[state.target].point) <= 1.2); };
+  const roofValid = (point: Point) => Number.isFinite(point.x) && Number.isFinite(point.z) && point.x >= ROOF_BOUNDS.minX + RADIUS && point.x <= ROOF_BOUNDS.maxX - RADIUS && point.z >= ROOF_BOUNDS.minZ + RADIUS && point.z <= ROOF_BOUNDS.maxZ - RADIUS;
+  const walk = (point: Point) => {
+    cancel(); stand();
+    path = state.floor === 'office' ? route(state.player, point) : Number.isFinite(point.x) && Number.isFinite(point.z) ? [{ x: clamp(point.x, ROOF_BOUNDS.minX + RADIUS, ROOF_BOUNDS.maxX - RADIUS), z: clamp(point.z, ROOF_BOUNDS.minZ + RADIUS, ROOF_BOUNDS.maxZ - RADIUS) }] : [];
+    state.destination = path.length ? { ...path[path.length - 1] } : null;
+  };
   const followBoss = () => {
     path = bossApproach(state.player, state.boss); followedBoss = { x: state.boss.x, z: state.boss.z }; followClock = .35;
     state.destination = path.length ? { ...path[path.length - 1] } : null;
@@ -194,6 +201,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     Object.assign(state, initialState(saved)); path = []; bossPath = []; coworkerPath = []; axis = { x: 0, z: 0 };
     eventId = 0; lastAttack = -Infinity; attackUntil = hitUntil = recoverUntil = immunityUntil = 0;
     nextObservation = 10; patrolIndex = 0; patrolWait = 0; coworkerPhase = -1; followClock = 0; followedBoss = { ...state.boss };
+    officeReturn = { ...START };
   };
   const dispatch = (command: Command) => {
     if (disposed) return;
@@ -207,8 +215,23 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
       state.name = command.name?.trim().slice(0, 10) || state.name; state.player.name = state.name; state.entered = true; state.paused = false;
     } else if (command.type === 'pause') { state.paused = command.value; axis = { x: 0, z: 0 }; }
     else if (state.entered && !state.paused) {
+      if (state.transition) return;
       switch (command.type) {
+        case 'travel': {
+          if (command.floor === state.floor) break;
+          if (state.floor === 'office') officeReturn = { x: state.player.x, z: state.player.z };
+          cancel(); stand(); state.target = null; state.ready = false; state.lastHit = null;
+          attackUntil = hitUntil = recoverUntil = 0; state.bossPhase = 'routine'; state.boss.pose = 'idle'; state.boss.moving = false;
+          bossPath = []; state.message = ''; state.messageUntil = 0;
+          const duration = state.settings.reducedMotion ? .4 : 1.6;
+          state.transition = { from: state.floor, to: command.floor, duration, remaining: duration };
+          break;
+        }
+        case 'candy':
+          if (state.floor === 'rooftop' && !busy()) { begin('candy', 5); state.player.angle = .3; event('오늘 삼킨 말은, 사탕처럼 천천히 녹여요.'); }
+          break;
         case 'select':
+          if (state.floor !== 'office') break;
           state.target = command.target;
           if (command.target === 'boss') { cancel(); stand(); followBoss(); }
           else walk(TARGETS[command.target].point);
@@ -244,6 +267,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           else if (state.target === 'exit') reset(toPersistedState(state));
           break;
         case 'take':
+          if (state.floor !== 'office') break;
           if (busy()) break;
           if (distance(state.player, TARGETS.snacks.point) > 1.2) { event('과자 선반 가까이 가 주세요.'); break; }
           if (state.inventory.cookie + state.inventory.choco + state.inventory.cracker >= 6) { event('과자는 여섯 개까지 챙길 수 있어요.'); break; }
@@ -317,6 +341,17 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
   };
   const tick = (dt: number) => {
     state.elapsed += dt;
+    if (state.transition) {
+      const transition = state.transition;
+      transition.remaining = Math.max(0, transition.remaining - dt);
+      if (transition.remaining <= transition.duration / 2 && state.floor !== transition.to) {
+        state.floor = transition.to;
+        Object.assign(state.player, state.floor === 'rooftop' ? ROOF_START : officeReturn);
+        state.player.angle = state.floor === 'rooftop' ? .3 : 0; restorePose();
+      }
+      if (transition.remaining < 1e-8) { state.transition = null; event(state.floor === 'rooftop' ? '여기서는 잠깐, 회사 생각 내려놓기.' : '다시 사무실. 오늘도 적당히 해요.'); }
+      return;
+    }
     if (state.activity) {
       state.activity.remaining = Math.max(0, state.activity.remaining - dt);
       if (state.activity.remaining < 1e-8) {
@@ -325,6 +360,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
         else if (a.kind === 'drink') { state.inventory.coffee = Math.max(0, state.inventory.coffee - 1); event('커피 한 모금, 잠깐의 여유.', 'sip'); }
         else if (a.kind === 'take' && a.snack) { state.inventory[a.snack]++; event(`${SNACKS[a.snack]}를 챙겼어요.`, 'snack'); }
         else if (a.kind === 'eat' && a.snack) { state.inventory[a.snack] = Math.max(0, state.inventory[a.snack] - 1); event('맛있는 휴식이었어요.', 'snack'); }
+        else if (a.kind === 'candy') event('사탕은 달고, 오늘의 마음은 조금 가벼워졌어요.', 'sip');
         restorePose();
       }
     }
@@ -332,8 +368,9 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
       if (axis.x || axis.z) {
         const length = Math.max(1, Math.hypot(axis.x, axis.z)), dx = axis.x / length * 2.6 * dt, dz = axis.z / length * 2.6 * dt;
         const p = state.player, old = { x: p.x, z: p.z };
-        if (valid({ x: p.x + dx, z: p.z })) p.x += dx;
-        if (valid({ x: p.x, z: p.z + dz })) p.z += dz;
+        const canWalk = state.floor === 'rooftop' ? roofValid : valid;
+        if (canWalk({ x: p.x + dx, z: p.z })) p.x += dx;
+        if (canWalk({ x: p.x, z: p.z + dz })) p.z += dz;
         p.moving = distance(old, p) > .00001;
         if (p.moving) { p.angle = Math.atan2(p.x - old.x, p.z - old.z); p.pose = 'walk'; } else restorePose();
       } else {
@@ -352,7 +389,8 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
         }
       }
     }
-    updateBoss(dt); updateCoworkers(dt); ready();
+    if (state.floor === 'office') { updateBoss(dt); updateCoworkers(dt); }
+    ready();
   };
   return {
     state, dispatch,

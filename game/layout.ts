@@ -2,6 +2,8 @@ import type { Point, TargetId } from './types.ts';
 
 export const BOUNDS = { minX: -8.6, maxX: 8.6, minZ: -5.6, maxZ: 5.6 };
 export const START: Point = { x: 1.8, z: 5.0 };
+export const ROOF_BOUNDS = { minX: -6.8, maxX: 6.8, minZ: -4.3, maxZ: 4.3 };
+export const ROOF_START: Point = { x: 0, z: 2.4 };
 export const DESKS = [
   { x: -6, z: -1.2, owner: 'colleague-0' },
   { x: -2, z: -1.2, owner: 'colleague-1' },

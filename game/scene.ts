@@ -1,8 +1,32 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { DESKS, TARGETS } from './layout.ts';
+import { BOUNDS, DESKS, ROOF_BOUNDS, TARGETS } from './layout.ts';
 import type { OfficeScene, SceneCallbacks, TargetId } from './types.ts';
 import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere, spriteLabel } from './models.ts';
+import { createRooftop, transitionOrbit } from './rooftop.ts';
+
+function batchArchitecture(group: THREE.Group) {
+  group.updateMatrixWorld(true);
+  const batches = new Map<string, { material: THREE.MeshStandardMaterial; geometries: THREE.BufferGeometry[]; target?: TargetId; ground: boolean; castShadow: boolean; receiveShadow: boolean }>();
+  const originals: THREE.Mesh[] = [];
+  group.traverse(object => {
+    if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial) || object.material.map) return;
+    let ancestor: THREE.Object3D | null = object, target: TargetId | undefined;
+    while (ancestor) { if (ancestor.userData.dynamic) return; if (ancestor.userData.target) target = ancestor.userData.target as TargetId; ancestor = ancestor.parent; }
+    const ground = !!object.userData.ground;
+    const key = `${object.material.uuid}/${target ?? ''}/${ground}/${object.castShadow}/${object.receiveShadow}`;
+    if (!batches.has(key)) batches.set(key, { material: object.material, geometries: [], target, ground, castShadow: object.castShadow && !ground, receiveShadow: object.receiveShadow });
+    let geometry = object.geometry.clone();
+    if (geometry.index) { const unindexed = geometry.toNonIndexed(); geometry.dispose(); geometry = unindexed; }
+    geometry.applyMatrix4(object.matrixWorld); batches.get(key)!.geometries.push(geometry); originals.push(object);
+  });
+  batches.forEach(batch => {
+    const geometry = mergeGeometries(batch.geometries, false);
+    if (geometry) { const mesh = new THREE.Mesh(geometry, batch.material); mesh.castShadow = batch.castShadow; mesh.receiveShadow = batch.receiveShadow; mesh.userData.target = batch.target; mesh.userData.ground = batch.ground; group.add(mesh); }
+    batch.geometries.forEach(g => g.dispose());
+  });
+  originals.forEach(mesh => mesh.removeFromParent());
+}
 
 export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks): OfficeScene {
   let renderer: THREE.WebGLRenderer;
@@ -13,7 +37,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;outline:none;'; renderer.domElement.setAttribute('aria-label', '클릭해서 걸어 다니는 3D 사무실'); host.appendChild(renderer.domElement);
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#e6e5dc'); scene.fog = new THREE.Fog('#e6e5dc', 34, 70);
   const camera = new THREE.OrthographicCamera(-14, 14, 10, -10, .1, 90);
-  const room = new THREE.Group(); scene.add(room);
+  const room = new THREE.Group(); room.name = 'office'; scene.add(room);
   const ambient = new THREE.HemisphereLight('#f5f5e7', '#91a09a', 2.5); scene.add(ambient);
   const sunlight = new THREE.DirectionalLight('#fff2d7', 3.6); sunlight.position.set(-3, 14, -6); sunlight.castShadow = true; sunlight.shadow.mapSize.set(2048, 2048); sunlight.shadow.camera.left = -13; sunlight.shadow.camera.right = 13; sunlight.shadow.camera.top = 11; sunlight.shadow.camera.bottom = -11; sunlight.shadow.normalBias = .035; sunlight.shadow.bias = -.0002; scene.add(sunlight); scene.add(sunlight.target);
   const fill = new THREE.DirectionalLight('#e1eff4', 1.1); fill.position.set(10, 8, 9); scene.add(fill);
@@ -109,53 +133,41 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   for (let i = 0; i < 3; i++) { const ray = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 3.6), new THREE.MeshBasicMaterial({ color: '#fff0bb', transparent: true, opacity: .10, depthWrite: false })); ray.rotation.x = -Math.PI / 2; ray.rotation.z = -.2; ray.position.set(-2.8 + i * 3.7, .049, -3.3); room.add(ray); }
   // Batch the immutable architecture and props by material and interaction tag.
   // This keeps the richly furnished room to a small number of GPU draw calls.
-  room.updateMatrixWorld(true);
-  const batches = new Map<string, { material: THREE.MeshStandardMaterial; geometries: THREE.BufferGeometry[]; target?: TargetId; ground: boolean }>();
-  const originals: THREE.Mesh[] = [];
-  room.traverse(object => {
-    if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial) || object.material.map) return;
-    let ancestor: THREE.Object3D | null = object, target: TargetId | undefined;
-    while (ancestor) { if (ancestor.userData.dynamic) return; if (ancestor.userData.target) target = ancestor.userData.target as TargetId; ancestor = ancestor.parent; }
-    const ground = !!object.userData.ground;
-    const key = `${object.material.uuid}/${target ?? ''}/${ground}`;
-    if (!batches.has(key)) batches.set(key, { material: object.material, geometries: [], target, ground });
-    let geometry = object.geometry.clone();
-    if (geometry.index) { const unindexed = geometry.toNonIndexed(); geometry.dispose(); geometry = unindexed; }
-    geometry.applyMatrix4(object.matrixWorld); batches.get(key)!.geometries.push(geometry); originals.push(object);
-  });
-  batches.forEach(batch => {
-    const geometry = mergeGeometries(batch.geometries, false);
-    if (geometry) { const mesh = new THREE.Mesh(geometry, batch.material); mesh.castShadow = !batch.ground; mesh.receiveShadow = true; mesh.userData.target = batch.target; mesh.userData.ground = batch.ground; room.add(mesh); }
-    batch.geometries.forEach(g => g.dispose());
-  });
-  originals.forEach(mesh => mesh.removeFromParent());
+  batchArchitecture(room);
+  const roof = createRooftop(scene); batchArchitecture(roof); roof.visible = false;
   const state = callbacks.getState();
   const actors = new Map<string, ReturnType<typeof createActor>>();
-  actors.set(state.player.id, createActor(room, 0, state.player.name));
+  const playerGroup = new THREE.Group(); scene.add(playerGroup);
+  actors.set(state.player.id, createActor(playerGroup, 0, state.player.name));
   const boss = createActor(room, 1, state.boss.name); boss.root.userData.target = 'boss'; actors.set(state.boss.id, boss);
   state.coworkers.forEach((a, i) => actors.set(a.id, createActor(room, i + 2, a.name)));
   // World-space interaction rings stay below the characters and never capture clicks.
   const selection = new THREE.Mesh(new THREE.RingGeometry(.50, .56, 48), new THREE.MeshBasicMaterial({ color: '#dca45e', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })); selection.rotation.x = -Math.PI / 2; selection.position.y = .065; scene.add(selection);
   const destination = new THREE.Mesh(new THREE.RingGeometry(.13, .19, 24), new THREE.MeshBasicMaterial({ color: '#4d9184', transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false })); destination.rotation.x = -Math.PI / 2; destination.position.y = .07; scene.add(destination);
   const playerRing = new THREE.Mesh(new THREE.RingGeometry(.31, .37, 32), new THREE.MeshBasicMaterial({ color: '#467d70', transparent: true, opacity: .55, side: THREE.DoubleSide, depthWrite: false })); playerRing.rotation.x = -Math.PI / 2; playerRing.position.y = .06; scene.add(playerRing);
-  let width = 1, height = 1, zoomLevel = 1, lastQuality = '', dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden;
-  const focus = new THREE.Vector3(0, .5, 0); const desired = new THREE.Vector3(); const offset = new THREE.Vector3(16, 20, 24).normalize().multiplyScalar(32);
+  let width = 1, height = 1, zoomLevel = 1, lastQuality = '', dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden, orbit = 0;
+  let lastFloor = state.floor;
+  const officeColor = new THREE.Color('#e6e5dc'), roofColor = new THREE.Color('#e6d6bf');
+  const focus = new THREE.Vector3(0, .5, 0); const desired = new THREE.Vector3(); const offset = new THREE.Vector3(16, 20, 24).normalize().multiplyScalar(32), rotatedOffset = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   const updateCamera = () => {
     const aspect = width / height; const mobile = aspect < .9;
     const span = (mobile ? 15.2 : Math.max(15.6, 23.2 / aspect)) * zoomLevel;
-    camera.left = -span * aspect / 2; camera.right = span * aspect / 2; camera.top = span / 2; camera.bottom = -span / 2; camera.updateProjectionMatrix(); camera.position.copy(focus).add(offset); camera.lookAt(focus);
+    camera.left = -span * aspect / 2; camera.right = span * aspect / 2; camera.top = span / 2; camera.bottom = -span / 2; camera.updateProjectionMatrix(); rotatedOffset.copy(offset).applyAxisAngle(up, orbit); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus);
   };
   const resize = () => { if (dead) return; width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
   const observer = new ResizeObserver(resize); observer.observe(host); resize();
-  const adjustZoom = (factor: number) => { zoomLevel = THREE.MathUtils.clamp(zoomLevel * factor, .64, 1.45); updateCamera(); };
+  const adjustZoom = (factor: number) => { if (callbacks.getState().transition) return; zoomLevel = THREE.MathUtils.clamp(zoomLevel * factor, .64, 1.45); updateCamera(); };
   const zoom = (delta: number) => { adjustZoom(Math.pow(.9, delta)); };
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down: { x: number; y: number; time: number; id: number } | null = null;
-  const pointerDown = (e: PointerEvent) => { if (e.button !== 0) return; down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId }; renderer.domElement.setPointerCapture?.(e.pointerId); };
+  const pointerDown = (e: PointerEvent) => { if (e.button !== 0 || callbacks.getState().transition) return; down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId }; renderer.domElement.setPointerCapture?.(e.pointerId); };
   const pointerUp = (e: PointerEvent) => {
-    const start = down; down = null; if (!start || start.id !== e.pointerId || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8 || performance.now() - start.time > 650) return;
+    const start = down; down = null; const current = callbacks.getState(); if (current.transition || !start || start.id !== e.pointerId || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8 || performance.now() - start.time > 650) return;
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
-    const hits = raycaster.intersectObjects(room.children, true);
-    for (const hit of hits) { let obj: THREE.Object3D | null = hit.object; let target: TargetId | null = null; while (obj) { if (obj.userData.target) { target = obj.userData.target as TargetId; break; } obj = obj.parent; } if (target) { callbacks.onTarget(target); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, -8.6, 8.6), z: THREE.MathUtils.clamp(hit.point.z, -5.6, 5.6) }); return; } }
+    const onRoof = current.floor === 'rooftop', bounds = onRoof ? ROOF_BOUNDS : BOUNDS;
+    // Raycaster does not treat an invisible parent as an interaction boundary.
+    // Restrict it to the current floor so hidden desks cannot capture roof taps.
+    const hits = raycaster.intersectObjects((onRoof ? roof : room).children, true);
+    for (const hit of hits) { let obj: THREE.Object3D | null = hit.object; let target: TargetId | null = null; while (obj) { if (!onRoof && obj.userData.target) { target = obj.userData.target as TargetId; break; } obj = obj.parent; } if (target) { callbacks.onTarget(target); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
   };
   const pointerCancel = () => { down = null; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
   const contextLoss = (e: Event) => { e.preventDefault(); graphicsLost = true; cancelAnimationFrame(frame); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 다시 열어보기를 누르면 이어서 놀 수 있어요.'); };
@@ -165,13 +177,21 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     if (dead || graphicsLost) return; frame = requestAnimationFrame(render); if (!visible) return;
     const dt = lastTime ? Math.min(.05, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
     callbacks.onFrame(dt); const s = callbacks.getState();
+    const onRoof = s.floor === 'rooftop'; room.visible = !onRoof; roof.visible = onRoof;
+    const background = onRoof ? roofColor : officeColor;
+    (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);
+    ambient.color.set(onRoof ? '#fff0d5' : '#f5f5e7');
+    orbit = transitionOrbit(s.transition, s.settings.reducedMotion);
     if (lastQuality !== s.settings.quality) { lastQuality = s.settings.quality; renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lastQuality === 'low' ? 1 : lastQuality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = lastQuality !== 'low'; sunlight.shadow.mapSize.set(lastQuality === 'high' ? 2048 : 1024, lastQuality === 'high' ? 2048 : 1024); renderer.shadowMap.needsUpdate = true; resize(); }
     const mobile = width / height < .9;
     desired.set(mobile ? s.player.x * .72 : s.player.x * .09, .5, mobile ? s.player.z * .65 : s.player.z * .05);
-    focus.lerp(desired, s.settings.reducedMotion ? 1 : 1 - Math.exp(-dt * 2.5)); updateCamera();
-    [s.player, s.boss, ...s.coworkers].forEach(a => { const rig = actors.get(a.id); if (rig) animateActor(rig, a, s, s.elapsed); });
+    // The midpoint is covered by the UI fade, so reset tracking there rather
+    // than sliding across the unrelated old floor after the new one appears.
+    if (lastFloor !== s.floor) { focus.copy(desired); lastFloor = s.floor; down = null; }
+    else focus.lerp(desired, s.settings.reducedMotion ? 1 : 1 - Math.exp(-dt * 2.5)); updateCamera();
+    (onRoof ? [s.player] : [s.player, s.boss, ...s.coworkers]).forEach(a => { const rig = actors.get(a.id); if (rig) animateActor(rig, a, s, s.elapsed); });
     desks[5].chair.rotation.y = s.player.pose === 'spin' && !s.settings.reducedMotion ? s.elapsed * 6 : 0;
-    selection.visible = s.target !== null; if (s.target) { const p = s.target === 'boss' ? s.boss : TARGETS[s.target].point; selection.position.set(p.x, .065, p.z); selection.scale.setScalar(s.settings.reducedMotion ? 1 : 1 + Math.sin(s.elapsed * 3) * .025); }
+    selection.visible = !onRoof && !s.transition && s.target !== null; if (s.target && !onRoof) { const p = s.target === 'boss' ? s.boss : TARGETS[s.target].point; selection.position.set(p.x, .065, p.z); selection.scale.setScalar(s.settings.reducedMotion ? 1 : 1 + Math.sin(s.elapsed * 3) * .025); }
     destination.visible = !!s.destination; if (s.destination) destination.position.set(s.destination.x, .07, s.destination.z);
     playerRing.position.set(s.player.x, .065, s.player.z); renderer.render(scene, camera);
   };

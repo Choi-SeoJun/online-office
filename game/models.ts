@@ -84,7 +84,7 @@ export function desk(parent: THREE.Object3D, x: number, z: number, index: number
   return { group: g, chair: ch, screen };
 }
 
-type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; snacks: Record<Snack, THREE.Group>; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
+type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
 export function createActor(parent: THREE.Object3D, role: number, name: string): Rig {
   const root = new THREE.Group(); parent.add(root); const body = new THREE.Group(); root.add(body);
   const boss = role === 1; const shirt = ['#4e8a7e', '#2f4355', '#c48d6b', '#7e8da5', '#bbab78'][role] ?? '#9fa8b4'; const skin = ['#f0c5a2', '#e7ba94', '#eec09c', '#e5b692', '#f0cbad'][role] ?? '#edc3a0';
@@ -102,14 +102,32 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   for (const side of [-1, 1]) { sphere(head, .025, '#343e39', side * .115, -.015, .292, .85, 1.15, .5); sphere(head, .047, '#df9b83', side * .215, -.095, .264, 1, .45, .25); }
   sphere(head, .042, skin, 0, -.06, .31, .7, .6, .8);
   const smile = new THREE.Mesh(new THREE.TorusGeometry(.062, .009, 5, 12, Math.PI * .7), material('#805945')); smile.rotation.z = Math.PI * 1.15; smile.position.set(.028, -.10, .294); head.add(smile);
+  const mouth = new THREE.Object3D(); mouth.name = 'mouth-contact'; mouth.position.set(0, -.12, .304); head.add(mouth);
   if (boss) { for (const side of [-1, 1]) { const glasses = new THREE.Mesh(new THREE.TorusGeometry(.074, .009, 5, 14), material('#5d5d4f')); glasses.position.set(side * .116, -.01, .312); head.add(glasses); } box(head, .08, .012, .012, '#5d5d4f', 0, -.005, .314, 0); }
   const arms: THREE.Group[] = [];
   for (const side of [-1, 1]) { const arm = new THREE.Group(); arm.position.set(side * .33, 1.16, 0); body.add(arm); box(arm, .16, .37, .18, shirt, 0, -.16, 0, .06); sphere(arm, .092, skin, 0, -.37, .015, .85, 1, .85); arms.push(arm); }
   const hand = new THREE.Group(); hand.position.set(0, -.40, .04); arms[1].add(hand);
   const weapons = { punch: new THREE.Group(), hammer: new THREE.Group(), fan: new THREE.Group() }; Object.values(weapons).forEach(g => hand.add(g));
   sphere(weapons.punch, .13, '#eeb48a', 0, 0, 0, 1.08, .9, 1.1);
-  cylinder(weapons.hammer, .028, .028, .42, '#ad7b4d', 0, .12); const hammer = cylinder(weapons.hammer, .17, .17, .40, '#e8aa61', 0, .39); hammer.rotation.z = Math.PI / 2;
-  cylinder(weapons.fan, .018, .018, .29, '#b49365', 0, .10); for (let i = 0; i < 6; i++) { const p = box(weapons.fan, .12, .37, .025, i % 2 ? '#f0e5cb' : '#fff8e6', 0, .31, i * .004, .005); p.rotation.z = (i - 2.5) * .20; }
+  cylinder(weapons.hammer, .036, .045, .48, '#cf825d', 0, .14);
+  for (let i = 0; i < 4; i++) cylinder(weapons.hammer, .048, .048, .022, '#efbb83', 0, -.03 + i * .045);
+  const hammer = new THREE.Group(); hammer.name = 'hammer-head'; hammer.position.y = .43; weapons.hammer.add(hammer);
+  const center = cylinder(hammer, .135, .135, .44, '#e9a14f'); center.rotation.z = Math.PI / 2;
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i++) { const ridge = cylinder(hammer, .19 + i * .012, .19 + i * .012, .035, i % 2 ? '#edb459' : '#f5c76d', side * (.12 + i * .043)); ridge.rotation.z = Math.PI / 2; }
+    const cap = cylinder(hammer, .218, .218, .045, '#efb35d', side * .25); cap.rotation.z = Math.PI / 2;
+  }
+  cylinder(weapons.fan, .025, .025, .27, '#b49365', 0, .08);
+  // Each folded sector shares the handle pivot. Alternating depth makes a real
+  // accordion sheet, rather than a stack of rectangles crossing at their centres.
+  for (let i = 0; i < 8; i++) {
+    const left = -.72 + i * .18, right = left + .18;
+    const vertices = new Float32Array([0, .12, 0, Math.sin(left) * .63, .12 + Math.cos(left) * .63, i % 2 ? -.025 : .025, Math.sin(right) * .63, .12 + Math.cos(right) * .63, i % 2 ? .025 : -.025]);
+    const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3)); geometry.computeVertexNormals();
+    const paper = new THREE.Mesh(geometry, material(i % 2 ? '#e5e0d0' : '#fff9e8')); paper.material.side = THREE.DoubleSide; paper.castShadow = true; weapons.fan.add(paper);
+    const fold = new THREE.Group(); fold.rotation.z = -(left + .09); fold.position.y = .12; weapons.fan.add(fold);
+    for (let line = 0; line < 3; line++) box(fold, .045 + line * .012, .009, .006, line === 0 ? '#7f9e9c' : '#a5b3aa', 0, .36 + line * .065, .028, 0);
+  }
   weapons.hammer.rotation.z = Math.PI; weapons.fan.rotation.z = Math.PI;
   const snacks = { cookie: new THREE.Group(), choco: new THREE.Group(), cracker: new THREE.Group() };
   for (const [kind, item] of Object.entries(snacks)) { item.name = `held-${kind}`; item.visible = false; hand.add(item); }
@@ -120,6 +138,17 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   for (let i = 0; i < 2; i++) box(snacks.choco, .12, .006, .003, '#a07550', 0, .04 + i * .065, .029, 0);
   box(snacks.cracker, .23, .23, .045, '#e2c183', 0, 0, 0, .023);
   for (const x of [-.055, .055]) for (const y of [-.055, .055]) sphere(snacks.cracker, .012, '#ad8b50', x, y, .024, 1, 1, .25);
+  const candy = new THREE.Group(); candy.name = 'held-candy'; candy.visible = false; hand.add(candy);
+  cylinder(candy, .012, .012, .28, '#f9f4df', 0, -.005);
+  const sweet = cylinder(candy, .115, .115, .08, '#eaa18c', 0, .16); sweet.rotation.x = Math.PI / 2;
+  for (const side of [-1, 1]) {
+    const points = Array.from({ length: 49 }, (_, i) => { const angle = i / 48 * Math.PI * 3.5, radius = .007 + .0088 * angle; return new THREE.Vector3(Math.cos(angle) * radius, .16 + Math.sin(angle) * radius, side * .042); });
+    const swirl = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 48, .009, 5, false), material('#eaf4d8')); candy.add(swirl);
+  }
+  const wrapper = new THREE.Group(); wrapper.name = 'candy-wrapper'; wrapper.visible = false; candy.add(wrapper);
+  const film = sphere(wrapper, .145, '#f9edc8', 0, .16, 0, 1, 1.15, .48);
+  film.material = new THREE.MeshStandardMaterial({ color: '#f7edcf', transparent: true, opacity: .48, roughness: .35, depthWrite: false });
+  for (const side of [-1, 1]) { const twist = box(wrapper, .095, .075, .045, '#f0d9b6', 0, .16 + side * .18, 0, .006); twist.rotation.z = side * .5; }
   const actorMug = mug(arms[1], 0, -.33, .10, '#e6b77e'); actorMug.visible = false;
   actorMug.name = 'held-coffee'; actorMug.scale.setScalar(1.2);
   const steam = new THREE.Group(); steam.name = 'coffee-steam'; actorMug.add(steam);
@@ -131,7 +160,32 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   const effect = new THREE.Group(); effect.position.y = 1.90; root.add(effect); const stars: THREE.Mesh[] = [];
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
-  return { root, body, head, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, snacks, mug: actorMug, steam, crumbs, label, effect, stars, isBoss: boss, lastName: name };
+  return { root, body, head, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, snacks, candy, wrapper, mug: actorMug, steam, crumbs, label, effect, stars, isBoss: boss, lastName: name };
+}
+
+// Aim the wrist at the prop's grip and its actual rim/bite edge at the lips.
+// Everything is solved in the body frame, so turning, sitting and head tilt work
+// identically without hand-tuned world-space offsets.
+function bringToMouth(r: Rig, item: THREE.Object3D, contact: THREE.Vector3, grip: THREE.Vector3, amount: number, size: number, tilt = 0) {
+  r.root.updateMatrixWorld(true);
+  const bodyRotation = r.body.getWorldQuaternion(new THREE.Quaternion());
+  const startPosition = r.body.worldToLocal(item.getWorldPosition(new THREE.Vector3()));
+  const startRotation = bodyRotation.clone().invert().multiply(item.getWorldQuaternion(new THREE.Quaternion()));
+  const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt, 0, 0));
+  const mouth = r.body.worldToLocal(r.mouth.getWorldPosition(new THREE.Vector3()));
+  const endPosition = mouth.sub(contact.clone().multiplyScalar(size).applyQuaternion(rotation));
+  const itemPosition = startPosition.lerp(endPosition, amount);
+  const itemRotation = startRotation.slerp(rotation, amount);
+  const wrist = grip.clone().multiplyScalar(size).applyQuaternion(itemRotation).add(itemPosition);
+  const direction = wrist.sub(r.rightArm.position);
+  const handVector = r.hand.position.clone();
+  const reach = direction.length() / handVector.length();
+  r.rightArm.scale.setScalar(reach);
+  r.rightArm.quaternion.setFromUnitVectors(handVector.normalize(), direction.normalize());
+  r.root.updateMatrixWorld(true);
+  item.position.copy(item.parent!.worldToLocal(r.body.localToWorld(itemPosition)));
+  item.quaternion.copy(item.parent!.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(bodyRotation).multiply(itemRotation));
+  item.scale.setScalar(size / reach);
 }
 export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   const reduced = state.settings.reducedMotion; const player = a.id === 'player'; const walk = a.moving || a.pose === 'walk';
@@ -146,9 +200,10 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   r.body.position.x = r.body.position.z = 0; r.body.scale.set(1, 1, 1);
   r.body.rotation.set(0, 0, 0); r.head.rotation.set(0, reduced ? 0 : Math.sin(time * .7) * .025, 0); r.leftArm.rotation.set(0, 0, .07); r.rightArm.rotation.set(0, 0, -.07);
   r.leftArm.scale.set(1, 1, 1); r.rightArm.scale.set(1, 1, 1); r.hand.rotation.set(0, 0, 0);
-  r.mug.position.set(0, -.33, .10); r.mug.rotation.set(0, 0, 0); r.steam.visible = r.crumbs.visible = false;
-  Object.values(r.snacks).forEach(item => { item.visible = false; item.scale.setScalar(1); item.rotation.set(0, 0, 0); });
-  Object.values(r.weapons).forEach(item => { item.visible = false; });
+  r.mug.position.set(0, -.33, .10); r.mug.rotation.set(0, 0, 0); r.mug.scale.setScalar(1.2); r.steam.visible = r.crumbs.visible = false;
+  Object.values(r.snacks).forEach(item => { item.visible = false; item.position.set(0, 0, 0); item.scale.setScalar(1); item.rotation.set(0, 0, 0); });
+  r.candy.visible = r.wrapper.visible = false; r.candy.position.set(0, 0, 0); r.candy.rotation.set(0, 0, 0); r.candy.scale.setScalar(1); r.wrapper.scale.setScalar(1);
+  Object.entries(r.weapons).forEach(([kind, item]) => { item.visible = false; item.rotation.set(0, 0, kind === 'punch' ? 0 : Math.PI); });
   r.legs.forEach((leg, i) => { leg.rotation.x = seated ? -1.42 : walk ? wave * .42 * (i ? -1 : 1) : 0; r.calves[i].rotation.x = seated ? 1.44 : 0; });
   if (walk) { r.leftArm.rotation.x = -wave * .32; r.rightArm.rotation.x = wave * .32; }
   if (a.pose === 'type') { r.leftArm.rotation.x = -1.0 + Math.sin(time * 13) * .08; r.rightArm.rotation.x = -1.0 + Math.cos(time * 13) * .08; r.head.rotation.x = .13; }
@@ -183,13 +238,12 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   }
   if (a.pose === 'drink') {
     const amount = activity ? lift : .9;
-    r.rightArm.rotation.set(-.85 - amount * 1.3, 0, -.07 - amount * .35);
+    r.rightArm.rotation.set(-.85, 0, -.07);
     r.head.rotation.x = -.1 * amount; r.leftArm.rotation.x = -.3;
     if (!reduced && amount > .9) r.head.rotation.x += Math.sin(progress * Math.PI * 8) * .025;
   }
   if (a.pose === 'eat' && activity?.snack) {
-    const bite = !reduced && progress > .33 && progress < .73 ? Math.sin(progress * Math.PI * 12) * .06 : 0;
-    r.rightArm.rotation.set(-.4 - lift * 1.8 + bite, 0, -.07 - lift * .38);
+    r.rightArm.rotation.set(-.4, 0, -.07);
     r.leftArm.rotation.x = -.25; r.head.rotation.x = lift * .04;
     const snack = r.snacks[activity.snack]; snack.visible = progress < .96;
     snack.scale.setScalar(progress > .54 ? .68 : 1);
@@ -197,9 +251,33 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     r.crumbs.children.forEach((crumb, i) => { const fall = (progress * 3 + i * .22) % 1; crumb.position.set((i - 1.5) * .055, 1.34 - fall * .28, .35 + fall * .08); });
     r.mug.visible = false;
   }
+  if (a.pose === 'candy' && activity) {
+    const unwrap = 1 - ease(.10, .24);
+    r.candy.visible = true; r.wrapper.visible = progress < .20; r.wrapper.scale.setScalar(1 + ease(.10, .20) * .18);
+    r.rightArm.rotation.set(-.75, 0, -.12);
+    r.leftArm.rotation.set(-.2 - unwrap * .75, 0, .05 + unwrap * .45);
+    r.head.rotation.x = -.045 * ease(.24, .4);
+    r.body.rotation.x = reduced ? 0 : -.025 * Math.sin(progress * Math.PI);
+    r.mug.visible = false;
+  }
   r.mug.quaternion.copy(r.rightArm.quaternion).invert();
-  if (a.pose === 'drink') r.mug.rotation.x -= lift * .24;
+  if (a.pose === 'drink') bringToMouth(r, r.mug, new THREE.Vector3(0, .143, -.061), new THREE.Vector3(.09, .075, 0), activity ? lift : 1, 1.2, .28);
+  if (a.pose === 'eat' && activity?.snack) {
+    const snack = r.snacks[activity.snack];
+    bringToMouth(r, snack, new THREE.Vector3(0, activity.snack === 'cracker' ? .115 : .135, 0), new THREE.Vector3(0, -.045, 0), lift, progress > .54 ? .68 : 1);
+  }
+  if (a.pose === 'candy' && activity) bringToMouth(r, r.candy, new THREE.Vector3(0, .16, -.04), new THREE.Vector3(0, -.04, 0), ease(.16, .35) * (1 - ease(.8, 1)), 1, -.12);
   r.steam.children.forEach((puff, i) => { const rise = (progress * 2 + i / 3) % 1; puff.position.y = .20 + rise * .22; puff.scale.setScalar(.65 + rise * .5); });
+  const presentingTool = player && state.entered && state.floor === 'office' && state.target === 'boss' && state.ready && !state.transition && !state.activity && !seated && !walk && a.pose === 'idle' && state.weapon !== 'punch';
+  if (presentingTool) {
+    const tool = r.weapons[state.weapon]; tool.visible = true; r.mug.visible = false;
+    r.rightArm.rotation.set(-.65, 0, .45);
+    r.root.updateMatrixWorld(true);
+    // The office camera has this fixed isometric direction. Keep the broad
+    // paper face visible while waiting on either side of the boss.
+    const presentation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(16, 20, 24), new THREE.Vector3(), new THREE.Vector3(0, 1, 0)));
+    tool.quaternion.copy(r.hand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(presentation));
+  }
   const hitAge = state.lastHit ? state.elapsed - state.lastHit.at : 10;
   const swingDuration = state.lastHit ? WEAPONS[state.lastHit.weapon].interval : .55;
   if (player && a.pose === 'hit' && hitAge >= 0 && hitAge < swingDuration && state.lastHit) {
@@ -215,14 +293,15 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
       r.body.position.z = THREE.MathUtils.clamp(gap - 1.05, .05, .55) * strike * finish;
       if (!seated) { r.legs[0].rotation.x = -.35 * strike * finish; r.calves[0].rotation.x = .25 * strike * finish; }
     } else if (weapon === 'hammer') {
-      r.rightArm.rotation.set(THREE.MathUtils.lerp(-1.1 - 1.8 * windup, -1.85, strike) * finish, 0, -.16);
+      r.rightArm.rotation.set(THREE.MathUtils.lerp(-1.1 - 1.55 * windup, -1.75, strike) * finish, THREE.MathUtils.lerp(-.65 * windup, .25, strike) * finish, THREE.MathUtils.lerp(-.9 * windup, -.06, strike) * finish);
       r.leftArm.rotation.x = -.8 - .65 * windup * finish;
       r.body.rotation.x = (reduced ? .04 : .13) * strike * finish;
+      r.body.rotation.y = (.18 * windup - .3 * strike) * finish;
       // Keep functional reach when reduced motion removes the extra body sway.
-      r.body.position.z = THREE.MathUtils.clamp(gap - 1.3, 0, .2) * strike * finish;
+      r.body.position.z = THREE.MathUtils.clamp(gap - 1.2, 0, .3) * strike * finish;
     } else {
       const sweep = reduced ? -.3 : Math.sin(strike * Math.PI * 2.6) * .7;
-      r.rightArm.rotation.set((-1.0 - .35 * windup) * finish, sweep * finish, -.25);
+      r.rightArm.rotation.set((-1.0 - .35 * windup - (reduced ? .35 * strike : 0)) * finish, sweep * finish, -.25);
       r.hand.rotation.z = (reduced ? .15 : Math.sin(p * Math.PI * 4) * .35) * finish;
       r.body.rotation.y = sweep * .16 * finish;
       r.body.position.z = (THREE.MathUtils.clamp(gap - 1.25, 0, .35) + .1) * strike * finish;

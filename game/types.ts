@@ -1,16 +1,18 @@
 export type Point = { x: number; z: number };
+export type Floor = 'office' | 'rooftop';
 export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copier' | 'exit';
 export type Weapon = 'punch' | 'hammer' | 'fan';
 export type Snack = 'cookie' | 'choco' | 'cracker';
 export type DeskMode = 'work' | 'shopping' | 'game' | 'sleep';
-export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'hit' | 'watch' | 'scold';
+export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'hit' | 'watch' | 'scold' | 'candy';
 export type Actor = Point & { id: string; name: string; angle: number; pose: Pose; moving: boolean };
 export type Settings = { sound: boolean; volume: number; reducedMotion: boolean; quality: 'auto' | 'low' | 'high' };
 export type Inventory = Record<Snack, number> & { coffee: number };
-export type Activity = { kind: 'brew' | 'take' | 'eat' | 'drink' | 'spin'; remaining: number; duration: number; snack?: Snack };
+export type Activity = { kind: 'brew' | 'take' | 'eat' | 'drink' | 'spin' | 'candy'; remaining: number; duration: number; snack?: Snack };
 export type GameEvent = { id: number; kind: 'notice' | 'step' | 'type' | 'coffee' | 'snack' | 'sip' | 'punch' | 'hammer' | 'fan' | 'caught'; text: string; at: number };
 export type GameState = {
   entered: boolean; paused: boolean; elapsed: number; name: string;
+  floor: Floor; transition: { from: Floor; to: Floor; remaining: number; duration: number } | null;
   player: Actor; boss: Actor; coworkers: Actor[];
   target: TargetId | null; ready: boolean; destination: Point | null;
   seat: 'desk' | 'lounge' | null; deskMode: DeskMode | null;
@@ -24,6 +26,7 @@ export type Command =
   | { type: 'enter'; name?: string } | { type: 'exit' } | { type: 'pause'; value: boolean }
   | { type: 'select'; target: TargetId } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
   | { type: 'interact' } | { type: 'stand' } | { type: 'cancel' }
+  | { type: 'travel'; floor: Floor } | { type: 'candy' }
   | { type: 'desk'; mode: DeskMode } | { type: 'spin' }
   | { type: 'weapon'; weapon: Weapon } | { type: 'attack' }
   | { type: 'take'; snack: Snack } | { type: 'eat'; snack: Snack } | { type: 'drink' }

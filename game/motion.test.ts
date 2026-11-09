@@ -84,6 +84,63 @@ test('eating shows the selected snack near the mouth and leaves no snack or crum
   assert.ok(crumbs && !crumbs.visible);
 });
 
+test('the cup rim and every snack biting edge meet the mouth, not an eye or ear', () => {
+  const { state, rig, render } = setup();
+  for (const reduced of [false, true]) for (const seat of [null, 'desk', 'lounge'] as const) for (const angle of [0, 1.2, Math.PI]) {
+    state.settings.reducedMotion = reduced; state.seat = seat; state.player.angle = angle;
+    activity(state, 'drink', .5); render();
+    const mouth = rig.head.localToWorld(new THREE.Vector3(0, -.12, .304));
+    const rim = rig.mug.localToWorld(new THREE.Vector3(0, .143, -.061));
+    assert.ok(rim.distanceTo(mouth) < .035, `cup rim must touch lips; distance ${rim.distanceTo(mouth)}`);
+    const handle = rig.mug.localToWorld(new THREE.Vector3(.09, .075, 0));
+    assert.ok(handle.distanceTo(position(rig.hand)) < .015, 'cup handle stays in the hand while its rim touches the lips');
+    for (const snack of ['cookie', 'choco', 'cracker'] as Snack[]) for (const progress of [.4, .6]) {
+      activity(state, 'eat', progress, snack); render();
+      const lip = rig.head.localToWorld(new THREE.Vector3(0, -.12, .304));
+      const edge = rig.snacks[snack].localToWorld(new THREE.Vector3(0, snack === 'cracker' ? .115 : .135, 0));
+      assert.ok(edge.distanceTo(lip) < .035, `${snack} biting edge must touch lips; distance ${edge.distanceTo(lip)}`);
+      const grip = rig.snacks[snack].localToWorld(new THREE.Vector3(0, -.045, 0));
+      assert.ok(grip.distanceTo(position(rig.hand)) < .015, 'the snack remains gripped before and after a bite');
+    }
+  }
+});
+
+test('the toy hammer crosses sideways into its strike instead of chopping in one vertical plane', () => {
+  const { state, rig, render } = setup();
+  state.player.x = state.player.z = 0; state.player.angle = 0; state.player.pose = 'hit'; state.boss.x = 0; state.boss.z = 1.4;
+  state.lastHit = { id: 1, at: 12, weapon: 'hammer' };
+  state.elapsed = 12 + WEAPONS.hammer.interval * .23; render();
+  const windup = new THREE.Box3().setFromObject(rig.weapons.hammer).getCenter(new THREE.Vector3());
+  state.elapsed = 12 + WEAPONS.hammer.interval * .43; render();
+  const impact = new THREE.Box3().setFromObject(rig.weapons.hammer).getCenter(new THREE.Vector3());
+  assert.ok(Math.abs(impact.x - windup.x) > .22, 'hammer needs a readable diagonal side sweep');
+});
+
+test('a rooftop candy unwraps, meets the lips from every facing, lowers and clears on cancellation', () => {
+  const { state, rig, render } = setup();
+  activity(state, 'candy', .05); render();
+  const candy = rig.root.getObjectByName('held-candy');
+  const wrapper = rig.root.getObjectByName('candy-wrapper');
+  assert.ok(candy?.visible && wrapper?.visible, 'the first beat shows a wrapped lollipop');
+  const low = position(candy);
+  for (const reduced of [false, true]) for (const angle of [0, .7, Math.PI, 4.2]) {
+    state.settings.reducedMotion = reduced; state.player.angle = angle;
+    activity(state, 'candy', .55); render();
+    assert.equal(wrapper.visible, false, 'the wrapper is gone before sucking');
+    const sweet = candy.localToWorld(new THREE.Vector3(0, .16, -.04));
+    const mouth = rig.head.localToWorld(new THREE.Vector3(0, -.12, .304));
+    assert.ok(sweet.distanceTo(mouth) < .035, 'the candy touches the mouth instead of an eye or ear');
+    const grip = candy.localToWorld(new THREE.Vector3(0, -.04, 0));
+    assert.ok(grip.distanceTo(position(rig.hand)) < .015, 'the stick stays held during the sucking pose');
+  }
+  state.player.angle = 0; activity(state, 'candy', .55); render(); const held = position(candy);
+  assert.ok(held.distanceTo(low) > .15, 'the candy visibly lifts from the hand');
+  activity(state, 'candy', .99); render(); assert.ok(position(candy).distanceTo(held) > .15, 'the candy lowers at the end');
+  state.activity = null; state.player.pose = 'idle'; render();
+  assert.equal(candy.visible, false); assert.equal(wrapper.visible, false);
+  assert.equal(rig.rightArm.scale.y, 1, 'relaxed candy reach must not leak into walking');
+});
+
 test('all weapons stay visible through their full swing and reset after recovery', () => {
   const { state, rig, render } = setup();
   for (const weapon of ['punch', 'hammer', 'fan'] as Weapon[]) {
@@ -95,6 +152,58 @@ test('all weapons stay visible through their full swing and reset after recovery
     assert.equal(Object.values(rig.weapons).some(item => item.visible), false);
     assert.equal(rig.rightArm.scale.y, 1, 'arm extension cannot leak into idle');
   }
+});
+
+test('chosen props are readable while waiting beside the boss and clear when leaving or starting another action', () => {
+  const { state, rig, render } = setup();
+  state.target = 'boss'; state.ready = true; state.floor = 'office'; state.player.pose = 'idle';
+  const cameraDirection = new THREE.Vector3(16, 20, 24).normalize();
+  for (const weapon of ['hammer', 'fan'] as Weapon[]) for (const angle of [0, 1.2, Math.PI, 4.2]) {
+    state.weapon = weapon; state.player.angle = angle; render();
+    assert.ok(rig.weapons[weapon].visible, 'selected tool remains visible before the next hit');
+    if (weapon === 'fan') {
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(rig.weapons.fan.getWorldQuaternion(new THREE.Quaternion()));
+      assert.ok(Math.abs(normal.dot(cameraDirection)) > .9, 'the broad paper face is readable from both approach sides');
+    }
+  }
+  for (const condition of ['leaving', 'moving', 'seated', 'activity', 'rooftop', 'transition'] as const) {
+    state.target = 'boss'; state.ready = true; state.player.moving = false; state.seat = null; state.activity = null; state.floor = 'office'; state.transition = null;
+    if (condition === 'leaving') state.target = 'coffee';
+    if (condition === 'moving') state.player.moving = true;
+    if (condition === 'seated') state.seat = 'desk';
+    if (condition === 'activity') state.activity = { kind: 'drink', duration: 2, remaining: 1 };
+    if (condition === 'rooftop') state.floor = 'rooftop';
+    if (condition === 'transition') state.transition = { from: 'office', to: 'rooftop', duration: 1, remaining: .5 };
+    render(); assert.equal(Object.values(rig.weapons).some(item => item.visible), false, `${condition} clears the held preview`);
+  }
+});
+
+test('the actual folded paper surface reaches the boss with reduced motion at maximum attack range', () => {
+  const { state, rig, render } = setup();
+  const bossRig = createActor(new THREE.Group(), 1, state.boss.name);
+  state.player.x = state.player.z = 0; state.player.angle = 0; state.player.pose = 'hit';
+  state.boss.x = 0; state.boss.z = 1.5; state.boss.angle = Math.PI; state.boss.pose = 'hit';
+  state.settings.reducedMotion = true; state.lastHit = { id: 1, at: 12, weapon: 'fan' };
+  const sphere = bossRig.head.children.find(object => object instanceof THREE.Mesh && object.geometry.type === 'SphereGeometry') as THREE.Mesh<THREE.SphereGeometry>;
+  const zero = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), closest = new THREE.Vector3(), triangle = new THREE.Triangle();
+  let contact = false;
+  for (let sample = 1; sample < 100 && !contact; sample++) {
+    state.elapsed = 12 + WEAPONS.fan.interval * sample / 100; render();
+    animateActor(bossRig, state.boss, state, state.elapsed); bossRig.root.updateMatrixWorld(true);
+    const inverse = sphere.matrixWorld.clone().invert();
+    rig.weapons.fan.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const transform = inverse.clone().multiply(object.matrixWorld), points = object.geometry.attributes.position, index = object.geometry.index;
+      for (let i = 0; i < (index ? index.count : points.count); i += 3) {
+        a.fromBufferAttribute(points, index ? index.getX(i) : i).applyMatrix4(transform);
+        b.fromBufferAttribute(points, index ? index.getX(i + 1) : i + 1).applyMatrix4(transform);
+        c.fromBufferAttribute(points, index ? index.getX(i + 2) : i + 2).applyMatrix4(transform);
+        triangle.set(a, b, c).closestPointToPoint(zero, closest);
+        contact ||= closest.length() <= sphere.geometry.parameters.radius;
+      }
+    });
+  }
+  assert.ok(contact, 'visible paper geometry must touch the actual head, not merely its bounding box');
 });
 
 test('reduced motion preserves informative cup/snack poses without drifting while simulation is paused', () => {
