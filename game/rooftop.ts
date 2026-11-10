@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { box, cylinder, plant, plaque, sphere } from './models.ts';
+import { box, cylinder, plant, plaque, sphere, spriteLabel } from './models.ts';
 import { ROOF_BIN, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
 
 /** Uses simulation progress, so hidden tabs and paused games freeze the turn. */
@@ -83,8 +83,10 @@ export function createRooftop(parent: THREE.Object3D) {
   cylinder(bench, .12, .12, .16, '#c28e7d', -.94, .70, .04);
   cylinder(bench, .125, .125, .035, '#e8d7b5', -.94, .795, .04);
   box(bench, .58, .07, .36, '#6e8597', .81, .66, .03, .035);
-  const sign = plaque(roof, '잠깐, 숨 돌리는 곳', 2.50, .32, 4.5, 1.36, -5.895, '#e9e0cb', '#6e8271');
-  sign.name = 'rooftop-sign';
+  // Face the camera so steep views cannot flatten the lettering into the wall.
+  const sign = spriteLabel(roof, '잠깐, 숨 돌리는 곳', '#243e35', 1.45);
+  sign.position.set(ROOF_REST.bench.seat.x, 2.18, -5.68); sign.name = 'rooftop-sign';
+  sign.userData.pointerPassthrough = true; sign.raycast = () => {};
   // Planters frame the space; their footprints are shared with roof navigation.
   for (const { x, z } of ROOF_PLANTERS) {
     const planter = new THREE.Group(); planter.name = 'rooftop-planter'; planter.position.set(x,0,z); roof.add(planter);
