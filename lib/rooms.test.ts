@@ -30,6 +30,129 @@ function fixture() {
   return { sql, send, advance, create };
 }
 
+test('avatar choice survives room snapshots while old clients default to short hair', async () => {
+  const f=fixture(), host=await f.create();
+  assert.equal(host.snapshot.players[0].avatar,'short');
+  const joined=await f.send({action:'join',code:host.session.code,name:'이사원',avatar:'ponytail'});
+  assert.equal(joined.status,201);
+  const guest=joined.body as {session:RoomSession;snapshot:RoomSnapshot};
+  assert.equal(guest.snapshot.players.find(p=>p.id===guest.session.playerId)?.avatar,'ponytail');
+  const own=guest.snapshot.players.find(p=>p.id===guest.session.playerId)!;
+  const synced=(await f.send({action:'sync',...guest.session,player:{...own,avatar:'short'}})).body as {snapshot:RoomSnapshot};
+  assert.equal(synced.snapshot.players.find(p=>p.id===guest.session.playerId)?.avatar,'ponytail');
+  const before=f.sql.prepare('SELECT count(*) AS n FROM office_members').get()!.n;
+  assert.equal((await f.send({action:'join',code:host.session.code,name:'위조',avatar:'other'})).status,400);
+  assert.equal(f.sql.prepare('SELECT count(*) AS n FROM office_members').get()!.n,before);
+  assert.equal((await f.send({action:'create',name:'김사원',roomName:'회사',capacity:2,avatar:{style:'ponytail'}})).status,400);
+});
+
+test('additive notification migration preserves existing member data and defaults their avatar',()=>{
+  const sql=new DatabaseSync(':memory:');
+  sql.exec('PRAGMA foreign_keys=ON');
+  sql.exec(readFileSync(new URL('../drizzle/0000_flat_ezekiel_stane.sql',import.meta.url),'utf8'));
+  sql.prepare('INSERT INTO office_rooms (code,name,capacity,host_id,created_at,expires_at) VALUES (?,?,?,?,?,?)').run('ABCDEFGH','기존 회사',2,'existing',1,100_000);
+  sql.prepare("INSERT INTO office_members (id,room_code,token_hash,seat_index,name,x,z,angle,pose,moving,joined_at,last_seen) VALUES (?,?,?,?,?,?,?,?,'idle',0,?,?)").run('existing','ABCDEFGH','existing-token',0,'기존사원',1,2,0,1,1);
+  sql.exec(readFileSync(new URL('../drizzle/0001_breezy_prowler.sql',import.meta.url),'utf8'));
+  const member=sql.prepare('SELECT id,name,x,z,avatar,last_poke FROM office_members').get()!;
+  assert.deepEqual({...member},{id:'existing',name:'기존사원',x:1,z:2,avatar:'short',last_poke:0});
+  assert.equal(sql.prepare('SELECT name FROM office_rooms').get()!.name,'기존 회사');
+  assert.deepEqual(sql.prepare('PRAGMA foreign_key_check').all(),[]);
+  sql.close();
+});
+
+test('pokes reach only their recipient with server-owned sender identity and time', async () => {
+  const f=fixture(), host=await f.create(4);
+  const guest=(await f.send({action:'join',code:host.session.code,name:'이사원'})).body as {session:RoomSession;snapshot:RoomSnapshot};
+  const bystander=(await f.send({action:'join',code:host.session.code,name:'최사원'})).body as {session:RoomSession;snapshot:RoomSnapshot};
+  const poke=await f.send({action:'poke',...host.session,targetId:guest.session.playerId,senderId:bystander.session.playerId,senderName:'위조',createdAt:0});
+  assert.equal(poke.status,200);assert.deepEqual((poke.body as {snapshot:RoomSnapshot}).snapshot.notifications,[]);
+  const received=(await f.send({action:'sync',...guest.session})).body as {snapshot:RoomSnapshot};
+  assert.equal(received.snapshot.notifications.length,1);
+  const notification=received.snapshot.notifications[0];
+  assert.equal(notification.senderId,host.session.playerId);assert.equal(notification.senderName,'김사원');
+  assert.equal(notification.createdAt,1_000_000);assert.equal(notification.readAt,null);
+  assert.deepEqual(((await f.send({action:'sync',...bystander.session})).body as {snapshot:RoomSnapshot}).snapshot.notifications,[]);
+  const second=await f.create(2);f.advance(5000);
+  assert.equal((await f.send({action:'poke',...host.session,targetId:second.session.playerId})).status,404);
+  assert.equal((await f.send({action:'poke',...host.session,targetId:host.session.playerId})).status,400);
+  assert.equal((await f.send({action:'poke',...host.session,targetId:guest.session.playerId,token:second.session.token})).status,401);
+  assert.equal((await f.send({action:'poke',...host.session,targetId:crypto.randomUUID()})).status,404);
+  for(const targetId of [undefined,null,5,''])assert.equal((await f.send({action:'poke',...host.session,targetId})).status,400);
+});
+
+test('simultaneous pokes obey one atomic five-second sender cooldown', async () => {
+  const f=fixture(), host=await f.create(3);
+  const first=(await f.send({action:'join',code:host.session.code,name:'첫째'})).body as {session:RoomSession};
+  const second=(await f.send({action:'join',code:host.session.code,name:'둘째'})).body as {session:RoomSession};
+  const results=await Promise.all([first,second].map(g=>f.send({action:'poke',...host.session,targetId:g.session.playerId})));
+  assert.deepEqual(results.map(r=>r.status).sort(),[200,429]);
+  assert.equal(f.sql.prepare('SELECT count(*) AS n FROM office_notifications').get()!.n,1);
+  f.advance(4999);assert.equal((await f.send({action:'poke',...host.session,targetId:first.session.playerId})).status,429);
+  f.advance(1);assert.equal((await f.send({action:'poke',...host.session,targetId:first.session.playerId})).status,200);
+});
+
+test('notification reads affect only the caller through the last seen id', async () => {
+  const f=fixture(), host=await f.create(3);
+  const first=(await f.send({action:'join',code:host.session.code,name:'첫째'})).body as {session:RoomSession};
+  const second=(await f.send({action:'join',code:host.session.code,name:'둘째'})).body as {session:RoomSession};
+  await f.send({action:'poke',...first.session,targetId:host.session.playerId});
+  const initial=(await f.send({action:'sync',...host.session})).body as {snapshot:RoomSnapshot};
+  const throughId=initial.snapshot.notifications[0].id;
+  await f.send({action:'poke',...second.session,targetId:host.session.playerId});
+  f.advance(300);
+  const read=(await f.send({action:'readNotifications',...host.session,throughId})).body as {snapshot:RoomSnapshot};
+  assert.equal(read.snapshot.notifications.length,2);
+  assert.equal(read.snapshot.notifications[0].readAt,null);
+  assert.equal(read.snapshot.notifications[1].readAt,1_000_300);
+  await f.send({action:'readNotifications',...first.session,throughId:read.snapshot.notifications[0].id,recipientId:host.session.playerId});
+  f.advance(300);
+  assert.equal(((await f.send({action:'sync',...host.session})).body as {snapshot:RoomSnapshot}).snapshot.notifications[0].readAt,null);
+  for(const invalid of [-1,NaN,Infinity,1.5,'2',Number.MAX_SAFE_INTEGER+1])assert.equal((await f.send({action:'readNotifications',...host.session,throughId:invalid})).status,400);
+});
+
+test('a read racing with a new poke never consumes the unseen notification',async()=>{
+  const f=fixture(),host=await f.create(3);
+  const first=(await f.send({action:'join',code:host.session.code,name:'첫째'})).body as {session:RoomSession};
+  const second=(await f.send({action:'join',code:host.session.code,name:'둘째'})).body as {session:RoomSession};
+  assert.equal((await f.send({action:'poke',...first.session,targetId:host.session.playerId})).status,200);
+  const visible=((await f.send({action:'sync',...host.session})).body as {snapshot:RoomSnapshot}).snapshot.notifications;
+  const raced=await Promise.all([
+    f.send({action:'poke',...second.session,targetId:host.session.playerId}),
+    f.send({action:'readNotifications',...host.session,throughId:visible[0].id}),
+  ]);
+  assert.deepEqual(raced.map(r=>r.status),[200,200]);
+  f.advance(300);
+  const after=((await f.send({action:'sync',...host.session})).body as {snapshot:RoomSnapshot}).snapshot.notifications;
+  assert.equal(after[0].senderId,second.session.playerId);assert.equal(after[0].readAt,null);
+  assert.equal(after[1].id,visible[0].id);assert.equal(after[1].readAt,1_000_000);
+});
+
+test('stale or departed poke targets are rejected without spending the sender cooldown',async()=>{
+  const f=fixture(),host=await f.create(3);
+  const first=(await f.send({action:'join',code:host.session.code,name:'첫째'})).body as {session:RoomSession};
+  f.advance(120_001);
+  assert.equal((await f.send({action:'poke',...host.session,targetId:first.session.playerId})).status,404);
+  // The still-valid session can reconnect while its seat has not been reclaimed.
+  await f.send({action:'sync',...first.session});
+  assert.equal((await f.send({action:'poke',...host.session,targetId:first.session.playerId})).status,200);
+  await f.send({action:'leave',...first.session});f.advance(5000);
+  assert.equal((await f.send({action:'poke',...host.session,targetId:first.session.playerId})).status,404);
+  assert.equal(f.sql.prepare('SELECT count(*) AS n FROM office_notifications').get()!.n,0);
+});
+
+test('notification history is bounded per recipient and survives sender departure',async()=>{
+  const f=fixture(),host=await f.create(2);
+  const guest=(await f.send({action:'join',code:host.session.code,name:'동료'})).body as {session:RoomSession};
+  for(let i=0;i<103;i++){
+    f.advance(5000);await f.send({action:'sync',...guest.session});
+    assert.equal((await f.send({action:'poke',...host.session,targetId:guest.session.playerId})).status,200);
+  }
+  assert.equal(f.sql.prepare('SELECT count(*) AS n FROM office_notifications').get()!.n,100);
+  await f.send({action:'leave',...host.session});f.advance(300);
+  const remaining=((await f.send({action:'sync',...guest.session})).body as {snapshot:RoomSnapshot}).snapshot.notifications;
+  assert.equal(remaining.length,100);assert.ok(remaining[0].id>remaining[99].id);assert.equal(remaining[0].senderName,'김사원');
+});
+
 test('creates a private member session and joins with unique server-owned seats', async () => {
   const f = fixture(), first = await f.create(2);
   assert.equal(first.snapshot.players[0].seatIndex, 0);

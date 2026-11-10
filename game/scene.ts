@@ -157,9 +157,9 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const state = callbacks.getState();
   const actors = new Map<string, ReturnType<typeof createActor>>();
   const playerGroup = new THREE.Group(); scene.add(playerGroup);
-  actors.set(state.player.id, createActor(playerGroup, 0, state.player.name));
-  const boss = createActor(room, 1, state.boss.name); boss.root.userData.target = 'boss'; actors.set(state.boss.id, boss);
-  state.coworkers.forEach((a, i) => actors.set(a.id, createActor(room, i + 2, a.name)));
+  actors.set(state.player.id, createActor(playerGroup, 0, state.player.name, state.player.avatar));
+  const boss = createActor(room, 1, state.boss.name, state.boss.avatar); boss.root.userData.target = 'boss'; actors.set(state.boss.id, boss);
+  state.coworkers.forEach((a, i) => actors.set(a.id, createActor(room, i + 2, a.name, a.avatar)));
   // World-space interaction rings stay below the characters and never capture clicks.
   const selection = new THREE.Mesh(new THREE.RingGeometry(.50, .56, 48), new THREE.MeshBasicMaterial({ color: '#dca45e', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })); selection.rotation.x = -Math.PI / 2; selection.position.y = .065; scene.add(selection);
   const destination = new THREE.Mesh(new THREE.RingGeometry(.13, .19, 24), new THREE.MeshBasicMaterial({ color: '#4d9184', transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false })); destination.rotation.x = -Math.PI / 2; destination.position.y = .07; scene.add(destination);

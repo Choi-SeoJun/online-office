@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import type { Actor, GameState, Snack, Weapon } from './types.ts';
+import type { Actor, AvatarStyle, GameState, Snack, Weapon } from './types.ts';
 import { DESKS, ROOF_REST, WEAPONS, WEAPON_IMPACT } from './layout.ts';
 
 const mats = new Map<string, THREE.MeshStandardMaterial>();
@@ -94,8 +94,8 @@ export function desk(parent: THREE.Object3D, x: number, z: number, index: number
   return { group: g, chair: ch, screen };
 }
 
-type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
-export function createActor(parent: THREE.Object3D, role: number, name: string): Rig {
+type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
+export function createActor(parent: THREE.Object3D, role: number, name: string, avatar: AvatarStyle = 'short'): Rig {
   const root = new THREE.Group(); parent.add(root); const body = new THREE.Group(); root.add(body);
   const boss = role === 1; const shirt = ['#4e8a7e', '#2f4355', '#c48d6b', '#7e8da5', '#bbab78'][role] ?? '#9fa8b4'; const skin = ['#f0c5a2', '#e7ba94', '#eec09c', '#e5b692', '#f0cbad'][role] ?? '#edc3a0';
   const legs: THREE.Group[] = [], calves: THREE.Group[] = [];
@@ -107,8 +107,24 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   sphere(head, .34, skin, 0, 0, 0, 1, 1.05, .93); sphere(head, .075, skin, -.33, -.025); sphere(head, .075, skin, .33, -.025);
   const hair = ['#4c3930', '#2b2b2b', '#594033', '#302f32', '#73513b'][role] ?? '#3c302a';
   sphere(head, .345, hair, 0, .10, -.055, 1.025, .84, .96);
-  for (let i = 0; i < 4; i++) sphere(head, .105, hair, -.23 + i * .14, .195 + Math.sin(i) * .02, .20, 1.13, .60, .85);
-  if (role === 3) sphere(head, .18, hair, 0, .04, -.31);
+  const hairStyles = { short: new THREE.Group(), ponytail: new THREE.Group() };
+  for (const [style, group] of Object.entries(hairStyles)) { group.name = `${style}-hair`; group.visible = style === avatar; group.scale.setScalar(group.visible ? 1 : 0); head.add(group); }
+  for (let i = 0; i < 4; i++) sphere(hairStyles.short, .105, hair, -.23 + i * .14, .195 + Math.sin(i) * .02, .20, 1.13, .60, .85);
+  if (role === 3) sphere(hairStyles.short, .18, hair, 0, .04, -.31);
+  // The tied tail is attached to the head, so its outline stays recognizable
+  // while typing, drinking, leaning or turning. Both styles reuse their meshes.
+  for (const side of [-1, 1]) {
+    const swept = sphere(hairStyles.ponytail, .15, hair, side * .18, .18, .20, 1.12, .55, .65); swept.rotation.z = side * .30;
+    sphere(hairStyles.ponytail, .09, hair, side * .295, .015, -.04, .58, 1.65, 1);
+  }
+  const ponytail = new THREE.Group(); ponytail.position.set(0, .12, -.26); hairStyles.ponytail.add(ponytail);
+  sphere(ponytail, .135, hair, 0, .02, -.08, 1, 1, 1.15);
+  const hairTie = cylinder(ponytail, .095, .095, .07, '#c79a68', 0, -.02, -.17);
+  hairTie.name = 'ponytail-tie'; hairTie.rotation.x = Math.PI / 2;
+  sphere(ponytail, .145, hair, 0, -.215, -.22, .9, 1.65, .95);
+  sphere(ponytail, .115, hair, .025, -.43, -.27, .85, 1.55, .85);
+  const tailTip = sphere(ponytail, .08, hair, .05, -.59, -.26, .70, 1.25, .72);
+  tailTip.name = 'ponytail-tip'; tailTip.rotation.z = -.20;
   for (const side of [-1, 1]) { sphere(head, .025, '#343e39', side * .115, -.015, .292, .85, 1.15, .5); sphere(head, .047, '#df9b83', side * .215, -.095, .264, 1, .45, .25); }
   sphere(head, .042, skin, 0, -.06, .31, .7, .6, .8);
   const smile = new THREE.Mesh(new THREE.TorusGeometry(.062, .009, 5, 12, Math.PI * .7), material('#805945')); smile.rotation.z = Math.PI * 1.15; smile.position.set(.028, -.10, .294); head.add(smile);
@@ -180,7 +196,7 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   const effect = new THREE.Group(); effect.position.y = 1.90; root.add(effect); const stars: THREE.Mesh[] = [];
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
-  return { root, body, head, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, isBoss: boss, lastName: name };
+  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, isBoss: boss, lastName: name };
 }
 
 // Aim the wrist at the prop's grip and its actual rim/bite edge at the lips.
@@ -208,8 +224,15 @@ function bringToMouth(r: Rig, item: THREE.Object3D, contact: THREE.Vector3, grip
   item.scale.setScalar(size / reach);
 }
 export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
+  const avatar = a.avatar === 'ponytail' ? 'ponytail' : 'short';
+  if (avatar !== r.lastAvatar) {
+    for (const [style, group] of Object.entries(r.hairStyles)) { group.visible = style === avatar; group.scale.setScalar(group.visible ? 1 : 0); }
+    r.lastAvatar = avatar;
+  }
   const reduced = state.settings.reducedMotion; const player = a.id === 'player'; const walk = a.moving || a.pose === 'walk';
   const roofRest = player && state.floor === 'rooftop' && !walk ? state.roofRest : null;
+  // A long tail rests to one side of the shoulder when the back meets a wall.
+  r.ponytail.rotation.y = roofRest === 'wall' ? 1.5 : 0;
   const atDesk = !player && DESKS.some(d => d.owner === a.id && Math.hypot(a.x - d.x, a.z - d.z - 1.05) < .2);
   const seated = !walk && (player ? state.seat !== null : ['sit', 'type', 'sleep', 'lean'].includes(a.pose) || (atDesk && ['drink', 'eat'].includes(a.pose)));
   const activity = player && state.activity?.kind === a.pose ? state.activity : null;

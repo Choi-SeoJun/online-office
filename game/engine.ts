@@ -151,7 +151,7 @@ function initialState(saved?: PersistedState): GameState {
   return {
     entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원',
     floor: 'office', transition: null,
-    player: actor('player', p?.name ?? '김사원', START), boss: actor('boss', '박부장', TARGETS.boss.point),
+    player: { ...actor('player', p?.name ?? '김사원', START), avatar: p?.avatar ?? 'short' }, boss: actor('boss', '박부장', TARGETS.boss.point),
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
     target: null, ready: false, destination: null, seat: null, deskMode: null, activity: null, roofRest: null, roofWallSide: null, roofLeanPoint: null, candyInMouth: false,
     inventory: { cookie: p?.snacks.cookie ?? 0, choco: p?.snacks.choco ?? 0, cracker: p?.snacks.cracker ?? 0, coffee: 0 },
@@ -257,6 +257,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
       if (command.weapon in WEAPONS) state.weapon = command.weapon;
     } else if (command.type === 'enter') {
       state.name = command.name?.trim().slice(0, 10) || state.name; state.player.name = state.name; state.entered = true; state.paused = false;
+      if (command.avatar === 'short' || command.avatar === 'ponytail') state.player.avatar = command.avatar;
     } else if (command.type === 'pause') { state.paused = command.value; axis = { x: 0, z: 0 }; }
     else if (state.entered && !state.paused) {
       if (state.transition) return;

@@ -1,12 +1,14 @@
 import { createMultiLayout, isMultiWalkable } from '../game/multi-layout.ts';
 import type { RoomError, RoomPlayerUpdate, RoomPose, RoomResponse, RoomSession, RoomSnapshot } from '../game/multi-types.ts';
+import type { AvatarStyle } from '../game/types.ts';
 
 export type RoomDatabase = Pick<D1Database, 'prepare' | 'batch'>;
 export const ROOM_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const ROOM_SEAT_LEASE_MS = 120_000;
 type RoomRow = { code: string; name: string; capacity: number; host_id: string; created_at: number; expires_at: number };
-type MemberRow = { id: string; room_code: string; token_hash: string; seat_index: number; name: string; x: number; z: number; angle: number; pose: RoomPose; moving: number; joined_at: number; last_seen: number; last_sync: number; last_chat: number };
+type MemberRow = { id: string; room_code: string; token_hash: string; seat_index: number; name: string; avatar: AvatarStyle; x: number; z: number; angle: number; pose: RoomPose; moving: number; joined_at: number; last_seen: number; last_sync: number; last_chat: number; last_poke: number };
 type MessageRow = { id: number; player_id: string; name: string; text: string; created_at: number };
+type NotificationRow = { id: number; sender_id: string; sender_name: string; created_at: number; read_at: number | null };
 type Context = { now?: number; rateKey?: string };
 type Result = { status: number; body: RoomResponse | RoomError };
 
@@ -35,6 +37,11 @@ function capacityValue(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 2 || value > 16) fail(400, 'INVALID_REQUEST', '정원은 2~16명 사이로 골라 주세요.');
   return value;
 }
+function avatarValue(value: unknown): AvatarStyle {
+  if (value === undefined) return 'short';
+  if (value !== 'short' && value !== 'ponytail') fail(400, 'INVALID_REQUEST', '캐릭터를 다시 골라 주세요.');
+  return value;
+}
 function roomCode(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-HJ-NP-Z2-9]{8}$/.test(value.trim().toUpperCase())) fail(400, 'INVALID_REQUEST', '8자리 참여 코드를 확인해 주세요.');
   return value.trim().toUpperCase();
@@ -51,17 +58,19 @@ function newCode(): string {
 const transferHost = (db: RoomDatabase, code: string, now: number) => db.prepare(`UPDATE office_rooms SET host_id = COALESCE((SELECT id FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY joined_at, seat_index LIMIT 1), '') WHERE code = ? AND NOT EXISTS (SELECT 1 FROM office_members WHERE room_code = ? AND id = office_rooms.host_id AND last_seen >= ?)`).bind(code, now - ROOM_SEAT_LEASE_MS, code, code, now - ROOM_SEAT_LEASE_MS);
 
 async function snapshot(db: RoomDatabase, code: string, selfId: string, now: number): Promise<RoomSnapshot> {
-  const [rooms, members, messages] = await db.batch([
+  const [rooms, members, messages, notifications] = await db.batch([
     db.prepare('SELECT * FROM office_rooms WHERE code = ?').bind(code),
-    db.prepare('SELECT id, name, seat_index, x, z, angle, pose, moving, last_seen FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY seat_index LIMIT 16').bind(code, now - ROOM_SEAT_LEASE_MS),
+    db.prepare('SELECT id, name, avatar, seat_index, x, z, angle, pose, moving, last_seen FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY seat_index LIMIT 16').bind(code, now - ROOM_SEAT_LEASE_MS),
     db.prepare('SELECT id, player_id, name, text, created_at FROM office_messages WHERE room_code = ? ORDER BY id DESC LIMIT 100').bind(code),
+    db.prepare('SELECT id, sender_id, sender_name, created_at, read_at FROM office_notifications WHERE room_code = ? AND recipient_id = ? ORDER BY id DESC LIMIT 100').bind(code, selfId),
   ]);
   const room = rooms.results[0] as RoomRow | undefined;
   if (!room || room.expires_at <= now) fail(410, 'ROOM_EXPIRED', '이 회사의 하루가 끝났어요. 새 방을 만들어 주세요.');
   return {
     room: { code: room.code, name: room.name, capacity: room.capacity, hostId: room.host_id, expiresAt: room.expires_at }, selfId, serverTime: now,
-    players: (members.results as unknown as MemberRow[]).map(m => ({ id: m.id, name: m.name, seatIndex: m.seat_index, x: m.x, z: m.z, angle: m.angle, pose: m.pose, moving: !!m.moving, lastSeen: m.last_seen })),
+    players: (members.results as unknown as MemberRow[]).map(m => ({ id: m.id, name: m.name, avatar: m.avatar, seatIndex: m.seat_index, x: m.x, z: m.z, angle: m.angle, pose: m.pose, moving: !!m.moving, lastSeen: m.last_seen })),
     messages: (messages.results as unknown as MessageRow[]).reverse().map(m => ({ id: m.id, playerId: m.player_id, name: m.name, text: m.text, createdAt: m.created_at })),
+    notifications: (notifications.results as unknown as NotificationRow[]).map(n => ({ id: n.id, senderId: n.sender_id, senderName: n.sender_name, createdAt: n.created_at, readAt: n.read_at })),
   };
 }
 async function admissionLimit(db: RoomDatabase, action: 'create' | 'join', key: string, now: number) {
@@ -94,9 +103,9 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
   const now = context.now ?? Date.now();
   try {
     const input = object(raw), action = input.action;
-    if (!['create', 'join', 'sync', 'chat', 'capacity', 'leave'].includes(String(action))) fail(400, 'INVALID_REQUEST', '요청한 행동을 확인해 주세요.');
+    if (!['create', 'join', 'sync', 'chat', 'poke', 'readNotifications', 'capacity', 'leave'].includes(String(action))) fail(400, 'INVALID_REQUEST', '요청한 행동을 확인해 주세요.');
     if (action === 'create') {
-      const name = label(input.name, 10, '이름'), roomName = label(input.roomName, 24, '회사 이름'), capacity = capacityValue(input.capacity);
+      const name = label(input.name, 10, '이름'), roomName = label(input.roomName, 24, '회사 이름'), capacity = capacityValue(input.capacity), avatar = avatarValue(input.avatar);
       await admissionLimit(db, 'create', context.rateKey ?? 'unknown', now);
       await db.batch([
         db.prepare('DELETE FROM office_rooms WHERE code IN (SELECT code FROM office_rooms WHERE expires_at <= ? LIMIT 20)').bind(now),
@@ -109,7 +118,7 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
         try {
           await db.batch([
             db.prepare('INSERT INTO office_rooms (code, name, capacity, host_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)').bind(code, roomName, capacity, id, now, now + ROOM_LIFETIME_MS),
-            db.prepare("INSERT INTO office_members (id, room_code, token_hash, seat_index, name, x, z, angle, pose, moving, joined_at, last_seen, last_sync, last_chat) VALUES (?, ?, ?, 0, ?, ?, ?, 0, 'idle', 0, ?, ?, 0, 0)").bind(id, code, tokenHash, name, spawn.x, spawn.z, now, now),
+            db.prepare("INSERT INTO office_members (id, room_code, token_hash, seat_index, name, avatar, x, z, angle, pose, moving, joined_at, last_seen, last_sync, last_chat) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 0, 'idle', 0, ?, ?, 0, 0)").bind(id, code, tokenHash, name, avatar, spawn.x, spawn.z, now, now),
           ]);
         } catch (error) {
           if (String(error).includes('office_rooms.code') && retry < 3) continue;
@@ -120,7 +129,7 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
       fail(503, 'TRY_AGAIN', '방을 준비하지 못했어요. 한 번 더 시도해 주세요.');
     }
     if (action === 'join') {
-      const code = roomCode(input.code), name = label(input.name, 10, '이름');
+      const code = roomCode(input.code), name = label(input.name, 10, '이름'), avatar = avatarValue(input.avatar);
       await admissionLimit(db, 'join', context.rateKey ?? 'unknown', now);
       const room = await db.prepare('SELECT * FROM office_rooms WHERE code = ?').bind(code).first<RoomRow>();
       if (!room) fail(404, 'ROOM_NOT_FOUND', '이 참여 코드의 회사를 찾지 못했어요.');
@@ -129,10 +138,10 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
       const results = await db.batch([
         db.prepare('DELETE FROM office_members WHERE room_code = ? AND last_seen < ?').bind(code, now - ROOM_SEAT_LEASE_MS),
         db.prepare(`WITH RECURSIVE seats(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seats WHERE n < 15)
-          INSERT INTO office_members (id, room_code, token_hash, seat_index, name, x, z, angle, pose, moving, joined_at, last_seen, last_sync, last_chat)
-          SELECT ?, r.code, ?, seats.n, ?, ?, ?, 0, 'idle', 0, ?, ?, 0, 0 FROM office_rooms r CROSS JOIN seats
+          INSERT INTO office_members (id, room_code, token_hash, seat_index, name, avatar, x, z, angle, pose, moving, joined_at, last_seen, last_sync, last_chat)
+          SELECT ?, r.code, ?, seats.n, ?, ?, ?, ?, 0, 'idle', 0, ?, ?, 0, 0 FROM office_rooms r CROSS JOIN seats
           WHERE r.code = ? AND r.expires_at > ? AND seats.n < r.capacity AND NOT EXISTS (SELECT 1 FROM office_members m WHERE m.room_code = r.code AND m.seat_index = seats.n)
-          ORDER BY seats.n LIMIT 1 RETURNING id`).bind(id, tokenHash, name, spawn.x, spawn.z, now, now, code, now),
+          ORDER BY seats.n LIMIT 1 RETURNING id`).bind(id, tokenHash, name, avatar, spawn.x, spawn.z, now, now, code, now),
         transferHost(db, code, now),
       ]);
       if (!results[1].results.length) fail(409, 'ROOM_FULL', '자리가 모두 찼어요. 방장에게 정원을 늘려 달라고 해 주세요.');
@@ -160,6 +169,34 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
         transferHost(db, code, now),
       ]);
       if (!result[0].results.length) fail(429, 'RATE_LIMITED', '한 박자 쉬고 이야기해 주세요.');
+    } else if (action === 'poke') {
+      if (typeof input.targetId !== 'string' || !/^[a-f0-9-]{36}$/.test(input.targetId)) fail(400, 'INVALID_REQUEST', '콕 찌를 동료를 골라 주세요.');
+      const targetId = input.targetId;
+      if (targetId === member.id) fail(400, 'INVALID_REQUEST', '다른 동료를 골라 주세요.');
+      const targetPresent = () => db.prepare('SELECT id FROM office_members WHERE id = ? AND room_code = ? AND last_seen >= ?').bind(targetId, code, now - ROOM_SEAT_LEASE_MS).first();
+      if (!await targetPresent()) fail(404, 'TARGET_UNAVAILABLE', '지금 같은 회사에 있는 동료를 골라 주세요.');
+      const requestId = crypto.randomUUID();
+      // D1 batches are atomic: a successful insert alone consumes the sender cooldown.
+      const result = await db.batch([
+        db.prepare(`INSERT INTO office_notifications (request_id, room_code, recipient_id, sender_id, sender_name, created_at)
+          SELECT ?, sender.room_code, target.id, sender.id, sender.name, ? FROM office_members sender JOIN office_members target ON target.room_code = sender.room_code
+          WHERE sender.id = ? AND sender.room_code = ? AND sender.token_hash = ? AND sender.last_poke <= ? AND target.id = ? AND target.last_seen >= ? RETURNING id`).bind(requestId, now, member.id, code, tokenHash, now - 5000, targetId, now - ROOM_SEAT_LEASE_MS),
+        db.prepare('UPDATE office_members SET last_poke = ?, last_seen = ? WHERE id = ? AND room_code = ? AND token_hash = ? AND EXISTS (SELECT 1 FROM office_notifications WHERE request_id = ?)').bind(now, now, member.id, code, tokenHash, requestId),
+        db.prepare('DELETE FROM office_notifications WHERE room_code = ? AND recipient_id = ? AND id NOT IN (SELECT id FROM office_notifications WHERE room_code = ? AND recipient_id = ? ORDER BY id DESC LIMIT 100)').bind(code, targetId, code, targetId),
+        transferHost(db, code, now),
+      ]);
+      if (!result[0].results.length) {
+        if (!await targetPresent()) fail(404, 'TARGET_UNAVAILABLE', '지금 같은 회사에 있는 동료를 골라 주세요.');
+        fail(429, 'RATE_LIMITED', '5초만 쉬었다가 다시 콕 찔러 주세요.');
+      }
+    } else if (action === 'readNotifications') {
+      const throughId = input.throughId;
+      if (typeof throughId !== 'number' || !Number.isSafeInteger(throughId) || throughId < 0) fail(400, 'INVALID_REQUEST', '확인할 알림을 다시 골라 주세요.');
+      await db.batch([
+        db.prepare('UPDATE office_notifications SET read_at = ? WHERE room_code = ? AND recipient_id = ? AND id <= ? AND read_at IS NULL').bind(now, code, member.id, throughId),
+        db.prepare('UPDATE office_members SET last_seen = ? WHERE id = ? AND room_code = ? AND token_hash = ?').bind(now, member.id, code, tokenHash),
+        transferHost(db, code, now),
+      ]);
     } else if (action === 'capacity') {
       const capacity = capacityValue(input.capacity);
       if (room.host_id !== member.id) fail(403, 'NOT_HOST', '정원은 방장만 바꿀 수 있어요.');

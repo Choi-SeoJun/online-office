@@ -19,6 +19,7 @@ export type MultiSceneCallbacks = {
   onFrame(dt: number): void;
   onGround(point: Point): void;
   onSeat(index: number): void;
+  onActor?(id: string): void;
   onReady(): void;
   onError(message: string): void;
 };
@@ -155,6 +156,17 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     const start = down; down = null;
     if (!start || start.id !== event.pointerId || start.dragging || cameraDragAngle(event.clientX - start.x, event.clientY - start.y) !== null || performance.now() - start.time > 650) return;
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
+    if (callbacks.onActor) {
+      const ownId = callbacks.getState().player.id;
+      for (const hit of raycaster.intersectObject(actorGroup, true)) {
+        let object: THREE.Object3D | null = hit.object;
+        while (object) {
+          const id = object.userData.actorId;
+          if (typeof id === 'string' && id !== ownId) { callbacks.onActor(id); return; }
+          object = object.parent;
+        }
+      }
+    }
     for (const hit of raycaster.intersectObject(architecture.group, true)) {
       let object: THREE.Object3D | null = hit.object, passthrough = false, seat: number | null = null;
       while (object) { if (object.userData.pointerPassthrough) passthrough = true; if (typeof object.userData.target === 'string' && object.userData.target.startsWith('seat:')) seat = Number(object.userData.target.slice(5)); object = object.parent; }
@@ -183,11 +195,11 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     for (const [id, entry] of rigs) if (!ids.has(id)) { entry.rig.root.removeFromParent(); retired.push(entry.rig.root); rigs.delete(id); bubbles.get(id)?.remove(); bubbles.delete(id); }
     members.forEach(actor => {
       let entry = rigs.get(actor.id);
-      if (!entry) { const role = [0, 2, 3, 4][Array.from(actor.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 4]; entry = { rig: createActor(actorGroup, role, actor.name), shown: { ...actor } }; rigs.set(actor.id, entry); }
+      if (!entry) { const role = [0, 2, 3, 4][Array.from(actor.id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 4]; entry = { rig: createActor(actorGroup, role, actor.name, actor.avatar), shown: { ...actor } }; entry.rig.root.userData.actorId = actor.id; rigs.set(actor.id, entry); }
       const shown = entry.shown, local = actor.id === state.player.id, amount = local || state.settings.reducedMotion ? 1 : 1 - Math.exp(-dt * 10);
       shown.x += (actor.x - shown.x) * amount; shown.z += (actor.z - shown.z) * amount;
       shown.angle += normalizeCameraAngle(actor.angle - shown.angle) * amount;
-      shown.name = actor.name; shown.pose = actor.pose; shown.moving = actor.moving || Math.hypot(actor.x - shown.x, actor.z - shown.z) > .08;
+      shown.name = actor.name; shown.avatar = actor.avatar; shown.pose = actor.pose; shown.moving = actor.moving || Math.hypot(actor.x - shown.x, actor.z - shown.z) > .08;
       animateActor(entry.rig, shown, context, elapsed);
     });
     const currentSpeech = new Map((state.speeches ?? []).filter(speech => speech.until > Date.now()).map(speech => [speech.id, speech]));

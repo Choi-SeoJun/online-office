@@ -1,4 +1,4 @@
-import type { GameState, PersistedState, Settings, Snack, Weapon } from './types.ts';
+import type { AvatarStyle, GameState, PersistedState, Settings, Snack, Weapon } from './types.ts';
 
 export const STORAGE_KEY = 'office-playground-v1';
 const defaults: Settings = { sound: false, volume: .4, reducedMotion: false, quality: 'auto' };
@@ -18,6 +18,7 @@ function normalize(value: unknown): PersistedState | undefined {
   return {
     version: 1,
     name: typeof data.name === 'string' ? data.name.trim().slice(0, 10) || '김사원' : '김사원',
+    avatar: data.avatar === 'ponytail' ? 'ponytail' : 'short',
     weapon: (['punch', 'hammer', 'fan'].includes(data.weapon as string) ? data.weapon : 'punch') as Weapon,
     settings: {
       sound: typeof s.sound === 'boolean' ? s.sound : defaults.sound,
@@ -37,8 +38,18 @@ export function readSavedState(storage?: Pick<Storage, 'getItem'>): PersistedSta
 }
 
 export function toPersistedState(state: GameState): PersistedState {
-  return normalize({ version: 1, name: state.name, weapon: state.weapon, settings: state.settings,
+  return normalize({ version: 1, name: state.name, avatar: state.player.avatar, weapon: state.weapon, settings: state.settings,
     snacks: { cookie: state.inventory.cookie, choco: state.inventory.choco, cracker: state.inventory.cracker } })!;
+}
+
+export function writeAvatarChoice(avatar: AvatarStyle, storage?: Pick<Storage, 'getItem' | 'setItem'>): boolean {
+  try {
+    const destination = storage ?? globalThis.localStorage;
+    if (!destination) return false;
+    const saved = readSavedState(destination);
+    destination.setItem(STORAGE_KEY, JSON.stringify(normalize({ version: 1, ...saved, avatar })));
+    return true;
+  } catch { return false; }
 }
 
 export function writeSavedState(state: GameState, storage?: Pick<Storage, 'setItem'>): boolean {
