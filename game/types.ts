@@ -46,4 +46,4 @@ export interface SceneCallbacks {
   getState(): GameState; onFrame(dt: number): void; onGround(point: Point): void;
   onTarget(target: TargetId, point?: Point): void; onReady(): void; onError(message: string): void;
 }
-export interface OfficeScene { dispose(): void; zoom(delta: number): void; rotate(delta: number): void; resetView(): void; screenToWorld(axis: Point): Point; }
+export interface OfficeScene { dispose(): void; zoom(delta: number): void; rotate(delta: number): void; tilt(delta: number): void; resetView(): void; screenToWorld(axis: Point): Point; }

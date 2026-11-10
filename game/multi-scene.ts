@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, mug, plant, plaque, spriteLabel } from './models.ts';
 import { batchArchitecture } from './scene.ts';
-import { CAMERA_TURN_STEP, cameraDragAngle, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
+import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotation, clampCameraPitch, setCameraOffset, smoothCameraPitch, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
 import type { Actor, GameState, OfficeScene, Point, RoofWallSide, Settings } from './types.ts';
 import type { MultiLayout } from './multi-layout.ts';
@@ -109,7 +109,7 @@ function animationState(settings: Settings, player: Actor): GameState {
 export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbacks): OfficeScene {
   let renderer: THREE.WebGLRenderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); }
-  catch { callbacks.onError('3D 회사를 열 수 없어요. 브라우저의 그래픽 가속을 확인해 주세요.'); return { dispose() {}, zoom() {}, rotate() {}, resetView() {}, screenToWorld: point => point }; }
+  catch { callbacks.onError('3D 회사를 열 수 없어요. 브라우저의 그래픽 가속을 확인해 주세요.'); return { dispose() {}, zoom() {}, rotate() {}, tilt() {}, resetView() {}, screenToWorld: point => point }; }
   renderer.setClearColor('#e7e9df'); renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.18;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -124,37 +124,38 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const rigs = new Map<string, { rig: ReturnType<typeof createActor>; shown: Actor }>();
   const retired: THREE.Object3D[] = [], bubbles = new Map<string, HTMLDivElement>();
   let initial = callbacks.getState(), architecture = createArchitecture(initial.layout); world.add(architecture.group);
-  let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, desiredOrbit = 0, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastQuality = '';
+  let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, desiredOrbit = 0, pitch = CAMERA_BASE_PITCH, desiredPitch = CAMERA_BASE_PITCH, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastQuality = '';
   const b = initial.layout.bounds, focus = new THREE.Vector3((b.minX + b.maxX) / 2, .65, (b.minZ + b.maxZ) / 2), desiredFocus = focus.clone();
-  const offset = new THREE.Vector3(16, 20, 24).normalize().multiplyScalar(50), rotatedOffset = offset.clone(), up = new THREE.Vector3(0, 1, 0), projection = new THREE.Vector3();
+  const rotatedOffset = new THREE.Vector3(), projection = new THREE.Vector3();
   const playerRing = new THREE.Mesh(new THREE.RingGeometry(.34, .40, 32), new THREE.MeshBasicMaterial({ color: '#477e6e', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })); playerRing.rotation.x = -Math.PI / 2; world.add(playerRing);
   const seatRing = new THREE.Mesh(new THREE.RingGeometry(.46, .51, 32), new THREE.MeshBasicMaterial({ color: '#d69b49', transparent: true, opacity: .7, side: THREE.DoubleSide, depthWrite: false })); seatRing.rotation.x = -Math.PI / 2; world.add(seatRing);
   const updateCamera = () => {
     const state = callbacks.getState(), b = state.layout.bounds, aspect = width / height, roomW = b.maxX - b.minX, roomD = b.maxZ - b.minZ, angle = Math.atan2(16, 24) + orbit;
     const projectedW = Math.abs(Math.cos(angle)) * roomW + Math.abs(Math.sin(angle)) * roomD;
-    const projectedH = (Math.abs(Math.sin(angle)) * roomW + Math.abs(Math.cos(angle)) * roomD) * .57;
+    const projectedH = (Math.abs(Math.sin(angle)) * roomW + Math.abs(Math.cos(angle)) * roomD) * Math.sin(pitch);
     const span = (aspect < .85 ? 13.8 : Math.max(12, projectedH + 4.5, (projectedW + 3) / aspect)) * zoomLevel;
     camera.left = -span * aspect / 2; camera.right = span * aspect / 2; camera.top = span / 2; camera.bottom = -span / 2; camera.updateProjectionMatrix();
-    rotatedOffset.copy(offset).applyAxisAngle(up, orbit); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus);
+    setCameraOffset(rotatedOffset, orbit, pitch, 50); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus);
     architecture.cutaways(rotatedOffset);
   };
   const resize = () => { if (dead) return; width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
   const observer = new ResizeObserver(resize); observer.observe(host); resize();
   const zoom = (delta: number) => { zoomLevel = THREE.MathUtils.clamp(zoomLevel * Math.pow(.9, delta), .55, 1.5); updateCamera(); };
   const rotate = (delta: number) => { desiredOrbit = normalizeCameraAngle(desiredOrbit + delta * CAMERA_TURN_STEP); };
-  const resetView = () => { desiredOrbit = 0; zoomLevel = 1; updateCamera(); };
+  const tilt = (delta: number) => { if (Number.isFinite(delta)) desiredPitch = clampCameraPitch(desiredPitch + delta * CAMERA_TILT_STEP); };
+  const resetView = () => { desiredOrbit = 0; desiredPitch = CAMERA_BASE_PITCH; zoomLevel = 1; updateCamera(); };
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  let down: { x: number; y: number; id: number; time: number; angle: number; dragging: boolean } | null = null;
-  const pointerDown = (event: PointerEvent) => { if (event.button !== 0) return; down = { x: event.clientX, y: event.clientY, id: event.pointerId, time: performance.now(), angle: desiredOrbit, dragging: false }; renderer.domElement.setPointerCapture?.(event.pointerId); };
+  let down: { x: number; y: number; id: number; time: number; angle: number; pitch: number; dragging: boolean } | null = null;
+  const pointerDown = (event: PointerEvent) => { if (event.button !== 0 || down) return; down = { x: event.clientX, y: event.clientY, id: event.pointerId, time: performance.now(), angle: desiredOrbit, pitch: desiredPitch, dragging: false }; renderer.domElement.setPointerCapture?.(event.pointerId); };
   const pointerMove = (event: PointerEvent) => {
     if (!down || down.id !== event.pointerId) return;
-    const delta = cameraDragAngle(event.clientX - down.x, event.clientY - down.y);
+    const delta = cameraDragRotation(event.clientX - down.x, event.clientY - down.y);
     if (delta !== null) down.dragging = true;
-    if (down.dragging) desiredOrbit = normalizeCameraAngle(down.angle - (event.clientX - down.x) * .009);
+    if (down.dragging) { desiredOrbit = normalizeCameraAngle(down.angle - (event.clientX - down.x) * .009); desiredPitch = clampCameraPitch(down.pitch - (event.clientY - down.y) * .006); renderer.domElement.style.cursor = 'grabbing'; }
   };
   const pointerUp = (event: PointerEvent) => {
-    const start = down; down = null;
-    if (!start || start.id !== event.pointerId || start.dragging || cameraDragAngle(event.clientX - start.x, event.clientY - start.y) !== null || performance.now() - start.time > 650) return;
+    const start = down; if (start?.id !== event.pointerId) return; down = null; renderer.domElement.style.cursor = '';
+    if (!start || start.id !== event.pointerId || start.dragging || cameraDragRotation(event.clientX - start.x, event.clientY - start.y) !== null || performance.now() - start.time > 650) return;
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
     if (callbacks.onActor) {
       const ownId = callbacks.getState().player.id;
@@ -175,10 +176,10 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
       if (hit.object.userData.ground) { callbacks.onGround({ x: hit.point.x, z: hit.point.z }); return; }
     }
   };
-  const pointerCancel = () => { down = null; };
+  const pointerCancel = () => { down = null; renderer.domElement.style.cursor = ''; };
   const wheel = (event: WheelEvent) => { event.preventDefault(); zoom(-THREE.MathUtils.clamp(event.deltaY, -300, 300) / 150); };
   const contextLoss = (event: Event) => { event.preventDefault(); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 방을 다시 열어 주세요.'); };
-  renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointermove', pointerMove); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss);
+  renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointermove', pointerMove); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('lostpointercapture', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss); document.addEventListener('visibilitychange', pointerCancel);
   const render = (now: number) => {
     if (dead) return; frame = requestAnimationFrame(render);
     const dt = lastTime ? Math.min(.06, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
@@ -187,7 +188,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     if (capacity !== state.layout.capacity) { architecture.release(); architecture = createArchitecture(state.layout); world.add(architecture.group); capacity = state.layout.capacity; }
     const quality = `${state.settings.quality}/${devicePixelRatio}`;
     if (quality !== lastQuality) { renderer.setPixelRatio(Math.min(devicePixelRatio || 1, state.settings.quality === 'low' ? 1 : state.settings.quality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = state.settings.quality !== 'low'; resize(); lastQuality = quality; }
-    orbit = smoothCameraAngle(orbit, desiredOrbit, dt, state.settings.reducedMotion);
+    orbit = smoothCameraAngle(orbit, desiredOrbit, dt, state.settings.reducedMotion); pitch = smoothCameraPitch(pitch, desiredPitch, dt, state.settings.reducedMotion);
     const b = state.layout.bounds;
     desiredFocus.set(width / height < .85 ? state.player.x : (b.minX + b.maxX) / 2, .65, width / height < .85 ? state.player.z : (b.minZ + b.maxZ) / 2);
     focus.lerp(desiredFocus, state.settings.reducedMotion ? 1 : 1 - Math.exp(-dt * 4)); updateCamera();
@@ -218,9 +219,9 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     renderer.render(world, camera);
   };
   try { render(performance.now()); callbacks.onReady(); } catch (error) { callbacks.onError(error instanceof Error ? error.message : '회사를 불러오지 못했어요.'); }
-  return { zoom, rotate, resetView, screenToWorld: point => screenAxisToWorld(point, orbit), dispose() {
+  return { zoom, rotate, tilt, resetView, screenToWorld: point => screenAxisToWorld(point, orbit), dispose() {
     dead = true; cancelAnimationFrame(frame); observer.disconnect();
-    renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
+    renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', pointerCancel);
     architecture.release(); retired.forEach(object => world.add(object));
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
     world.traverse(object => { if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); for (const material of Array.isArray(object.material) ? object.material : [object.material]) { materials.add(material); const texture = (material as THREE.MeshStandardMaterial).map; if (texture) textures.add(texture); } } });

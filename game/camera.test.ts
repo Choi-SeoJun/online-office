@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cameraDragAngle, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle, wallFacesCamera } from './camera.ts';
+import { CAMERA_BASE_PITCH, CAMERA_MIN_PITCH, CAMERA_MAX_PITCH, clampCameraPitch, smoothCameraPitch, setCameraOffset, cameraDragRotation, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle, wallFacesCamera } from './camera.ts';
 import * as THREE from 'three';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
 
@@ -13,9 +13,11 @@ test('camera angles wrap and easing takes the short path across a full turn', ()
 });
 
 test('drag threshold separates walking clicks from camera gestures', () => {
-  assert.equal(cameraDragAngle(6, 3), null);
-  assert.ok(Math.abs(cameraDragAngle(30, 0)! + .27) < 1e-10);
-  assert.equal(cameraDragAngle(0, 20), 0);
+  assert.equal(cameraDragRotation(6, 3), null);
+  assert.ok(Math.abs(cameraDragRotation(30, 0)!.orbit + .27) < 1e-10);
+  assert.equal(cameraDragRotation(0, -20)!.orbit, 0);
+  assert.ok(cameraDragRotation(0, -20)!.pitch > 0);
+  assert.ok(cameraDragRotation(30, 20)!.pitch < 0);
 });
 
 test('screen movement follows the camera on every quarter turn', () => {
@@ -45,4 +47,29 @@ test('wall cutaways follow rotation without fading shared furniture materials', 
   assert.equal(furniture.material.opacity,1);
   update({x:0,z:30});
   assert.equal(wall.material.opacity,1); assert.equal(wall.userData.pointerPassthrough,false);
+});
+
+
+test('vertical orbit preserves the default view and distance while clamping above the floor', () => {
+  for(const radius of [32,50]) {
+    const offset=setCameraOffset({x:0,y:0,z:0},0,CAMERA_BASE_PITCH,radius);
+    const old=new THREE.Vector3(16,20,24).normalize().multiplyScalar(radius);
+    assert.ok(new THREE.Vector3(offset.x,offset.y,offset.z).distanceTo(old)<1e-10);
+    for(const pitch of [-20,CAMERA_MIN_PITCH,CAMERA_MAX_PITCH,20]) {
+      const next=setCameraOffset(offset,Math.PI/2,pitch,radius);
+      assert.equal(next,offset);
+      assert.ok(Math.abs(Math.hypot(next.x,next.y,next.z)-radius)<1e-10);
+      assert.ok(next.y>0 && Math.hypot(next.x,next.z)>radius*.2);
+    }
+  }
+  assert.equal(clampCameraPitch(-20),CAMERA_MIN_PITCH);
+  assert.equal(clampCameraPitch(20),CAMERA_MAX_PITCH);
+  assert.equal(clampCameraPitch(NaN),CAMERA_BASE_PITCH);
+});
+
+test('vertical easing is bounded and reduced motion reaches the requested height immediately', () => {
+  const next=smoothCameraPitch(CAMERA_BASE_PITCH,CAMERA_MAX_PITCH,.016,false);
+  assert.ok(next>CAMERA_BASE_PITCH && next<CAMERA_MAX_PITCH);
+  assert.equal(smoothCameraPitch(CAMERA_MIN_PITCH,CAMERA_BASE_PITCH,.016,true),CAMERA_BASE_PITCH);
+  assert.equal(smoothCameraPitch(CAMERA_MAX_PITCH,20,.016,true),CAMERA_MAX_PITCH);
 });
