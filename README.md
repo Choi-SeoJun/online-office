@@ -17,7 +17,7 @@
 
 상사 옆에 간격을 두고 마주 서서 공격하며, 도구마다 준비·타격·회복 동작이 다릅니다. 탕비실에서는 컵을 들고 커피를 마시거나 과자를 집어 주머니에 넣고 먹는 동작이 표시됩니다. 먹고 마시는 동안 주머니 창은 잠깐 접혀 동작을 보여주고, 행동이 끝나면 다시 열립니다.
 
-개발 기준 저장소는 [Choi-SeoJun/online-office](https://github.com/Choi-SeoJun/online-office)입니다. [로그인 없는 공개 플레이 주소](https://office-break-01a1bf07.mobilechrysanthemum1.chatgpt.site)에서 현재 배포본을 확인할 수 있습니다.
+개발 기준 저장소는 [Choi-SeoJun/online-office](https://github.com/Choi-SeoJun/online-office)입니다. [로그인 없는 공개 플레이 주소](https://choi-seojun.github.io/online-office/)에서 현재 배포본을 확인할 수 있습니다.
 
 적발이나 타격에 따른 해고·체력·사망·소지품 손실은 없습니다. 회원 가입, 결제, 외부 AI 호출은 포함하지 않습니다.
 
@@ -76,6 +76,19 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 ```
 
 Sites 환경에서는 제공되는 설치·미리보기·빌드·소스 동기화·배포 도우미의 순서를 따릅니다. 잠금 파일 기반 설치 래퍼는 `npm run install:ci`입니다. 환경별 세부 절차와 호스팅·인증·선택적 데이터베이스 안내는 [스타터 참고 문서](docs/starter-reference.md)에 보존했습니다.
+
+## GitHub Pages 배포
+
+공개 플레이 주소는 https://choi-seojun.github.io/online-office/ 입니다. `main`에 반영하면 GitHub Actions가 타입 검사·테스트·정적 빌드를 거쳐 Pages에 배포합니다. Pages에는 게임 화면과 정적 파일만 올라가며, 방·채팅·동기화는 기존 Sites의 `/api/rooms`와 D1을 사용합니다. 백엔드 변경은 기존 Sites 배포도 함께 진행해야 합니다.
+
+```sh
+npm run build:pages
+npm run preview:pages
+```
+
+정적 진입점은 `web/`, 설정은 `vite.pages.config.ts`, 결과물은 `dist-pages/`입니다. Pages용 API 주소와 `/online-office/` 경로는 빌드 시 고정하며 방문자가 입력한 주소를 사용하지 않습니다. 백엔드는 같은 출처 및 `https://choi-seojun.github.io`에서 온 요청만 허용합니다. 로컬 정적 미리보기에서는 멀티 연결이 허용되지 않으므로 멀티 개발은 기존 `npm run dev`를 사용합니다.
+
+주소별 브라우저 저장 공간은 분리됩니다. 기존 주소의 업무 화면에서 **내보내기**로 할 일을 저장한 뒤 새 주소에서 **가져오기**를 선택하면 내용과 완료 표시를 옮길 수 있습니다. 가져오기는 기존 항목을 덮어쓰지 않으며 파일은 서버에 전송하지 않습니다. 기존 Sites 주소도 계속 이용할 수 있습니다.
 
 ## 코드 구조
 

@@ -1,4 +1,5 @@
 import type { RoomSession } from './multi-types.ts';
+import { roomEndpoint } from './hosting.ts';
 
 const ROOM_CODE=/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/;
 const TOKEN=/^[a-f0-9]{64}$/;
@@ -82,7 +83,8 @@ export async function requestRoom<T>(body:unknown,signal?:AbortSignal):Promise<T
   const cancel=()=>controller.abort();signal?.addEventListener('abort',cancel,{once:true});
   const timeout=setTimeout(()=>{timedOut=true;controller.abort();},REQUEST_TIMEOUT);
   try {
-    const response=await fetch('/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,signal:controller.signal,cache:'no-store',credentials:'same-origin',redirect:'error'});
+    const endpoint=roomEndpoint();
+    const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:payload,signal:controller.signal,cache:'no-store',credentials:endpoint.startsWith('/')?'same-origin':'omit',redirect:'error'});
     let data:unknown;
     try {data=await response.json();} catch {
       if(controller.signal.aborted) throw new DOMException('Request cancelled','AbortError');

@@ -1,10 +1,11 @@
 import type { GameState, Weapon } from './types.ts';
 import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
+import { publicAssetPath } from './hosting.ts';
 
 const IMPACT_SAMPLES: Record<Weapon, { url: string; offset: number }> = {
-  fan: { url: '/audio/ribhavagrawal-hit-by-a-wood-230542.mp3', offset: .048 },
-  hammer: { url: '/audio/bithuh-villager-hit-4-hd-402179.mp3', offset: .035 },
-  punch: { url: '/audio/soraatwod-punch-416719.mp3', offset: .375 },
+  fan: { url: publicAssetPath('audio/ribhavagrawal-hit-by-a-wood-230542.mp3'), offset: .048 },
+  hammer: { url: publicAssetPath('audio/bithuh-villager-hit-4-hd-402179.mp3'), offset: .035 },
+  punch: { url: publicAssetPath('audio/soraatwod-punch-416719.mp3'), offset: .375 },
 };
 
 /** Uploaded impact recordings, synthesized keyboard and wind; no background timers. */
