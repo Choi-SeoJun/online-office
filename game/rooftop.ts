@@ -36,6 +36,7 @@ export function createRooftop(parent: THREE.Object3D) {
     const upper = box(wall, dimensions.width, dimensions.height - .55, dimensions.depth, '#e9e0cb', 0, .55 + (dimensions.height - .55) / 2, 0, .015);
     upper.name = `${side}-wall-upper`;
     const cap = box(wall, dimensions.width + .08, .085, dimensions.depth + .08, '#a9b9a7', 0, dimensions.height + .025, 0, .018);
+    upper.userData.cutawaySide = side; cap.userData.cutawaySide = side;
     if (side === 'south' || side === 'east') {
       const cutaway = new THREE.MeshStandardMaterial({ color: '#e9e0cb', transparent: true, opacity: .18, depthWrite: false, roughness: .8 });
       upper.material = cutaway; upper.castShadow = false; upper.receiveShadow = false;

@@ -4,6 +4,8 @@ import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } 
 import type { Floor, OfficeScene, Point, SceneCallbacks, TargetId } from './types.ts';
 import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere, spriteLabel } from './models.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
+import { CAMERA_TURN_STEP, cameraDragAngle, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
+import { prepareCameraCutaways } from './camera-cutaway.ts';
 
 export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId | null {
   let ancestor: THREE.Object3D | null = object;
@@ -48,7 +50,7 @@ export function batchArchitecture(group: THREE.Group) {
 export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks): OfficeScene {
   let renderer: THREE.WebGLRenderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' }); }
-  catch { callbacks.onError('3D 사무실을 열 수 없어요. 브라우저의 그래픽 가속을 확인해 주세요.'); return { dispose() {}, zoom() {} }; }
+  catch { callbacks.onError('3D 사무실을 열 수 없어요. 브라우저의 그래픽 가속을 확인해 주세요.'); return { dispose() {}, zoom() {}, rotate() {}, resetView() {}, screenToWorld:axis=>axis }; }
   renderer.setClearColor('#e6e5dc'); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.3;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.domElement.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;outline:none;'; renderer.domElement.setAttribute('aria-label', '클릭해서 걸어 다니는 3D 사무실'); host.appendChild(renderer.domElement);
@@ -150,8 +152,8 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   for (let i = 0; i < 3; i++) { const ray = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 3.6), new THREE.MeshBasicMaterial({ color: '#fff0bb', transparent: true, opacity: .10, depthWrite: false })); ray.rotation.x = -Math.PI / 2; ray.rotation.z = -.2; ray.position.set(-2.8 + i * 3.7, .049, -3.3); room.add(ray); }
   // Batch the immutable architecture and props by material and interaction tag.
   // This keeps the richly furnished room to a small number of GPU draw calls.
-  batchArchitecture(room);
-  const roof = createRooftop(scene); batchArchitecture(roof); roof.visible = false;
+  const officeCutaways = prepareCameraCutaways(room, true); batchArchitecture(room);
+  const roof = createRooftop(scene); const roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
   const state = callbacks.getState();
   const actors = new Map<string, ReturnType<typeof createActor>>();
   const playerGroup = new THREE.Group(); scene.add(playerGroup);
@@ -162,23 +164,26 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const selection = new THREE.Mesh(new THREE.RingGeometry(.50, .56, 48), new THREE.MeshBasicMaterial({ color: '#dca45e', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })); selection.rotation.x = -Math.PI / 2; selection.position.y = .065; scene.add(selection);
   const destination = new THREE.Mesh(new THREE.RingGeometry(.13, .19, 24), new THREE.MeshBasicMaterial({ color: '#4d9184', transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false })); destination.rotation.x = -Math.PI / 2; destination.position.y = .07; scene.add(destination);
   const playerRing = new THREE.Mesh(new THREE.RingGeometry(.31, .37, 32), new THREE.MeshBasicMaterial({ color: '#467d70', transparent: true, opacity: .55, side: THREE.DoubleSide, depthWrite: false })); playerRing.rotation.x = -Math.PI / 2; playerRing.position.y = .06; scene.add(playerRing);
-  let width = 1, height = 1, zoomLevel = 1, lastQuality = '', dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden, orbit = 0;
+  let width = 1, height = 1, zoomLevel = 1, lastQuality = '', dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden, orbit = 0, userOrbit = 0, targetOrbit = 0;
   let lastFloor = state.floor;
   const officeColor = new THREE.Color('#e6e5dc'), roofColor = new THREE.Color('#e6d6bf');
   const focus = new THREE.Vector3(0, .5, 0); const desired = new THREE.Vector3(); const offset = new THREE.Vector3(16, 20, 24).normalize().multiplyScalar(32), rotatedOffset = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   const updateCamera = () => {
     const aspect = width / height; const mobile = aspect < .9;
     const span = (mobile ? 15.2 : Math.max(15.6, 23.2 / aspect)) * zoomLevel;
-    camera.left = -span * aspect / 2; camera.right = span * aspect / 2; camera.top = span / 2; camera.bottom = -span / 2; camera.updateProjectionMatrix(); rotatedOffset.copy(offset).applyAxisAngle(up, orbit); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus);
+    camera.left = -span * aspect / 2; camera.right = span * aspect / 2; camera.top = span / 2; camera.bottom = -span / 2; camera.updateProjectionMatrix(); rotatedOffset.copy(offset).applyAxisAngle(up, orbit); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus); officeCutaways(rotatedOffset); roofCutaways(rotatedOffset);
   };
   const resize = () => { if (dead) return; width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
   const observer = new ResizeObserver(resize); observer.observe(host); resize();
   const adjustZoom = (factor: number) => { if (callbacks.getState().transition) return; zoomLevel = THREE.MathUtils.clamp(zoomLevel * factor, .64, 1.45); updateCamera(); };
   const zoom = (delta: number) => { adjustZoom(Math.pow(.9, delta)); };
-  const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down: { x: number; y: number; time: number; id: number } | null = null;
-  const pointerDown = (e: PointerEvent) => { if (e.button !== 0 || callbacks.getState().transition) return; down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId }; renderer.domElement.setPointerCapture?.(e.pointerId); };
+  const rotate = (delta: number) => { if (callbacks.getState().transition || !Number.isFinite(delta)) return; targetOrbit = normalizeCameraAngle(targetOrbit + delta * CAMERA_TURN_STEP); };
+  const resetView = () => { if (!callbacks.getState().transition) targetOrbit = 0; };
+  const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down: { x: number; y: number; time: number; id: number; orbit:number; dragged:boolean } | null = null;
+  const pointerDown = (e: PointerEvent) => { if (e.button !== 0 || callbacks.getState().transition || down) return; down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId, orbit:targetOrbit, dragged:false }; renderer.domElement.setPointerCapture?.(e.pointerId); };
+  const pointerMove = (e: PointerEvent) => { if (!down || down.id !== e.pointerId || callbacks.getState().transition) return; const delta = cameraDragAngle(e.clientX-down.x,e.clientY-down.y); if (delta !== null || down.dragged) { down.dragged = true; targetOrbit = normalizeCameraAngle(down.orbit-(e.clientX-down.x)*.009); renderer.domElement.style.cursor='grabbing'; } };
   const pointerUp = (e: PointerEvent) => {
-    const start = down; down = null; const current = callbacks.getState(); if (current.transition || !start || start.id !== e.pointerId || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8 || performance.now() - start.time > 650) return;
+    const start = down; if (start?.id !== e.pointerId) return; down = null; renderer.domElement.style.cursor=''; const current = callbacks.getState(); if (current.transition || !start || start.dragged || cameraDragAngle(e.clientX-start.x,e.clientY-start.y)!==null || performance.now() - start.time > 650) return;
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
     const onRoof = current.floor === 'rooftop', bounds = onRoof ? ROOF_BOUNDS : BOUNDS;
     // Raycaster does not treat an invisible parent as an interaction boundary.
@@ -186,10 +191,10 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     const hits = raycaster.intersectObjects((onRoof ? roof : room).children, true);
     for (const hit of hits) { const selection = targetSelectionForHit(hit, current.floor); if (selection) { callbacks.onTarget(selection.target, selection.point); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
   };
-  const pointerCancel = () => { down = null; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
+  const pointerCancel = () => { down = null; renderer.domElement.style.cursor=''; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
   const contextLoss = (e: Event) => { e.preventDefault(); graphicsLost = true; cancelAnimationFrame(frame); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 다시 열어보기를 누르면 이어서 놀 수 있어요.'); };
   const visibility = () => { visible = !document.hidden; lastTime = 0; down = null; };
-  renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss); document.addEventListener('visibilitychange', visibility);
+  renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointermove', pointerMove); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss); document.addEventListener('visibilitychange', visibility);
   const render = (now: number) => {
     if (dead || graphicsLost) return; frame = requestAnimationFrame(render); if (!visible) return;
     const dt = lastTime ? Math.min(.05, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
@@ -198,7 +203,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     const background = onRoof ? roofColor : officeColor;
     (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);
     ambient.color.set(onRoof ? '#fff0d5' : '#f5f5e7');
-    orbit = transitionOrbit(s.transition, s.settings.reducedMotion);
+    userOrbit = smoothCameraAngle(userOrbit, targetOrbit, dt, s.settings.reducedMotion); orbit = userOrbit + transitionOrbit(s.transition, s.settings.reducedMotion);
     if (lastQuality !== s.settings.quality) { lastQuality = s.settings.quality; renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lastQuality === 'low' ? 1 : lastQuality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = lastQuality !== 'low'; sunlight.shadow.mapSize.set(lastQuality === 'high' ? 2048 : 1024, lastQuality === 'high' ? 2048 : 1024); renderer.shadowMap.needsUpdate = true; resize(); }
     const mobile = width / height < .9;
     desired.set(mobile ? s.player.x * .72 : s.player.x * (onRoof ? .15 : .09), onRoof ? .65 : .5, mobile ? s.player.z * .65 : onRoof ? -.55 + s.player.z * .17 : s.player.z * .05);
@@ -216,10 +221,10 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   // First render is synchronous so the entry panel can reliably display a ready state.
   try { render(performance.now()); callbacks.onReady(); } catch (e) { callbacks.onError(e instanceof Error ? e.message : '사무실을 불러오지 못했어요.'); }
   return {
-    zoom,
+    zoom, rotate, resetView, screenToWorld:axis=>screenAxisToWorld(axis,orbit),
     dispose() {
       dead = true; cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener('visibilitychange', visibility);
-      renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
+      renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
       const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
       scene.traverse(object => { if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); const ms = Array.isArray(object.material) ? object.material : [object.material]; ms.forEach(m => { materials.add(m); const map = (m as THREE.MeshStandardMaterial).map; if (map) textures.add(map); }); } });
       geometries.forEach(g => g.dispose()); textures.forEach(t => t.dispose()); materials.forEach(m => m.dispose()); sunlight.shadow.dispose(); renderer.dispose(); renderer.domElement.remove(); disposeModelCaches();

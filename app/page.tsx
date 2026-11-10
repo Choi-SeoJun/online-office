@@ -1,2 +1,2 @@
-import OfficeGame from '@/components/office-game';
-export default function Home() { return <OfficeGame />; }
+import OfficeEntry from '@/components/office-entry';
+export default function Home() { return <OfficeEntry />; }

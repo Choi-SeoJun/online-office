@@ -1,12 +1,13 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Armchair, ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, Check, ChevronLeft, ChevronRight, Coffee, Cookie, DoorOpen, Files, Gamepad2, Hand, Headphones, HelpCircle, Leaf, LoaderCircle, Minus, Monitor, Moon, MousePointer2, PackageOpen, Plus, RotateCcw, Settings2, Shirt, ShoppingBag, Sparkles, Volume2, VolumeX, Wind, X, Zap } from 'lucide-react';
+import { Armchair, ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, Check, ChevronLeft, ChevronRight, Coffee, Cookie, DoorOpen, Files, Gamepad2, Hand, Headphones, HelpCircle, Leaf, LoaderCircle, Monitor, Moon, MousePointer2, PackageOpen, RotateCcw, Settings2, Shirt, ShoppingBag, Sparkles, Volume2, VolumeX, Wind, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createGameEngine } from '@/game/engine';
 import { getRoofLean, ROOF_LEAN_DISTANCE } from '@/game/roof-rest';
 import { readSavedState, writeSavedState } from '@/game/storage';
 import { createOfficeAudio } from '@/game/audio';
 import { WorkSheet } from './work-sheet';
+import { CameraControls } from './camera-controls';
 import { resetWorkSheet } from '@/game/worksheet';
 import './office-rooftop.css';
 import { isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layout';
@@ -19,14 +20,14 @@ const deskModes: { id: DeskMode; label: string; icon: LucideIcon }[] = [{ id: 'w
 function ToolButton({ icon: Icon, label, onClick, active, disabled }: { icon: LucideIcon; label: string; onClick: () => void; active?: boolean; disabled?: boolean }) {
   return <button type="button" className={`tool ${active ? 'selected' : ''}`} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}><Icon size={20} strokeWidth={1.65} /><span>{label}</span></button>;
 }
-export default function OfficeGame() {
+export default function OfficeGame({onMultiplayer}: {onMultiplayer?:()=>void}) {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   useEffect(() => { const saved = readSavedState(); const next = createGameEngine(saved); if (!saved && window.matchMedia('(prefers-reduced-motion: reduce)').matches) next.dispatch({ type: 'settings', value: { reducedMotion: true } }); setEngine(next); return () => next.dispose(); }, []);
   if (!engine) return <main className="boot"><Building2 size={30} /><p>사무실 문을 열고 있어요.</p></main>;
-  return <Game engine={engine} />;
+  return <Game engine={engine} onMultiplayer={onMultiplayer} />;
 }
 
-function Game({ engine }: { engine: GameEngine }) {
+function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()=>void }) {
   const state = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const host = useRef<HTMLDivElement>(null), scene = useRef<OfficeScene | null>(null), audio = useRef<ReturnType<typeof createOfficeAudio> | null>(null);
   const [ready, setReady] = useState(false), [error, setError] = useState(''), [retry, setRetry] = useState(0);
@@ -52,7 +53,7 @@ function Game({ engine }: { engine: GameEngine }) {
   useEffect(() => { writeSavedState(state); }, [state.name, state.weapon, state.settings.sound, state.settings.volume, state.settings.reducedMotion, state.settings.quality, state.inventory.cookie, state.inventory.choco, state.inventory.cracker]);
   useEffect(() => {
     const keys = new Set<string>();
-    const axis = () => engine.dispatch({ type: 'axis', x: Number(keys.has('d') || keys.has('arrowright')) - Number(keys.has('a') || keys.has('arrowleft')), z: Number(keys.has('s') || keys.has('arrowdown')) - Number(keys.has('w') || keys.has('arrowup')) });
+    const axis = () => { const input = { x: Number(keys.has('d') || keys.has('arrowright')) - Number(keys.has('a') || keys.has('arrowleft')), z: Number(keys.has('s') || keys.has('arrowdown')) - Number(keys.has('w') || keys.has('arrowup')) }; engine.dispatch({ type: 'axis', ...(scene.current?.screenToWorld(input) ?? input) }); };
     const clear = () => { keys.clear(); axis(); };
     const visibility = () => { clear(); engine.dispatch({ type: 'pause', value: document.hidden || panelRef.current === 'settings' || panelRef.current === 'help' }); audio.current?.sync(engine.state); };
     const keydown = (event: KeyboardEvent) => {
@@ -102,14 +103,14 @@ function Game({ engine }: { engine: GameEngine }) {
       <button className="icon-button" aria-label="이용 방법" onClick={() => setPanel('help')}><HelpCircle size={20} /></button><button className="icon-button" aria-label="설정" onClick={() => setPanel('settings')}><Settings2 size={20} /></button>
     </div></header>
     {!ready && !error && <div className="loading-status"><LoaderCircle className="loading-icon" size={18} />사무실을 준비하고 있어요</div>}
-    {!state.entered && !error && <section className="welcome-card"><div className="eyebrow"><span />혼자만의 작은 회사</div><h2>출근은 했고,<br />일은 <em>모르겠고.</em></h2><p className="welcome-description">일하는 척 딴짓하고, 커피 한 잔 쉬어 가요.<br />이 회사에서는 조금 마음대로 해도 괜찮아요.</p><div className="entry-name"><label htmlFor="employee-name">오늘의 이름</label><input id="employee-name" value={name} maxLength={10} onChange={e => setName(e.target.value)} placeholder="김사원" autoComplete="off" /><span>사원</span></div><button className="primary-button enter-button" disabled={!ready} onClick={() => send({ type: 'enter', name: name.trim() || '김사원' })}>{ready ? <>출근하기<ArrowRight size={19} /></> : <>문 여는 중<LoaderCircle className="loading-icon" size={18} /></>}</button><div className="entry-footnote"><Leaf size={13} />가입도, 할당량도, 야근도 없어요.</div><div className="welcome-tags"><span><Monitor size={14} />눈치껏 딴짓</span><span><Zap size={14} />통쾌한 한 방</span><span><Coffee size={14} />커피 한 잔</span></div></section>}
+    {!state.entered && !error && <section className="welcome-card">{onMultiplayer && <div className="mode-switch" aria-label="플레이 방식"><button aria-pressed="true">혼자 쉬기 <span>솔로</span></button><button onClick={onMultiplayer}>동료들과 <span>멀티</span></button></div>}<div className="eyebrow"><span />혼자만의 작은 회사</div><h2>출근은 했고,<br />일은 <em>모르겠고.</em></h2><p className="welcome-description">일하는 척 딴짓하고, 커피 한 잔 쉬어 가요.<br />이 회사에서는 조금 마음대로 해도 괜찮아요.</p><div className="entry-name"><label htmlFor="employee-name">오늘의 이름</label><input id="employee-name" value={name} maxLength={10} onChange={e => setName(e.target.value)} placeholder="김사원" autoComplete="off" /><span>사원</span></div><button className="primary-button enter-button" disabled={!ready} onClick={() => send({ type: 'enter', name: name.trim() || '김사원' })}>{ready ? <>출근하기<ArrowRight size={19} /></> : <>문 여는 중<LoaderCircle className="loading-icon" size={18} /></>}</button><div className="entry-footnote"><Leaf size={13} />가입도, 할당량도, 야근도 없어요.</div><div className="welcome-tags"><span><Monitor size={14} />눈치껏 딴짓</span><span><Zap size={14} />통쾌한 한 방</span><span><Coffee size={14} />커피 한 잔</span></div></section>}
     {state.entered && !error && <>
       <div className="employee-card"><span className="status-dot" /><strong>{state.name}</strong><span>{roof ? '잠깐, 숨 고르기' : '자유시간'}</span></div>
       <button className="floor-travel-button" disabled={!!state.transition} onClick={() => { setPanel(null); setHints(false); send({type:'travel',floor:roof ? 'office' : 'rooftop'}); }}>{roof ? <Building2 size={17} /> : <Wind size={17} />}<span>{roof ? '사무실로' : '옥상으로'}</span><ArrowRight size={15} /></button>
       {!roof && <nav className="location-nav" aria-label="사무실 장소">{(['desk','boss','coffee','snacks','lounge'] as TargetId[]).map(id => { const Icon = targetIcons[id]; return <button key={id} disabled={!!state.transition} className={state.target === id ? 'active' : ''} onClick={() => select(id)} aria-label={`${TARGETS[id].label}로 이동`}><Icon size={17} /><span>{id === 'coffee' ? '커피' : id === 'snacks' ? '과자' : TARGETS[id].label}</span></button>; })}</nav>}
       {roof && !state.activity && !state.transition && <div className="rooftop-note"><span>ROOFTOP BREAK</span><strong>오늘 삼킨 말은<br />달게 녹여 보내요.</strong><p>{state.settings.sound ? '바람 소리에, 잠깐 멍하니.' : '소리를 켜면 바람이 들려요.'}</p></div>}
-      <div className="view-controls"><button className="icon-button" aria-label="확대" onClick={() => scene.current?.zoom(1)}><Plus size={17} /></button><button className="icon-button" aria-label="축소" onClick={() => scene.current?.zoom(-1)}><Minus size={17} /></button></div>
-      {hints && <div className="first-hint"><MousePointer2 size={17} /><span>바닥을 눌러 걷거나, 장소를 골라요.</span><button aria-label="안내 닫기" onClick={() => setHints(false)}><X size={15} /></button></div>}
+      <CameraControls disabled={!!state.transition} onZoom={delta=>scene.current?.zoom(delta)} onRotate={delta=>scene.current?.rotate(delta)} onReset={()=>scene.current?.resetView()} />
+      {hints && <div className="first-hint"><MousePointer2 size={17} /><span>눌러서 걷기 · 옆으로 드래그해서 화면 회전</span><button aria-label="안내 닫기" onClick={() => setHints(false)}><X size={15} /></button></div>}
       {state.message && state.elapsed < state.messageUntil && <div className={`game-toast ${state.scold > 0 ? 'scold' : ''}`} role="status"><Sparkles size={16} /><span>{state.message}</span></div>}
       {state.warning > 0 && <div className="boss-warning" role="alert"><span className="warning-dot" /><div><strong>상사가 보고 있어요!</strong><span>지금 업무로 돌아가면 괜찮아요.</span></div><button onClick={() => send({ type: 'desk', mode: 'work' })}>업무로 전환 <kbd>Space</kbd></button><div className="warning-progress" style={{ width: `${state.warning / 2 * 100}%` }} /></div>}
       {state.seat === 'desk' && <MonitorPanel mode={state.deskMode || 'work'} reducedMotion={state.settings.reducedMotion} onType={key => audio.current?.typeKey(key)} />}
@@ -133,7 +134,7 @@ function Game({ engine }: { engine: GameEngine }) {
       <label className="setting-row"><span><Leaf size={18} />움직임 줄이기</span><input type="checkbox" checked={state.settings.reducedMotion} onChange={e => send({ type: 'settings', value: { reducedMotion: e.target.checked } })} /></label>
       <label className="setting-row"><span>화면 품질</span><select value={state.settings.quality} onChange={e => send({ type: 'settings', value: { quality: e.target.value as GameState['settings']['quality'] } })}><option value="auto">자동</option><option value="low">가볍게</option><option value="high">선명하게</option></select></label><p className="settings-note">이름, 설정, 간식과 업무 시트는 지금 사용하는 브라우저에 저장돼요.</p>
       {confirmReset ? <div className="reset-confirm"><p>이름과 설정, 업무 시트, 주머니 속 간식을 비우고 처음으로 돌아갈까요?</p><button className="danger-button" onClick={() => { resetWorkSheet(); send({ type: 'reset' }); setName('김사원'); setConfirmReset(false); setPanel(null); }}>처음부터 시작</button><button className="soft-button" onClick={() => setConfirmReset(false)}>취소</button></div> : <button className="text-button" onClick={() => setConfirmReset(true)}>처음부터 시작하기</button>}
-    </> : <><p className="help-intro">할 일은 없어요. 하고 싶은 것만 해요.</p><div className="help-row"><MousePointer2 /><div><strong>바닥을 누르면 걸어요</strong><p>PC에서는 WASD와 방향키도 사용할 수 있어요.</p></div></div><div className="help-row"><Monitor /><div><strong>내 자리에서 눈치껏 딴짓</strong><p>셀을 눌러 내용을 입력해 보세요. 소리를 켜면 키보드 ASMR이 들려요. 상사가 보면 ‘일하는 척’으로 돌아와요.</p></div></div><div className="help-row"><Zap /><div><strong>상사에게 통쾌한 한 방</strong><p>가까이 다가가 도구를 고르고 ‘한 대 치기’를 눌러요.</p></div></div><div className="help-row"><Coffee /><div><strong>탕비실에서 빈둥거리기</strong><p>커피와 과자를 챙기고 주머니를 열어 맛있게 먹어요.</p></div></div><div className="help-row"><Wind /><div><strong>옥상에서 마음 비우기</strong><p>벽 가까이 가면 ‘여기에 기대기’가 나타나요. 멀리서 ‘벽에 기대기’를 누르면 가장 가까운 벽으로 걸어가요. 벽을 직접 누르면 누른 위치에 기댑니다. ‘사탕 물기’는 따로 누르고, 물고 있는 채로 움직일 수 있어요. 소리를 켜면 잔잔한 바람이 들려요.</p></div></div><p className="settings-note">혼자 플레이하는 공간이에요. 상사와 동료는 게임 속 캐릭터입니다.</p></>}</section></div>}
+    </> : <><p className="help-intro">할 일은 없어요. 하고 싶은 것만 해요.</p><div className="help-row"><MousePointer2 /><div><strong>바닥을 누르면 걸어요</strong><p>PC에서는 WASD와 방향키도 사용할 수 있어요. 화면을 옆으로 드래그하거나 회전 버튼을 눌러 둘러보세요. 원래 방향 버튼으로 돌아올 수 있어요.</p></div></div><div className="help-row"><Monitor /><div><strong>내 자리에서 눈치껏 딴짓</strong><p>셀을 눌러 내용을 입력해 보세요. 소리를 켜면 키보드 ASMR이 들려요. 상사가 보면 ‘일하는 척’으로 돌아와요.</p></div></div><div className="help-row"><Zap /><div><strong>상사에게 통쾌한 한 방</strong><p>가까이 다가가 도구를 고르고 ‘한 대 치기’를 눌러요.</p></div></div><div className="help-row"><Coffee /><div><strong>탕비실에서 빈둥거리기</strong><p>커피와 과자를 챙기고 주머니를 열어 맛있게 먹어요.</p></div></div><div className="help-row"><Wind /><div><strong>옥상에서 마음 비우기</strong><p>벽 가까이 가면 ‘여기에 기대기’가 나타나요. 멀리서 ‘벽에 기대기’를 누르면 가장 가까운 벽으로 걸어가요. 벽을 직접 누르면 누른 위치에 기댑니다. ‘사탕 물기’는 따로 누르고, 물고 있는 채로 움직일 수 있어요. 소리를 켜면 잔잔한 바람이 들려요.</p></div></div><p className="settings-note">혼자 플레이하는 공간이에요. 상사와 동료는 게임 속 캐릭터입니다.</p></>}</section></div>}
     {error && <div className="error-backdrop"><section className="error-panel" role="alert"><Building2 size={32} /><h2>사무실 문이 잠깐 닫혔어요.</h2><p>{error}</p><button className="primary-button" onClick={() => { setError(''); setRetry(n => n + 1); }}>다시 열어보기<RotateCcw size={17} /></button></section></div>}
     {state.transition && <div className="floor-transition" role="status" aria-live="polite" style={{backgroundColor:`rgba(240, 233, 220, ${travelFade})`}}><span style={{opacity:travelFade}}><Wind size={25} />{state.transition.to === 'rooftop' ? '바람 쐬러 가는 길' : '다시, 오늘의 사무실로'}</span></div>}
     <div className="office-caption">평범한 회사, 조금 특별한 자유.</div>
