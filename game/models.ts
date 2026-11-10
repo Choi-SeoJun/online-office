@@ -26,17 +26,27 @@ export function cylinder(parent: THREE.Object3D, rt: number, rb: number, h: numb
   if (!geos.has(key)) geos.set(key, new THREE.CylinderGeometry(rt, rb, h, 16));
   const mesh = new THREE.Mesh(geos.get(key), material(color)); mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; parent.add(mesh); return mesh;
 }
-export function labelTexture(text: string, bg: string, color: string, width = 512, height = 128) {
+export function labelTexture(text: string, bg: string, color: string, width = 512, height = 128, fontScale = .39) {
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d')!; ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(0, 0, width, height, 24); ctx.fill();
-  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `700 ${height * .39}px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif`; ctx.fillText(text, width / 2, height / 2 + 2, width - 32);
+  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `700 ${height * fontScale}px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif`; ctx.fillText(text, width / 2, height / 2 + 2, width - 32);
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; return texture;
 }
 export function plaque(parent: THREE.Object3D, text: string, w: number, h: number, x: number, y: number, z: number, bg = '#284c4a', fg = '#fff9e9') {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: labelTexture(text, bg, fg), transparent: true })); m.position.set(x, y, z); parent.add(m); return m;
 }
-export function spriteLabel(parent: THREE.Object3D, text: string, color = '#274b49', w = 1.1) {
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(text, '#fffbee', color), transparent: true, depthTest: true, opacity: .95 })); sprite.scale.set(w, w / 4, 1); parent.add(sprite); return sprite;
+function updateSpriteLabel(sprite: THREE.Sprite, text: string, color: string) {
+  // Keep letters large even for a ten-character name: grow the tag instead of
+  // squeezing the glyphs into the old, tiny four-to-one name plate.
+  const width = Math.max(512, Array.from(text).length * 88 + 48), baseWidth = sprite.userData.labelWidth as number;
+  sprite.material.map?.dispose();
+  sprite.material.map = labelTexture(text, '#fffdf5', color, width, 160, .55);
+  sprite.material.needsUpdate = true; sprite.scale.set(baseWidth * width / 512, baseWidth * 160 / 512, 1);
+}
+export function spriteLabel(parent: THREE.Object3D, text: string, color = '#243e35', w = 1.2) {
+  // Labels are UI: scenic fog and filmic exposure must not wash out their ink.
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: true, depthWrite: false, toneMapped: false, fog: false }));
+  sprite.userData.labelWidth = w; updateSpriteLabel(sprite, text, color); parent.add(sprite); return sprite;
 }
 export function plant(parent: THREE.Object3D, x: number, z: number, size = 1) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(size); parent.add(g);
@@ -166,7 +176,7 @@ export function createActor(parent: THREE.Object3D, role: number, name: string):
   steam.visible = false;
   const crumbs = new THREE.Group(); crumbs.name = 'snack-crumbs'; body.add(crumbs); crumbs.visible = false;
   for (let i = 0; i < 4; i++) box(crumbs, .025, .026, .021, i % 2 ? '#b88147' : '#edc98a', (i - 1.5) * .04, 1.2, .36, .003);
-  const label = spriteLabel(root, name, boss ? '#795349' : '#325852', boss ? .82 : .86); label.position.y = 2.04;
+  const label = spriteLabel(root, name, boss ? '#51372d' : '#243e35', 1.2); label.position.y = 2.16;
   const effect = new THREE.Group(); effect.position.y = 1.90; root.add(effect); const stars: THREE.Mesh[] = [];
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
@@ -351,6 +361,6 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     if (weapon === 'fan') { r.head.rotation.x = (reduced ? .08 : .25) * amount; r.body.position.y -= (reduced ? .025 : .09) * amount; r.body.rotation.x = .06 * amount; }
     r.stars.forEach((s, i) => { const a = i / r.stars.length * Math.PI * 2 + (reduced ? 0 : reactionAge * 3); s.position.set(Math.cos(a) * .49, Math.sin(a * 2) * .10, Math.sin(a) * .49); const size = Math.max(.1, amount * 1.5); s.scale.set(size, weapon === 'fan' ? size * 1.55 : size, weapon === 'fan' ? .45 : 1); s.rotation.z = a; s.rotation.x = weapon === 'fan' && !reduced ? reactionAge * 9 + i : 0; });
   }
-  if (a.name !== r.lastName) { r.label.material.map?.dispose(); r.label.material.map = labelTexture(a.name, '#fffbee', '#325852'); r.label.material.needsUpdate = true; r.lastName = a.name; }
+  if (a.name !== r.lastName) { updateSpriteLabel(r.label, a.name, r.isBoss ? '#51372d' : '#243e35'); r.lastName = a.name; }
 }
 export function disposeModelCaches() { mats.forEach(m => m.dispose()); geos.forEach(g => g.dispose()); mats.clear(); geos.clear(); }

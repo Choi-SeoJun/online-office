@@ -17,7 +17,7 @@ export type GameState = {
   player: Actor; boss: Actor; coworkers: Actor[];
   target: TargetId | null; ready: boolean; destination: Point | null;
   seat: 'desk' | 'lounge' | 'roof-bench' | null; deskMode: DeskMode | null;
-  roofRest: 'bench' | 'wall' | null; roofWallSide: RoofWallSide | null; candyInMouth: boolean;
+  roofRest: 'bench' | 'wall' | null; roofWallSide: RoofWallSide | null; roofLeanPoint: Point | null; candyInMouth: boolean;
   activity: Activity | null; inventory: Inventory; weapon: Weapon; settings: Settings;
   warning: number; scold: number; bossPhase: 'routine' | 'watch' | 'scold' | 'hit' | 'recover';
   lastHit: { id: number; weapon: Weapon; at: number } | null;
@@ -26,7 +26,7 @@ export type GameState = {
 export type PersistedState = { version: 1; name: string; weapon: Weapon; settings: Settings; snacks: Record<Snack, number> };
 export type Command =
   | { type: 'enter'; name?: string } | { type: 'exit' } | { type: 'pause'; value: boolean }
-  | { type: 'select'; target: TargetId } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
+  | { type: 'select'; target: TargetId; point?: Point } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
   | { type: 'interact' } | { type: 'stand' } | { type: 'cancel' }
   | { type: 'travel'; floor: Floor } | { type: 'candy' } | { type: 'rest'; place: 'bench' | 'wall'; wall?: RoofWallSide }
   | { type: 'desk'; mode: DeskMode } | { type: 'spin' }
@@ -43,6 +43,6 @@ export interface GameEngine {
 }
 export interface SceneCallbacks {
   getState(): GameState; onFrame(dt: number): void; onGround(point: Point): void;
-  onTarget(target: TargetId): void; onReady(): void; onError(message: string): void;
+  onTarget(target: TargetId, point?: Point): void; onReady(): void; onError(message: string): void;
 }
 export interface OfficeScene { dispose(): void; zoom(delta: number): void; }

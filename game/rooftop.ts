@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { box, cylinder, plant, plaque, sphere } from './models.ts';
-import { ROOF_BIN, ROOF_REST, ROOF_WALLS } from './layout.ts';
+import { ROOF_BIN, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
 
 /** Uses simulation progress, so hidden tabs and paused games freeze the turn. */
 export function transitionOrbit(transition: { remaining: number; duration: number } | null, reducedMotion: boolean) {
@@ -17,7 +17,7 @@ export function animateRooftop(roof: THREE.Group, elapsed: number, reducedMotion
   ribbon.rotation.z = reducedMotion ? -.06 : -.06 + Math.sin(elapsed * 1.1) * .09 + Math.sin(elapsed * 2.3) * .025;
 }
 
-/** Furniture shares navigation footprints; the perimeter walls offer four rest spots. */
+/** Furniture shares navigation footprints and leaves every perimeter strip clear. */
 export function createRooftop(parent: THREE.Object3D) {
   const roof = new THREE.Group(); roof.name = 'rooftop'; parent.add(roof);
   box(roof, 18.4, .50, 12.4, '#a1a49b', 0, -.33, 0, .12);
@@ -44,8 +44,8 @@ export function createRooftop(parent: THREE.Object3D) {
       cap.castShadow = false; cap.receiveShadow = false;
     }
   }
-  // Stairwell and its door are outside the open strolling space.
-  const stairs = new THREE.Group(); stairs.position.set(-7.8, 0, -4.85); roof.add(stairs);
+  // Leave a walking and resting strip behind and beside the stairwell.
+  const stairs = new THREE.Group(); stairs.name = 'rooftop-stairs'; stairs.position.set(ROOF_STAIRS.x, 0, ROOF_STAIRS.z); roof.add(stairs);
   box(stairs, 1.65, 2.8, 1.60, '#ddd5c1', 0, 1.4, 0, .035);
   box(stairs, 1.78, .13, 1.74, '#a7b7a6', 0, 2.86, 0, .04);
   box(stairs, 1.03, 2.15, .05, '#64877c', 0, 1.1, .82, .02);
@@ -85,10 +85,11 @@ export function createRooftop(parent: THREE.Object3D) {
   const sign = plaque(roof, '잠깐, 숨 돌리는 곳', 2.50, .32, 4.5, 1.36, -5.895, '#e9e0cb', '#6e8271');
   sign.name = 'rooftop-sign';
   // Planters frame the space; their footprints are shared with roof navigation.
-  for (const x of [-7.8, 7.8]) for (const z of [-1.3, 2.2, 4.8]) {
-    box(roof, .83, .45, 1.03, '#bb9b76', x, .24, z, .045);
-    box(roof, .76, .035, .96, '#554b35', x, .48, z, .015);
-    const greenery = plant(roof, x, z, .90); greenery.position.y = .25;
+  for (const { x, z } of ROOF_PLANTERS) {
+    const planter = new THREE.Group(); planter.name = 'rooftop-planter'; planter.position.set(x,0,z); roof.add(planter);
+    box(planter, .83, .45, 1.03, '#bb9b76', 0, .24, 0, .045);
+    box(planter, .76, .035, .96, '#554b35', 0, .48, 0, .015);
+    const greenery = plant(planter, 0, 0, .90); greenery.position.y = .25;
   }
   // Small buildings below the roof line make this feel like a roof, not a room.
   const skyline = new THREE.Group(); skyline.name = 'distant-city'; roof.add(skyline);

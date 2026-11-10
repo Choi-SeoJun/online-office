@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, TARGETS } from './layout.ts';
-import type { Floor, OfficeScene, SceneCallbacks, TargetId } from './types.ts';
+import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } from './layout.ts';
+import type { Floor, OfficeScene, Point, SceneCallbacks, TargetId } from './types.ts';
 import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere, spriteLabel } from './models.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 
@@ -14,6 +14,12 @@ export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId |
     ancestor = ancestor.parent;
   }
   return null;
+}
+
+export function targetSelectionForHit(hit: Pick<THREE.Intersection, 'object' | 'point'>, floor: Floor): { target: TargetId; point?: Point } | null {
+  const target = targetForFloor(hit.object, floor);
+  if (!target) return null;
+  return roofWallForTarget(target) ? { target, point: { x: hit.point.x, z: hit.point.z } } : { target };
 }
 
 export function batchArchitecture(group: THREE.Group) {
@@ -178,7 +184,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     // Raycaster does not treat an invisible parent as an interaction boundary.
     // Restrict it to the current floor so hidden desks cannot capture roof taps.
     const hits = raycaster.intersectObjects((onRoof ? roof : room).children, true);
-    for (const hit of hits) { const target = targetForFloor(hit.object, current.floor); if (target) { callbacks.onTarget(target); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
+    for (const hit of hits) { const selection = targetSelectionForHit(hit, current.floor); if (selection) { callbacks.onTarget(selection.target, selection.point); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
   };
   const pointerCancel = () => { down = null; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
   const contextLoss = (e: Event) => { e.preventDefault(); graphicsLost = true; cancelAnimationFrame(frame); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 다시 열어보기를 누르면 이어서 놀 수 있어요.'); };
@@ -203,7 +209,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     (onRoof ? [s.player] : [s.player, s.boss, ...s.coworkers]).forEach(a => { const rig = actors.get(a.id); if (rig) animateActor(rig, a, s, s.elapsed); });
     if (onRoof) animateRooftop(roof, s.elapsed, s.settings.reducedMotion);
     desks[5].chair.rotation.y = s.player.pose === 'spin' && !s.settings.reducedMotion ? s.elapsed * 6 : 0;
-    selection.visible = !s.transition && s.target !== null && isRoofTarget(s.target) === onRoof; if (s.target && selection.visible) { const p = s.target === 'boss' ? s.boss : TARGETS[s.target].point; selection.position.set(p.x, .065, p.z); selection.scale.setScalar(s.settings.reducedMotion ? 1 : 1 + Math.sin(s.elapsed * 3) * .025); }
+    selection.visible = !s.transition && s.target !== null && isRoofTarget(s.target) === onRoof; if (s.target && selection.visible) { const p = s.target === 'boss' ? s.boss : roofWallForTarget(s.target) && s.roofLeanPoint ? s.roofLeanPoint : TARGETS[s.target].point; selection.position.set(p.x, .065, p.z); selection.scale.setScalar(s.settings.reducedMotion ? 1 : 1 + Math.sin(s.elapsed * 3) * .025); }
     destination.visible = !!s.destination; if (s.destination) destination.position.set(s.destination.x, .07, s.destination.z);
     playerRing.position.set(s.player.x, .065, s.player.z); renderer.render(scene, camera);
   };

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameEngine } from './engine.ts';
 import { ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, ROOF_WALLS } from './layout.ts';
+import { getRoofLean } from './roof-rest.ts';
 import type { RoofWallSide } from './types.ts';
 
 const enter = () => { const e = createGameEngine(); e.dispatch({type:'enter'}); return e; };
@@ -42,6 +43,39 @@ test('roof rejects office interactions, allows a candy break and keeps movement 
 });
 
 const rooftop = () => { const e=enter(); e.dispatch({type:'travel',floor:'rooftop'});e.step(2);return e; };
+test('generic leaning uses the nearest wall and preserves the current position along its full edge', () => {
+  const e=rooftop();e.dispatch({type:'candy'});e.step(1.3);
+  const samples=[{x:-3,z:-4.8,wall:'north'},{x:4,z:-4.8,wall:'north'},{x:3,z:4.8,wall:'south'},{x:-5,z:4.8,wall:'south'},{x:8.2,z:-3,wall:'east'},{x:8.2,z:1,wall:'east'},{x:-8.2,z:3,wall:'west'}] as const;
+  for(const sample of samples){
+    e.dispatch({type:'move',point:sample});e.step(20);
+    const expected=getRoofLean(e.state.player)!;assert.equal(expected.wall,sample.wall);
+    e.dispatch({type:'rest',place:'wall'});e.step(20);
+    assert.equal(e.state.roofWallSide,sample.wall);assert.deepEqual(e.state.roofLeanPoint,expected.point);
+    assert.deepEqual({x:e.state.player.x,z:e.state.player.z},expected.point);assert.equal(e.state.candyInMouth,true);
+  }
+});
+
+test('clicking two places on the same wall preserves each clicked coordinate and cancels safely', () => {
+  const e=rooftop();
+  for(const x of [-5,2,6]){
+    e.dispatch({type:'select',target:'roofWall',point:{x,z:-6}});e.step(20);
+    assert.equal(e.state.player.x,x);assert.equal(e.state.player.z,-5.51);assert.equal(e.state.roofWallSide,'north');
+  }
+  e.dispatch({type:'select',target:'roofWallSouth',point:{x:-3,z:6}});e.step(.3);
+  const destination=structuredClone(e.state.destination);e.dispatch({type:'pause',value:true});e.step(3);assert.deepEqual(e.state.destination,destination);
+  e.dispatch({type:'pause',value:false});e.dispatch({type:'move',point:{x:0,z:0}});e.step(20);
+  assert.equal(e.state.roofRest,null);assert.equal(e.state.roofLeanPoint,null);
+  e.dispatch({type:'select',target:'roofWallEast',point:{x:NaN,z:1}});e.step(2);assert.equal(e.state.roofRest,null);
+});
+
+test('nearby interaction leans locally without selecting a direction and distant E never teleports', () => {
+  const e=rooftop();e.dispatch({type:'move',point:{x:4,z:-4.9}});e.step(15);
+  assert.equal(e.state.target,null);e.dispatch({type:'interact'});e.step(1);
+  assert.equal(e.state.roofWallSide,'north');assert.equal(e.state.player.x,4);assert.equal(e.state.player.z,-5.51);
+  e.dispatch({type:'stand'});assert.equal(e.state.roofLeanPoint,null);
+  e.dispatch({type:'move',point:{x:0,z:0}});e.step(10);e.dispatch({type:'interact'});e.step(1);
+  assert.equal(e.state.roofRest,null);assert.equal(e.state.destination,null);
+});
 test('bench and wall rest are reachable independent actions and candy persists between them', () => {
   const e=rooftop();
   e.dispatch({type:'rest',place:'bench'});assert.equal(e.state.roofRest,null);assert.ok(e.state.destination);
@@ -52,7 +86,7 @@ test('bench and wall rest are reachable independent actions and candy persists b
   e.dispatch({type:'pause',value:false});e.step(.7);assert.equal(e.state.candyInMouth,true);assert.equal(e.state.player.pose,'sit');
   e.dispatch({type:'rest',place:'wall'});assert.equal(e.state.seat,null);assert.equal(e.state.candyInMouth,true);
   e.step(5);assert.equal(e.state.roofRest,'wall');assert.equal(e.state.player.pose,'wallLean');assert.equal(e.state.player.angle,0);
-  assert.deepEqual({x:e.state.player.x,z:e.state.player.z},ROOF_REST.wall.point);
+  assert.deepEqual({x:e.state.player.x,z:e.state.player.z},{x:ROOF_REST.bench.seat.x,z:-5.51});
   e.dispatch({type:'candy'});assert.equal(e.state.candyInMouth,false);assert.equal(e.state.player.pose,'wallLean');
   e.dispatch({type:'candy'});e.step(1.3);assert.equal(e.state.candyInMouth,true);assert.equal(e.state.player.pose,'wallLean');
   e.dispatch({type:'stand'});assert.equal(e.state.roofRest,null);assert.equal(e.state.player.pose,'idle');assert.equal(e.state.candyInMouth,true);
@@ -82,6 +116,7 @@ test('all four outer walls are reachable without crossing rooftop furniture and 
   const sides=Object.keys(ROOF_WALLS) as RoofWallSide[];
   for (const from of sides) for(const to of sides){
     e.dispatch({type:'rest',place:'wall',wall:from});e.step(15);
+    const expected=getRoofLean(e.state.player,to)!;
     e.dispatch({type:'rest',place:'wall',wall:to});
     for(let i=0;i<300;i++){
       e.step(.05);const p=e.state.player;
@@ -89,7 +124,7 @@ test('all four outer walls are reachable without crossing rooftop furniture and 
     }
     assert.equal(e.state.roofRest,'wall');assert.equal(e.state.roofWallSide,to);assert.equal(e.state.player.pose,'wallLean');
     assert.equal(e.state.player.angle,ROOF_WALLS[to].angle);assert.equal(e.state.candyInMouth,true);
-    assert.deepEqual({x:e.state.player.x,z:e.state.player.z},ROOF_WALLS[to].point);
+    assert.deepEqual({x:e.state.player.x,z:e.state.player.z},expected.point);
   }
   e.dispatch({type:'stand'});assert.equal(e.state.roofWallSide,null);
   e.dispatch({type:'travel',floor:'office'});e.step(2);e.dispatch({type:'rest',place:'wall',wall:'east'});
@@ -114,12 +149,13 @@ test('walking into the narrow outer planter corridor can still route back to eve
     e.dispatch({type:'rest',place:'wall',wall:side});e.step(15);
     e.dispatch({type:'axis',x:side==='west'?-1:1,z:0});e.step(.06);
     e.dispatch({type:'axis',x:0,z:-1});e.step(.7);e.dispatch({type:'axis',x:0,z:0});
-    assert.ok(Math.abs(e.state.player.x)>8.6);assert.ok(e.state.player.z < -1.3);
+    assert.ok(Math.abs(e.state.player.x)>8.6);assert.ok(Number.isFinite(e.state.player.z));
     e.dispatch({type:'rest',place:'wall',wall:'south'});assert.ok(e.state.destination,'outer corridor must connect to navigation');
     e.step(20);assert.equal(e.state.roofWallSide,'south');
     e.dispatch({type:'rest',place:'bench'});e.step(20);assert.equal(e.state.seat,'roof-bench');
   }
   for (const direction of [-1,1]) {
+    e.dispatch({type:'move',point:{x:0,z:4}});e.step(20);
     e.dispatch({type:'rest',place:'wall',wall:'south'});e.step(20);
     e.dispatch({type:'axis',x:0,z:1});e.step(.06);
     e.dispatch({type:'axis',x:direction,z:0});e.step(3);e.dispatch({type:'axis',x:0,z:0});

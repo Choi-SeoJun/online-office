@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
-import { batchArchitecture, targetForFloor } from './scene.ts';
-import { ROOF_BIN, ROOF_REST, ROOF_WALLS } from './layout.ts';
+import { batchArchitecture, targetForFloor, targetSelectionForHit } from './scene.ts';
+import { ROOF_BIN, ROOF_OBSTACLES, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
 
 // Label rasterization is the only browser dependency of the real roof geometry.
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
@@ -17,11 +17,58 @@ test('roof walking space reaches real ground without intersecting decoration', (
   roof.updateMatrixWorld(true);
   const ray = new THREE.Raycaster();
   for (const x of [-6.58, -4.3, -2.75, 0, 1.2, 2.75, 4, 6.58]) for (const z of [-4.29, -4.08, -2, 0, 2, 4.08]) {
+    if (ROOF_OBSTACLES.some(o => Math.abs(x-o.x) < o.w/2+.22 && Math.abs(z-o.z) < o.d/2+.22)) continue;
     ray.set(new THREE.Vector3(x, 8, z), new THREE.Vector3(0, -1, 0));
     const hit = ray.intersectObject(roof, true)[0];
     assert.ok(hit?.object.userData.ground, `walking point ${x}, ${z} must stay clear of furniture`);
     assert.ok(Math.abs(hit.point.y) < .1, 'walking surface aligns with character feet');
   }
+});
+
+test('wall clicks retain their actual world positions after render batching', () => {
+  const roof = createRooftop(new THREE.Group()); batchArchitecture(roof); roof.updateMatrixWorld(true);
+  for (const [side, wall] of Object.entries(ROOF_WALLS)) {
+    const horizontal = side === 'north' || side === 'south';
+    const selections = [-2.3, 2.7].map(tangent => {
+      const origin = new THREE.Vector3(horizontal ? tangent : wall.point.x, .3, horizontal ? wall.point.z : tangent);
+      const ray = new THREE.Raycaster(origin, new THREE.Vector3(-Math.sin(wall.angle),0,-Math.cos(wall.angle)));
+      const hit = ray.intersectObject(roof,true)[0];
+      const selection = targetSelectionForHit(hit,'rooftop');
+      assert.equal(selection?.target,wall.target);
+      assert.ok(selection?.point, 'wall selection carries the actual hit coordinate');
+      assert.ok(Math.abs((horizontal ? selection.point.x : selection.point.z)-tangent)<.001);
+      assert.equal(targetSelectionForHit(hit,'office'),null);
+      return selection.point;
+    });
+    assert.ok(Math.hypot(selections[0].x-selections[1].x,selections[0].z-selections[1].z)>4.9,'two places on one wall stay distinct');
+  }
+});
+
+test('every wall has a continuous clear resting strip with real upper-back support', () => {
+  const roof = createRooftop(new THREE.Group());roof.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  for (const [side,wall] of Object.entries(ROOF_WALLS)) {
+    const horizontal=side==='north'||side==='south';
+    const limit=horizontal?8.51:5.51;
+    for(let i=0;i<=30;i++) {
+      const tangent=-limit+2*limit*i/30;
+      const p={x:horizontal?tangent:wall.point.x,z:horizontal?wall.point.z:tangent};
+      ray.set(new THREE.Vector3(p.x,4,p.z),new THREE.Vector3(0,-1,0));
+      assert.ok(ray.intersectObject(roof,true)[0].object.userData.ground,`${side} strip is clear at ${tangent}`);
+      ray.set(new THREE.Vector3(p.x,1.35,p.z),new THREE.Vector3(-Math.sin(wall.angle),0,-Math.cos(wall.angle)));
+      // The thin mounted sign can precede the wall by a few millimetres.
+      const support=ray.intersectObject(roof,true).find(hit=>targetForFloor(hit.object.parent!,'rooftop')===wall.target);
+      assert.ok(support&&Math.abs(support.distance-.4)<.002,`${side} has back support at ${tangent}`);
+    }
+  }
+});
+
+test('relocated rooftop furniture matches navigation anchors', () => {
+  const roof=createRooftop(new THREE.Group());roof.updateMatrixWorld(true);
+  const stairs=roof.getObjectByName('rooftop-stairs');assert.ok(stairs);
+  assert.equal(stairs.position.x,ROOF_STAIRS.x);assert.equal(stairs.position.z,ROOF_STAIRS.z);
+  const actual=roof.children.filter(child=>child.name==='rooftop-planter').map(child=>({x:child.position.x,z:child.position.z}));
+  assert.deepEqual(actual,ROOF_PLANTERS.map(({x,z})=>({x,z})));
 });
 
 test('bench seat supports the seated player and can be selected from the walking space', () => {

@@ -11,7 +11,10 @@ export const ROOF_WALLS = {
   west: { target: 'roofWallWest', label: '왼쪽 벽', point: { x: -8.51, z: .4 }, center: { x: -9, z: 0 }, width: 12.1, depth: .18, height: 1.8, front: -8.91, angle: Math.PI / 2 },
 } as const;
 export const roofWallForTarget = (target: TargetId): RoofWallSide | null => (Object.keys(ROOF_WALLS) as RoofWallSide[]).find(side => ROOF_WALLS[side].target === target) ?? null;
-export const ROOF_BIN = { x: -8, z: -2.9, w: .66, d: .66 };
+export const ROOF_BIN = { x: -7.8, z: -2.9, w: .66, d: .66 };
+// Leave a continuous walking and leaning strip around the entire perimeter.
+export const ROOF_STAIRS = { x: -6.9, z: -4.15, w: 1.78, d: 1.74 };
+export const ROOF_PLANTERS = [-7.2, 7.2].flatMap(x => [-1.3, 2.2, 4].map(z => ({ x, z, w: 1.05, d: 1.2 })));
 export const ROOF_REST = {
   bench: { point: { x: 1.2, z: -3.95 }, seat: { x: 1.2, z: -4.65 }, seatTop: 0.6175, angle: 0 },
   wall: ROOF_WALLS.north,
@@ -27,9 +30,9 @@ export const DESKS = [
 ] as const;
 export type Obstacle = { x: number; z: number; w: number; d: number };
 export const ROOF_OBSTACLES: Obstacle[] = [
-  { x: -7.8, z: -4.85, w: 1.78, d: 1.74 },
+  ROOF_STAIRS,
   { x: 1.2, z: -4.65, w: 3.1, d: .7 },
-  ...[-7.8, 7.8].flatMap(x => [-1.3, 2.2, 4.8].map(z => ({ x, z, w: 1.05, d: 1.2 }))),
+  ...ROOF_PLANTERS,
   ROOF_BIN,
 ];
 export const OBSTACLES: Obstacle[] = [
