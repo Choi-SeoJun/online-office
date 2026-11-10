@@ -1,0 +1,70 @@
+/* Shared play controls use the same actions in both kinds of company. */
+.multi-room .location-nav{left:29px;right:auto;top:143px;transform:none}
+.multi-room .floor-travel-button{top:94px;right:30px}
+.multi-room .bottom-area{width:min(650px,calc(100% - 280px));bottom:25px}
+.multi-room .play-extra-actions{position:absolute;right:calc(100% + 12px);bottom:0}
+.multi-room .play-extra-actions button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:68px;height:93px;border-radius:18px;background:#426e58;color:#fffdf4;font-size:11px;box-shadow:0 10px 35px #304a3310}
+.multi-room .game-toast{top:90px;max-width:min(430px,calc(100% - 420px))}
+.multi-room .boss-warning{top:140px}
+.multi-room .rooftop-note{left:35px;top:151px}
+.multi-room .room-chat{top:auto;left:auto;right:26px;bottom:145px;width:360px;height:min(490px,calc(100dvh - 240px));max-width:calc(100vw - 28px);max-height:calc(100dvh - 205px);z-index:22;min-height:0;backdrop-filter:blur(9px)}
+.room-chat.is-resizing{user-select:none;box-shadow:0 12px 50px #344d3430;border-color:#9bb4a1}
+.room-chat .chat-resize-handle{position:absolute;left:0;top:0;width:30px;height:30px;display:grid;place-items:center;z-index:2;border-radius:18px 0 10px 0;background:#e7eddf;color:#56765e;cursor:nwse-resize;touch-action:none}
+.room-chat .chat-resize-handle:hover,.room-chat .chat-resize-handle:focus-visible{background:#cddfc9;color:#264e39;outline:2px solid #6e9277;outline-offset:-2px}
+.room-chat>header{padding-left:34px;flex-shrink:0}
+.room-chat form{flex-shrink:0}
+.room-chat>header>div{min-width:0;gap:6px}
+.room-chat>header strong{white-space:nowrap}
+.room-chat .chat-messages{min-height:0}
+.multi-room.chat-is-open .camera-controls{display:none}
+.multi-room .room-header-actions{gap:6px}
+.multi-room .room-notice{z-index:31}
+@media(max-width:760px){
+  .multi-room .room-header{left:14px;right:14px;top:14px;gap:5px}
+  .multi-room .room-title>svg{display:none}
+  .multi-room .room-title h1{font-size:13px;max-width:100px}
+  .multi-room .room-title span{font-size:8px}
+  .multi-room .room-header-actions{gap:4px}
+  .multi-room .room-header-actions>.icon-button{width:29px;height:31px;padding:5px}
+  .multi-room .room-members-button,.multi-room .room-invite-button{min-height:31px;padding:0 6px;gap:4px;font-size:10px}
+  .multi-room .room-members-button svg{width:14px}
+  .multi-room .room-self{top:67px;left:16px;font-size:9px}
+  .multi-room .room-self>span:last-child{font-size:8px;padding-left:6px}
+  .multi-room .floor-travel-button{top:65px;right:14px;min-height:32px;font-size:9px}
+  .multi-room .location-nav{left:14px;right:auto;top:110px;padding:5px;gap:2px;border-radius:13px}
+  .multi-room .location-nav button{min-height:47px;min-width:43px;font-size:9px;padding:5px}
+  .multi-room .location-nav svg{width:16px;height:16px}
+  .multi-room .bottom-area,.multi-room.is-rooftop .bottom-area{left:50%;right:auto;transform:translateX(-50%);width:calc(100% - 28px);max-width:600px;bottom:max(14px,env(safe-area-inset-bottom))}
+  .multi-room .bag-button,.multi-room.is-rooftop .bag-button{left:auto;right:0;bottom:calc(100% + 10px);height:36px;width:89px;flex-direction:row;border-radius:11px}
+  .multi-room .play-extra-actions{right:99px;bottom:calc(100% + 10px)}
+  .multi-room .play-extra-actions button{width:66px;height:36px;flex-direction:row;gap:6px;border-radius:11px;font-size:10px}
+  .multi-room .play-extra-actions svg{width:17px}
+  .multi-room .near-wall-action{bottom:calc(100% + 52px);font-size:11px}
+  .multi-room .bottom-meta{padding-right:170px;min-height:26px}
+  .multi-room .bottom-meta>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:95px}
+  .multi-room .bottom-meta>button{font-size:8px;white-space:nowrap}
+  .multi-room .room-chat{right:14px;left:auto;bottom:185px;width:calc(100% - 28px);height:min(430px,calc(100dvh - 275px));max-height:calc(100dvh - 205px);border-radius:18px}
+  .multi-room .game-toast{top:106px;left:auto;right:14px;transform:none;max-width:calc(100% - 90px);padding:9px 12px;font-size:11px}
+  .multi-room .boss-warning{top:106px;left:75px;right:14px;width:auto;transform:none;min-width:0;flex-wrap:wrap}
+  .multi-room .boss-warning button{margin-left:auto}
+  .multi-room .rooftop-note{left:22px;top:132px}
+  .multi-room .bag-panel{right:14px;bottom:165px;max-height:calc(100dvh - 240px);overflow:auto}
+  .multi-room .camera-controls{right:14px;bottom:216px}
+  .multi-room .coworker-poke-card{bottom:180px}
+  .multi-room .todo-board{top:108px;max-height:calc(100dvh - 280px);min-height:180px}
+}
+@media(max-height:600px){
+  .multi-room .room-chat{bottom:110px;max-height:calc(100dvh - 150px);height:calc(100dvh - 150px)}
+  .multi-room .bottom-area{bottom:12px}
+  .multi-room .location-nav{top:100px;gap:1px}
+  .multi-room .location-nav button{min-height:36px;font-size:8px}
+}
+@media(max-height:480px){
+  .room-chat>header{padding:8px 10px 8px 34px}
+  .room-chat form{padding:7px 9px}
+  .room-chat textarea{height:40px;padding:6px 9px;line-height:1.4}
+  .room-chat .chat-messages{padding:8px 12px}
+}
+@media(max-height:600px) and (max-width:760px){
+  .multi-room .room-chat{bottom:185px;max-height:calc(100dvh - 205px);height:calc(100dvh - 205px)}
+}

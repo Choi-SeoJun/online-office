@@ -5,13 +5,16 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { handleRoomAction, type RoomDatabase } from './rooms.ts';
 import { createMultiLayout } from '../game/multi-layout.ts';
 import type { RoomSession, RoomSnapshot } from '../game/multi-types.ts';
+import { ROOF_REST, ROOF_WALLS } from '../game/layout.ts';
+import { createMultiController } from '../game/multi-controller.ts';
+import type { Command, TargetId } from '../game/types.ts';
 
 function fixture() {
   const sql = new DatabaseSync(':memory:');
   sql.exec('PRAGMA foreign_keys=ON');
   for (const file of readdirSync(new URL('../drizzle', import.meta.url)).filter(x => x.endsWith('.sql')).sort()) sql.exec(readFileSync(new URL(`../drizzle/${file}`, import.meta.url), 'utf8'));
   const wrap = (query: string, values: (string | number | null)[] = []) => ({
-    bind(...next: (string | number | null)[]) { return wrap(query, next); },
+    bind(...next: (string | number | null)[]) { assert.ok(next.length <= 100, `D1 permits at most 100 bound parameters; query used ${next.length}`); return wrap(query, next); },
     async all() { return { success: true, results: sql.prepare(query).all(...values), meta: { changes: Number(sql.prepare('SELECT changes() AS n').get()!.n) } }; },
     async first() { return sql.prepare(query).get(...values) ?? null; },
     async run() { const result = sql.prepare(query).run(...values); return { success: true, results: [], meta: { changes: Number(result.changes) } }; },
@@ -29,6 +32,154 @@ function fixture() {
   };
   return { sql, send, advance, create };
 }
+
+test('shared office keeps full rooftop and pantry visual state without private inventories', async () => {
+  const f=fixture(),host=await f.create();
+  const own=host.snapshot.players[0];
+  assert.equal(own.floor,'office');
+  assert.equal(host.snapshot.boss.actor.name,'박부장');
+  const roof={...own,...ROOF_REST.bench.seat,floor:'rooftop',pose:'sit',seat:'roof-bench',roofRest:'bench',candyInMouth:true,elapsed:12,inventory:{coffee:3,cookie:6},todos:['비밀 업무']};
+  const result=await f.send({action:'sync',...host.session,player:roof});
+  assert.equal(result.status,200);
+  const remote=(result.body as {snapshot:RoomSnapshot}).snapshot.players[0];
+  assert.equal(remote.floor,'rooftop');assert.equal(remote.roofRest,'bench');assert.equal(remote.candyInMouth,true);
+  assert.equal('inventory' in remote,false);assert.equal('todos' in remote,false);
+  f.advance(300);
+  const wall={...roof,x:ROOF_WALLS.east.point.x,z:2.5,pose:'wallLean',seat:null,roofRest:'wall',roofWallSide:'east'};
+  assert.equal((await f.send({action:'sync',...host.session,player:wall})).status,200);
+  f.advance(300);
+  assert.equal((await f.send({action:'sync',...host.session,player:{...wall,x:0}})).status,400);
+  assert.equal((await f.send({action:'sync',...host.session,player:{...roof,z:0}})).status,400);
+  const pantry={...own,...createMultiLayout(4).coffee,pose:'brew',activity:{kind:'brew',duration:3.2,remaining:1.7},elapsed:20,carryingCoffee:true};
+  assert.equal((await f.send({action:'sync',...host.session,player:pantry})).status,200);
+  f.advance(300);
+  assert.equal((await f.send({action:'sync',...host.session,player:{...pantry,activity:{kind:'brew',duration:3.2,remaining:50}}})).status,400);
+});
+
+test('office resizing leaves rooftop visitors at their bench',async()=>{
+  const f=fixture(),host=await f.create(16),own=host.snapshot.players[0];
+  await f.send({action:'sync',...host.session,player:{...own,...ROOF_REST.bench.seat,floor:'rooftop',pose:'sit',seat:'roof-bench',roofRest:'bench',candyInMouth:true}});
+  const resized=await f.send({action:'capacity',...host.session,capacity:2});
+  assert.equal(resized.status,200);
+  const player=(resized.body as {snapshot:RoomSnapshot}).snapshot.players[0];
+  assert.equal(player.floor,'rooftop');assert.equal(player.seat,'roof-bench');assert.equal(player.z,ROOF_REST.bench.seat.z);
+});
+
+test('every supported capacity can be created and resized within D1 parameter limits',async()=>{
+  const f=fixture(),host=await f.create(8);
+  for(const capacity of [16,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,2]){
+    const resized=await f.send({action:'capacity',...host.session,capacity});
+    assert.equal(resized.status,200,`resize to ${capacity}`);
+    assert.equal((resized.body as {snapshot:RoomSnapshot}).snapshot.room.capacity,capacity);
+  }
+  const minimum=await fixture().create(2),maximum=await fixture().create(16);
+  assert.equal(minimum.snapshot.room.capacity,2);assert.equal(maximum.snapshot.room.capacity,16);
+});
+
+test('boss is host-owned but every nearby office member can trigger one shared reaction',async()=>{
+  const f=fixture(),host=await f.create();
+  const guest=(await f.send({action:'join',code:host.session.code,name:'이사원'})).body as {session:RoomSession;snapshot:RoomSnapshot};
+  const boss=host.snapshot.boss,actor={...boss.actor,x:boss.actor.x+.3};
+  assert.equal((await f.send({action:'sync',...guest.session,boss:{actor,phase:'routine'}})).status,403);
+  const updated=await f.send({action:'sync',...host.session,boss:{actor:{...actor,name:'위조',id:'other'},phase:'routine'}});
+  assert.equal(updated.status,200);
+  const authoritative=(updated.body as {snapshot:RoomSnapshot}).snapshot.boss;
+  assert.equal(authoritative.actor.id,'boss');assert.equal(authoritative.actor.name,'박부장');assert.equal(authoritative.actor.x,actor.x);
+  const self=guest.snapshot.players.find(p=>p.id===guest.session.playerId)!;
+  const attack={action:'attack',...guest.session,weapon:'hammer',player:{...self,x:actor.x+1.4,z:actor.z}};
+  const hit=await f.send(attack);assert.equal(hit.status,200);
+  const reaction=(hit.body as {snapshot:RoomSnapshot}).snapshot.boss;
+  assert.equal(reaction.lastHit?.playerId,guest.session.playerId);assert.equal(reaction.lastHit?.weapon,'hammer');assert.equal(reaction.phase,'hit');
+  assert.equal((await f.send(attack)).status,429);
+  f.advance(900);
+  const next=await f.send({...attack,weapon:'fan'});assert.equal(next.status,200);
+  const nextBoss=(next.body as {snapshot:RoomSnapshot}).snapshot.boss;
+  assert.equal(nextBoss.lastHit?.id,(reaction.lastHit?.id??0)+1);
+  f.advance(300);
+  const observed=(await f.send({action:'sync',...host.session})).body as {snapshot:RoomSnapshot};
+  assert.equal(observed.snapshot.boss.lastHit?.id,nextBoss.lastHit?.id);
+  assert.equal((await f.send({...attack,player:{...self,floor:'rooftop',x:0,z:0}})).status,400);
+  assert.equal((await f.send({...attack,player:self})).status,400);
+});
+
+test('shared boss survives host travel and transfers authority when that host leaves',async()=>{
+  const f=fixture(),host=await f.create();
+  const guest=(await f.send({action:'join',code:host.session.code,name:'이사원'})).body as {session:RoomSession;snapshot:RoomSnapshot};
+  const actor={...host.snapshot.boss.actor,z:host.snapshot.boss.actor.z+.4};
+  const own=host.snapshot.players[0];
+  const roof=await f.send({action:'sync',...host.session,player:{...own,floor:'rooftop',x:0,z:2.4},boss:{actor,phase:'routine'}});
+  assert.equal(roof.status,200);assert.equal((roof.body as {snapshot:RoomSnapshot}).snapshot.boss.actor.z,actor.z);
+  await f.send({action:'leave',...host.session});
+  f.advance(300);
+  const inherited=await f.send({action:'sync',...guest.session,boss:{actor:{...actor,x:actor.x+.2},phase:'watch'}});
+  assert.equal(inherited.status,200);
+  const snapshot=(inherited.body as {snapshot:RoomSnapshot}).snapshot;
+  assert.equal(snapshot.room.hostId,guest.session.playerId);assert.equal(snapshot.boss.phase,'watch');
+});
+
+test('simultaneous attacks enforce one sender cooldown and preserve accepted boss hits against host packets',async()=>{
+  const f=fixture(),host=await f.create();
+  const own=host.snapshot.players[0],boss=host.snapshot.boss;
+  const player={...own,x:boss.actor.x+1.4,z:boss.actor.z};
+  const hits=await Promise.all([1,2].map(()=>f.send({action:'attack',...host.session,weapon:'hammer',player})));
+  assert.deepEqual(hits.map(hit=>hit.status).sort(),[200,429]);
+  const accepted=(hits.find(hit=>hit.status===200)!.body as {snapshot:RoomSnapshot}).snapshot.boss;
+  f.advance(300);
+  const oldHostPacket=await f.send({action:'sync',...host.session,boss:{actor:{...boss.actor,x:boss.actor.x+.6},phase:'routine'}});
+  assert.equal(oldHostPacket.status,200);
+  const after=(oldHostPacket.body as {snapshot:RoomSnapshot}).snapshot.boss;
+  assert.equal(after.actor.x,accepted.actor.x);assert.equal(after.lastHit?.id,accepted.lastHit?.id);assert.equal(after.phase,'hit');
+});
+
+test('parity migration preserves existing rooms, sessions, chat, and notification records',()=>{
+  const sql=new DatabaseSync(':memory:');
+  sql.exec('PRAGMA foreign_keys=ON');
+  for(const file of ['0000_flat_ezekiel_stane.sql','0001_breezy_prowler.sql'])sql.exec(readFileSync(new URL(`../drizzle/${file}`,import.meta.url),'utf8'));
+  sql.prepare('INSERT INTO office_rooms (code,name,capacity,host_id,created_at,expires_at) VALUES (?,?,?,?,?,?)').run('ABCDEFGH','기존 회사',2,'existing',1,100_000);
+  sql.prepare("INSERT INTO office_members (id,room_code,token_hash,seat_index,name,x,z,angle,pose,moving,joined_at,last_seen) VALUES (?,?,?,?,?,?,?,?,'idle',0,?,?)").run('existing','ABCDEFGH','existing-token',0,'기존사원',1,2,0,1,1);
+  sql.prepare('INSERT INTO office_messages (request_id,room_code,player_id,name,text,created_at) VALUES (?,?,?,?,?,?)').run('old-message','ABCDEFGH','existing','기존사원','안녕하세요',1);
+  sql.prepare('INSERT INTO office_notifications (request_id,room_code,recipient_id,sender_id,sender_name,created_at) VALUES (?,?,?,?,?,?)').run('old-poke','ABCDEFGH','existing','sender','동료',1);
+  sql.exec(readFileSync(new URL('../drizzle/0002_shocking_maelstrom.sql',import.meta.url),'utf8'));
+  assert.deepEqual({...sql.prepare('SELECT token_hash,floor,visual,last_attack FROM office_members').get()!},{token_hash:'existing-token',floor:'office',visual:null,last_attack:0});
+  assert.equal(sql.prepare('SELECT boss_hit_id FROM office_rooms').get()!.boss_hit_id,0);
+  assert.equal(sql.prepare('SELECT text FROM office_messages').get()!.text,'안녕하세요');
+  assert.equal(sql.prepare('SELECT sender_name FROM office_notifications').get()!.sender_name,'동료');
+  assert.deepEqual(sql.prepare('PRAGMA foreign_key_check').all(),[]);sql.close();
+});
+
+test('real shared-engine desk, pantry, and rooftop actions remain accepted by room synchronization',async()=>{
+  const f=fixture(),host=await f.create(16),own=host.snapshot.players[0];
+  const controller=createMultiController(own,16);controller.applySnapshot(host.snapshot);
+  const engine=controller.engine;
+  const sync=async()=>{
+    f.advance(500);
+    const result=await f.send({action:'sync',...host.session,player:controller.serializePlayer(),boss:controller.serializeBoss()});
+    assert.equal(result.status,200,JSON.stringify({pose:engine.state.player.pose,floor:engine.state.floor,player:controller.serializePlayer(),response:result.body}));
+    controller.applySnapshot((result.body as {snapshot:RoomSnapshot}).snapshot);
+  };
+  const tick=async(seconds=.5)=>{for(let t=0;t<seconds-1e-8;t+=.5){controller.step(Math.min(.5,seconds-t));await sync();}};
+  const command=async(value:Command)=>{engine.dispatch(value);await sync();};
+  const approach=async(target:TargetId)=>{
+    await command({type:'select',target});
+    for(let tries=0;tries<60&&!engine.state.ready;tries++)await tick();
+    assert.equal(engine.state.ready,true,`reach ${target}`);
+    await command({type:'interact'});
+  };
+  await approach('desk');await command({type:'desk',mode:'shopping'});await command({type:'desk',mode:'game'});await command({type:'desk',mode:'sleep'});
+  await command({type:'spin'});await tick(1.5);await command({type:'stand'});
+  await approach('coffee');await tick(3.5);await command({type:'drink'});await tick(2);
+  await approach('snacks');await command({type:'take',snack:'choco'});await tick(1.5);await command({type:'eat',snack:'choco'});await tick(1.5);
+  await approach('lounge');await command({type:'interact'});await command({type:'stand'});
+  await approach('boss');engine.dispatch({type:'weapon',weapon:'fan'});engine.dispatch({type:'attack'});
+  const attacked=await f.send({action:'attack',...host.session,weapon:'fan',player:controller.serializePlayer()});
+  assert.equal(attacked.status,200);controller.applySnapshot((attacked.body as {snapshot:RoomSnapshot}).snapshot);await tick(1);
+  await command({type:'travel',floor:'rooftop'});await tick(2);
+  await command({type:'rest',place:'bench'});await tick(6);assert.equal(engine.state.seat,'roof-bench');
+  await command({type:'candy'});await tick(1.5);assert.equal(engine.state.candyInMouth,true);
+  await command({type:'stand'});await command({type:'rest',place:'wall'});await tick(6);assert.equal(engine.state.roofRest,'wall');
+  await command({type:'travel',floor:'office'});await tick(2);assert.equal(engine.state.floor,'office');
+  engine.dispose();
+});
 
 test('avatar choice survives room snapshots while old clients default to short hair', async () => {
   const f=fixture(), host=await f.create();

@@ -1,15 +1,30 @@
-import type { Actor, Command, Floor, GameEngine, GameEvent, GameState, PersistedState, Point, Pose, RoofWallSide, Snack } from './types.ts';
+import type { Actor, Command, Floor, GameEvent, GameState, PersistedState, Point, Pose, RoofWallSide, Snack } from './types.ts';
 import { BOUNDS, DESKS, OBSTACLES, ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, ROOF_START, ROOF_WALLS, SNACKS, START, TARGETS, WEAPONS, isRoofTarget, roofWallForTarget } from './layout.ts';
 import { readSavedState, toPersistedState } from './storage.ts';
 import { getRoofLean, ROOF_LEAN_DISTANCE } from './roof-rest.ts';
 
-const RADIUS = .22;
 const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
 const face = (actor: Actor, point: Point) => { actor.angle = Math.atan2(point.x - actor.x, point.z - actor.z); };
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
+export type OfficeEnvironment = {
+  bounds: typeof BOUNDS; obstacles: { x: number; z: number; w: number; d: number }[];
+  start: Point; targets: typeof TARGETS; deskAngle: number; loungeAngle: number;
+  coffeeFacing: Point; snacksFacing: Point; patrol: Point[];
+};
+export type GameEnvironment = {
+  getOffice(): OfficeEnvironment; coworkers?: boolean;
+  bossAuthority?: () => boolean; continueBossOnRoof?: boolean;
+  getPeers?: () => { actor: Actor; floor: Floor; seat: GameState['seat']; deskMode: GameState['deskMode'] }[];
+};
+const SOLO_OFFICE: OfficeEnvironment = { bounds: BOUNDS, obstacles: OBSTACLES, start: START, targets: TARGETS, deskAngle: Math.PI, loungeAngle: Math.PI,
+  coffeeFacing: { x: 7.6, z: -4.3 }, snacksFacing: { x: 7.6, z: -1.8 },
+  patrol: [{ x: 3.5, z: 3.25 }, { x: -3.8, z: 4 }, { x: -6, z: -3.55 }, { x: 3.5, z: .3 }] };
+function createNavigation(office: OfficeEnvironment) {
+const RADIUS = office === SOLO_OFFICE ? .22 : .24;
 const valid = (p: Point, floor: Floor = 'office') => {
-  const bounds = floor === 'rooftop' ? ROOF_BOUNDS : BOUNDS, obstacles = floor === 'rooftop' ? ROOF_OBSTACLES : OBSTACLES;
+  const RADIUS = floor === 'rooftop' ? .22 : office === SOLO_OFFICE ? .22 : .24;
+  const bounds = floor === 'rooftop' ? ROOF_BOUNDS : office.bounds, obstacles = floor === 'rooftop' ? ROOF_OBSTACLES : office.obstacles;
   return Number.isFinite(p.x) && Number.isFinite(p.z)
     && p.x >= bounds.minX + RADIUS && p.x <= bounds.maxX - RADIUS
     && p.z >= bounds.minZ + RADIUS && p.z <= bounds.maxZ - RADIUS
@@ -17,11 +32,12 @@ const valid = (p: Point, floor: Floor = 'office') => {
 };
 function lineClear(a: Point, b: Point, avoid?: Point, floor: Floor = 'office') {
   if (!valid(a, floor) || !valid(b, floor)) return false;
+  const RADIUS = floor === 'rooftop' ? .22 : office === SOLO_OFFICE ? .22 : .24;
   const dx = b.x - a.x, dz = b.z - a.z;
   // Sampling can skip a narrow diagonal intersection with a desk corner.
   // Clip the entire segment against each expanded rectangle instead, so a
   // route and any shorter per-frame portion of it agree on collision safety.
-  for (const obstacle of floor === 'rooftop' ? ROOF_OBSTACLES : OBSTACLES) {
+  for (const obstacle of floor === 'rooftop' ? ROOF_OBSTACLES : office.obstacles) {
     let enter = 0, leave = 1, intersects = true;
     for (const [origin, delta, min, max] of [
       [a.x, dx, obstacle.x - obstacle.w / 2 - RADIUS, obstacle.x + obstacle.w / 2 + RADIUS],
@@ -49,8 +65,13 @@ function lineClear(a: Point, b: Point, avoid?: Point, floor: Floor = 'office') {
 
 // Coworkers never block navigation. Only a selected boss adds temporary
 // encounter clearance, so the player cannot approach through the boss's body.
-const GRID = .3, NX = 55, NZ = 35;
-const nodes: Point[] = Array.from({ length: NX * NZ }, (_, i) => ({ x: -8.1 + (i % NX) * GRID, z: -5.1 + Math.floor(i / NX) * GRID }));
+const GRID = .3;
+const NX = office === SOLO_OFFICE ? 55 : Math.ceil((office.bounds.maxX - office.bounds.minX - RADIUS * 2) / GRID) + 1;
+const NZ = office === SOLO_OFFICE ? 35 : Math.ceil((office.bounds.maxZ - office.bounds.minZ - RADIUS * 2) / GRID) + 1;
+const nodes: Point[] = Array.from({ length: NX * NZ }, (_, i) => office === SOLO_OFFICE
+  ? { x: -8.1 + (i % NX) * GRID, z: -5.1 + Math.floor(i / NX) * GRID }
+  : { x: office.bounds.minX + RADIUS + (i % NX) * (office.bounds.maxX - office.bounds.minX - RADIUS * 2) / (NX - 1),
+      z: office.bounds.minZ + RADIUS + Math.floor(i / NX) * (office.bounds.maxZ - office.bounds.minZ - RADIUS * 2) / (NZ - 1) });
 // The expanded roof includes slim corridors outside the planters. Its grid
 // reaches those corridors; the office keeps its established furniture grid.
 const roofNX = 87, roofNZ = 57;
@@ -74,7 +95,8 @@ function nearest(p: Point, visibleFrom?: Point, avoid?: Point, floor: Floor = 'o
 }
 function route(start: Point, requested: Point, avoid?: Point, floor: Floor = 'office'): Point[] {
   if (!Number.isFinite(requested.x) || !Number.isFinite(requested.z)) return [];
-  const bounds = floor === 'rooftop' ? ROOF_BOUNDS : BOUNDS;
+  const RADIUS = floor === 'rooftop' ? .22 : office === SOLO_OFFICE ? .22 : .24;
+  const bounds = floor === 'rooftop' ? ROOF_BOUNDS : office.bounds;
   const { nodes, NX, NZ, open: openNodes } = navigation[floor];
   const bounded = { x: clamp(requested.x, bounds.minX + RADIUS, bounds.maxX - RADIUS), z: clamp(requested.z, bounds.minZ + RADIUS, bounds.maxZ - RADIUS) };
   const goalIndex = nearest(bounded, undefined, avoid, floor);
@@ -131,6 +153,8 @@ function bossApproach(player: Point, boss: Point): Point[] {
   }
   return [];
 }
+  return { valid, lineClear, route, bossApproach };
+}
 function travel(actor: Actor, path: Point[], speed: number, dt: number) {
   let remaining = speed * dt;
   actor.moving = false;
@@ -156,21 +180,33 @@ function initialState(saved?: PersistedState): GameState {
     target: null, ready: false, destination: null, seat: null, deskMode: null, activity: null, roofRest: null, roofWallSide: null, roofLeanPoint: null, candyInMouth: false,
     inventory: { cookie: p?.snacks.cookie ?? 0, choco: p?.snacks.choco ?? 0, cracker: p?.snacks.cracker ?? 0, coffee: 0 },
     weapon: p?.weapon ?? 'punch', settings: p?.settings ?? { sound: false, volume: .4, reducedMotion: false, quality: 'auto' },
-    warning: 0, scold: 0, bossPhase: 'routine', lastHit: null, event: null, message: '', messageUntil: 0,
+    warning: 0, scold: 0, bossPhase: 'routine', lastHit: null, bossHit: null, event: null, message: '', messageUntil: 0,
   };
 }
 
-export function createGameEngine(initial?: PersistedState): GameEngine {
+export function createGameEngine(initial?: PersistedState, environment?: GameEnvironment) {
+  let office = environment?.getOffice() ?? SOLO_OFFICE;
+  let navigation = createNavigation(office);
+  const valid = (point: Point, floor: Floor = 'office') => navigation.valid(point, floor);
+  const lineClear = (a: Point, b: Point, avoid?: Point, floor: Floor = 'office') => navigation.lineClear(a, b, avoid, floor);
+  const route = (a: Point, b: Point, avoid?: Point, floor: Floor = 'office') => navigation.route(a, b, avoid, floor);
+  const bossApproach = (player: Point, boss: Point) => navigation.bossApproach(player, boss);
   const state = initialState(initial);
+  const applyEnvironment = () => {
+    Object.assign(state.player, office.start); Object.assign(state.boss, office.targets.boss.point);
+    if (environment?.coworkers === false) state.coworkers = [];
+  };
+  applyEnvironment();
   let snapshot = structuredClone(state), disposed = false, snapshotClock = 0;
   const listeners = new Set<() => void>();
   let path: Point[] = [], bossPath: Point[] = [], axis = { x: 0, z: 0 }, followClock = 0;
   let followedBoss: Point = { ...state.boss };
-  let officeReturn: Point = { ...START };
+  let officeReturn: Point = { ...office.start };
   let pendingRest: { place: 'bench' | 'wall'; wall?: RoofWallSide; point: Point } | null = null;
   let eventId = 0, lastAttack = -Infinity, attackUntil = 0, hitUntil = 0, recoverUntil = 0, immunityUntil = 0;
   let nextObservation = 10, patrolIndex = 0, patrolWait = 0, coworkerPhase = -1, coworkerPath: Point[] = [];
-  const patrol: Point[] = [{ x: 3.5, z: 3.25 }, { x: -3.8, z: 4 }, { x: -6, z: -3.55 }, { x: 3.5, z: .3 }];
+  let observedPeer: string | null = null, peerObservationUntil = 0;
+  let patrol = office.patrol;
   const notify = () => {
     if (disposed) return;
     snapshot = structuredClone(state); snapshotClock = 0;
@@ -185,11 +221,11 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     p.moving = false;
     p.pose = state.roofRest === 'wall' ? 'wallLean' : state.seat === 'desk' ? state.deskMode === 'sleep' ? 'sleep' : 'type' : state.seat ? 'sit' : 'idle';
     if (state.roofRest) p.angle = state.roofRest === 'wall' ? ROOF_WALLS[state.roofWallSide ?? 'north'].angle : ROOF_REST.bench.angle;
-    else if (state.seat) p.angle = Math.PI;
+    else if (state.seat) p.angle = state.seat === 'desk' ? office.deskAngle : office.loungeAngle;
   };
   const endObservation = () => {
     state.warning = 0; state.scold = 0;
-    if (state.bossPhase === 'watch' || state.bossPhase === 'scold') { state.bossPhase = 'routine'; state.boss.pose = 'idle'; patrolWait = 2; }
+    if ((environment?.bossAuthority?.() ?? true) && !observedPeer && (state.bossPhase === 'watch' || state.bossPhase === 'scold')) { state.bossPhase = 'routine'; state.boss.pose = 'idle'; patrolWait = 2; }
   };
   const stand = () => {
     if (state.seat === 'roof-bench') Object.assign(state.player, ROOF_REST.bench.point);
@@ -209,7 +245,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     return state.floor === 'office' && !state.transition && gap >= 1.05 && gap <= BOSS_REACH && lateralGap >= .9 && lineClear(state.player, state.boss);
   };
   const ready = () => {
-    const point = state.target && roofWallForTarget(state.target) ? state.roofLeanPoint : state.target ? TARGETS[state.target].point : null;
+    const point = state.target && roofWallForTarget(state.target) ? state.roofLeanPoint : state.target ? office.targets[state.target].point : null;
     state.ready = !state.transition && !!state.target && isRoofTarget(state.target) === (state.floor === 'rooftop') && (state.target === 'boss' ? canReachBoss() : !!point && distance(state.player, point) <= 1.2);
   };
   const walk = (point: Point) => {
@@ -238,14 +274,14 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     state.activity = { kind, duration, remaining: duration, ...(snack ? { snack } : {}) };
     path = []; pendingRest = null; axis = { x: 0, z: 0 }; state.destination = null; state.player.moving = false;
     state.player.pose = kind === 'drink' ? 'drink' : kind;
-    if (kind === 'brew') face(state.player, { x: 7.6, z: -4.3 });
-    if (kind === 'take') face(state.player, { x: 7.6, z: -1.8 });
+    if (kind === 'brew') face(state.player, office.coffeeFacing);
+    if (kind === 'take') face(state.player, office.snacksFacing);
   };
   const reset = (saved?: PersistedState) => {
-    Object.assign(state, initialState(saved)); path = []; bossPath = []; coworkerPath = []; axis = { x: 0, z: 0 };
+    Object.assign(state, initialState(saved)); applyEnvironment(); path = []; bossPath = []; coworkerPath = []; axis = { x: 0, z: 0 };
     eventId = 0; lastAttack = -Infinity; attackUntil = hitUntil = recoverUntil = immunityUntil = 0;
     nextObservation = 10; patrolIndex = 0; patrolWait = 0; coworkerPhase = -1; followClock = 0; followedBoss = { ...state.boss };
-    officeReturn = { ...START }; pendingRest = null;
+    officeReturn = { ...office.start }; pendingRest = null;
   };
   const dispatch = (command: Command) => {
     if (disposed) return;
@@ -266,8 +302,8 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           if (command.floor === state.floor) break;
           if (state.floor === 'office') officeReturn = { x: state.player.x, z: state.player.z };
           cancel(); stand(); state.target = null; state.ready = false; state.lastHit = null; state.candyInMouth = false;
-          attackUntil = hitUntil = recoverUntil = 0; state.bossPhase = 'routine'; state.boss.pose = 'idle'; state.boss.moving = false;
-          bossPath = []; state.message = ''; state.messageUntil = 0;
+          attackUntil = 0;
+          if (!environment) { hitUntil = recoverUntil = 0; state.bossPhase = 'routine'; state.boss.pose = 'idle'; state.boss.moving = false; bossPath = []; } state.message = ''; state.messageUntil = 0;
           const duration = state.settings.reducedMotion ? .4 : 1.6;
           state.transition = { from: state.floor, to: command.floor, duration, remaining: duration };
           break;
@@ -292,7 +328,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           if (wall) { approachWall(command.point ?? state.player, wall); break; }
           state.target = command.target;
           if (command.target === 'boss') { cancel(); stand(); followBoss(); }
-          else walk(TARGETS[command.target].point);
+          else walk(office.targets[command.target].point);
           break;
         }
         case 'move': state.target = null; walk(command.point); break;
@@ -320,11 +356,11 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           if (!state.ready || !state.target) { event('조금 더 가까이 가 주세요.'); break; }
           if (state.target === 'roofBench') rest('bench');
           else if (roofWallForTarget(state.target)) approachWall(state.roofLeanPoint ?? state.player, roofWallForTarget(state.target)!);
-          else if (state.target === 'desk') { cancel(); state.seat = 'desk'; state.deskMode = 'work'; Object.assign(state.player, TARGETS.desk.point); restorePose(); event('자리에 앉았어요. 오늘도 적당히 힘내요.'); }
+          else if (state.target === 'desk') { cancel(); state.seat = 'desk'; state.deskMode = 'work'; Object.assign(state.player, office.targets.desk.point); restorePose(); event('자리에 앉았어요. 오늘도 적당히 힘내요.'); }
           else if (state.target === 'coffee') begin('brew', 3.2);
           else if (state.target === 'lounge') {
             if (state.seat === 'lounge') { state.player.pose = state.player.pose === 'lean' ? 'sit' : 'lean'; }
-            else { cancel(); stand(); state.seat = 'lounge'; Object.assign(state.player, TARGETS.lounge.point); restorePose(); }
+            else { cancel(); stand(); state.seat = 'lounge'; Object.assign(state.player, office.targets.lounge.point); restorePose(); }
             event('잠깐 쉬어도 괜찮아요.');
           } else if (state.target === 'copier') event('복사기도 잠깐 쉬는 중인가 봐요.');
           else if (state.target === 'snacks') event('먹고 싶은 과자를 골라 주세요.');
@@ -334,7 +370,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
         case 'take':
           if (state.floor !== 'office') break;
           if (busy()) break;
-          if (distance(state.player, TARGETS.snacks.point) > 1.2) { event('과자 선반 가까이 가 주세요.'); break; }
+          if (distance(state.player, office.targets.snacks.point) > 1.2) { event('과자 선반 가까이 가 주세요.'); break; }
           if (state.inventory.cookie + state.inventory.choco + state.inventory.cracker >= 6) { event('과자는 여섯 개까지 챙길 수 있어요.'); break; }
           begin('take', 1.3, command.snack); break;
         case 'eat':
@@ -350,6 +386,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
           lastAttack = state.elapsed; attackUntil = state.elapsed + WEAPONS[state.weapon].interval; state.player.pose = 'hit';
           state.warning = state.scold = 0; state.bossPhase = 'hit'; state.boss.pose = 'hit'; state.boss.moving = false; bossPath = [];
           hitUntil = state.elapsed + 2; state.lastHit = { id: (state.lastHit?.id ?? 0) + 1, weapon: state.weapon, at: state.elapsed };
+          if (environment) state.bossHit = { ...state.lastHit };
           event(state.weapon === 'fan' ? '나 안 해! 오늘의 서류는 여기까지.' : '앗! 장난은 살살 해 주세요.', state.weapon); break;
       }
     }
@@ -362,12 +399,23 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
       nextObservation = Math.max(nextObservation, immunityUntil); return;
     }
     if (state.bossPhase === 'recover') { if (state.elapsed < recoverUntil) return; state.bossPhase = 'routine'; }
-    if (state.target === 'boss' && !state.seat && distance(state.player, state.boss) <= 2.45) {
+    const peers = environment?.getPeers?.().filter(peer => peer.floor === 'office') ?? [];
+    const approachingPeer = peers.find(peer => !peer.seat && distance(peer.actor, state.boss) >= 1.05 && distance(peer.actor, state.boss) <= 2.45);
+    if ((state.floor === 'office' && state.target === 'boss' && !state.seat && distance(state.player, state.boss) <= 2.45) || approachingPeer) {
       // The boss acknowledges an approaching player instead of walking through
       // the encounter. Leaving or cancelling immediately resumes the routine.
-      bossPath = []; state.boss.moving = false; state.boss.pose = 'idle'; face(state.boss, state.player); return;
+      bossPath = []; state.boss.moving = false; state.boss.pose = 'idle'; face(state.boss, approachingPeer?.actor ?? state.player); return;
     }
-    const slack = state.seat === 'desk' && state.deskMode !== 'work' && !state.player.moving && state.elapsed >= attackUntil;
+    const slack = state.floor === 'office' && state.seat === 'desk' && state.deskMode !== 'work' && !state.player.moving && state.elapsed >= attackUntil;
+    const slackingPeers = peers.filter(peer => peer.seat === 'desk' && peer.deskMode !== 'work' && !peer.actor.moving);
+    if (observedPeer) {
+      const peer = slackingPeers.find(peer => peer.actor.id === observedPeer);
+      if (peer && state.elapsed < peerObservationUntil) {
+        state.bossPhase = state.elapsed < peerObservationUntil - 3 ? 'watch' : 'scold';
+        state.boss.pose = state.bossPhase; state.boss.moving = false; face(state.boss, peer.actor); return;
+      }
+      observedPeer = null; state.bossPhase = 'routine'; state.boss.pose = 'idle'; patrolWait = 2;
+    }
     if ((state.warning || state.scold) && !slack) endObservation();
     if (state.warning > 0) {
       state.warning = Math.max(0, state.warning - dt);
@@ -378,6 +426,16 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     if (state.elapsed >= nextObservation && state.elapsed >= immunityUntil && slack && distance(state.boss, state.player) <= BOSS_REACH) {
       state.warning = 2; state.bossPhase = 'watch'; state.boss.pose = 'watch'; state.boss.moving = false; bossPath = [];
       nextObservation = state.elapsed + 30; event('부장님이 화면을 보고 있어요. 업무로 돌아갈 시간!'); return;
+    }
+    const peerToObserve = slackingPeers.sort((a, b) => distance(state.boss, a.actor) - distance(state.boss, b.actor))[0];
+    if (state.elapsed >= nextObservation && state.elapsed >= immunityUntil && peerToObserve) {
+      if (distance(state.boss, peerToObserve.actor) <= BOSS_REACH) {
+        observedPeer = peerToObserve.actor.id; peerObservationUntil = state.elapsed + 5;
+        state.bossPhase = 'watch'; state.boss.pose = 'watch'; state.boss.moving = false; bossPath = [];
+        nextObservation = state.elapsed + 30; face(state.boss, peerToObserve.actor); return;
+      }
+      if (!bossPath.length) bossPath = bossApproach(state.boss, peerToObserve.actor);
+      travel(state.boss, bossPath, 1.65, dt); return;
     }
     if (patrolWait > 0) { patrolWait -= dt; state.boss.pose = 'idle'; state.boss.moving = false; return; }
     if (!bossPath.length) {
@@ -391,7 +449,19 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     }
     travel(state.boss, bossPath, 1.65, dt);
   };
+  const updateGuestObservation = (dt: number) => {
+    const slack = state.floor === 'office' && state.seat === 'desk' && state.deskMode !== 'work' && !state.player.moving;
+    if (!slack) { state.warning = 0; state.scold = 0; return; }
+    if (state.warning > 0) {
+      state.warning = Math.max(0, state.warning - dt);
+      if (!state.warning) { state.scold = 3; event('잠깐, 화면이 업무 같지는 않은데요? 괜찮아요, 다시 해 봐요.', 'caught'); }
+    } else if (state.scold > 0) state.scold = Math.max(0, state.scold - dt);
+    else if (state.elapsed >= nextObservation && state.bossPhase === 'watch' && distance(state.boss, state.player) <= BOSS_REACH) {
+      state.warning = 2; nextObservation = state.elapsed + 30; event('부장님이 화면을 보고 있어요. 업무로 돌아갈 시간!');
+    }
+  };
   const updateCoworkers = (dt: number) => {
+    if (state.coworkers.length < 3) return;
     const [typing, sleeping, coffee] = state.coworkers;
     typing.pose = state.elapsed % 16 < 12 ? 'type' : 'lean';
     sleeping.pose = state.elapsed % 24 < 19 ? 'sleep' : 'drink';
@@ -399,7 +469,7 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
     const home = { x: -2, z: 3.25 };
     // Keep the visiting coworker beside the pantry aisle, leaving the machine
     // approach free so the player's brewing and drinking motions remain visible.
-    const points = [home, { x: 5.5, z: -2.9 }, TARGETS.copier.point, home];
+    const points = [home, { x: 5.5, z: -2.9 }, office.targets.copier.point, home];
     if (phase !== coworkerPhase) { coworkerPhase = phase; coworkerPath = route(coffee, points[phase]); }
     travel(coffee, coworkerPath, 1.3, dt);
     if (!coffee.moving) { coffee.pose = phase === 1 ? 'drink' : phase === 2 ? 'idle' : 'type'; coffee.angle = coffee.pose === 'type' ? Math.PI : 0; }
@@ -459,19 +529,40 @@ export function createGameEngine(initial?: PersistedState): GameEngine {
         }
       }
     }
-    if (state.floor === 'office') { updateBoss(dt); updateCoworkers(dt); }
+    if ((state.floor === 'office' || environment?.continueBossOnRoof) && (environment?.bossAuthority?.() ?? true)) updateBoss(dt);
+    else if (environment?.bossAuthority && !environment.bossAuthority()) updateGuestObservation(dt);
+    if (state.floor === 'office') updateCoworkers(dt);
     ready();
   };
   return {
     state, dispatch,
-    step(dt) {
+    refreshEnvironment() {
+      const next = environment?.getOffice() ?? SOLO_OFFICE;
+      office = next; navigation = createNavigation(office); patrol = office.patrol;
+      path = []; bossPath = []; pendingRest = null; state.destination = null; axis = { x: 0, z: 0 };
+      if (!valid(officeReturn)) officeReturn = { ...office.start };
+      if (state.floor === 'office' && !valid(state.player)) { cancel(); stand(); Object.assign(state.player, office.start); }
+      if (!valid(state.boss)) Object.assign(state.boss, office.targets.boss.point);
+      if (state.seat === 'desk') { Object.assign(state.player, office.targets.desk.point); restorePose(); }
+      ready(); notify();
+    },
+    applyBossState(actor: Actor, phase: GameState['bossPhase'], hit: GameState['lastHit'], replacePosition = true) {
+      if (replacePosition) { Object.assign(state.boss, actor, { id: 'boss', name: '박부장' }); bossPath = []; }
+      if (hit) {
+        state.bossHit = { ...hit }; hitUntil = Math.max(hitUntil, hit.at + 2);
+        if (state.elapsed < hitUntil) { state.bossPhase = 'hit'; state.boss.pose = 'hit'; state.boss.moving = false; bossPath = []; }
+      }
+      if (replacePosition && (state.elapsed >= hitUntil || phase === 'hit')) state.bossPhase = phase;
+      ready(); notify();
+    },
+    step(dt: number) {
       if (disposed || !state.entered || state.paused || !Number.isFinite(dt) || dt <= 0) return;
       let left = dt;
       while (left > 1e-8) { const delta = Math.min(.05, left); tick(delta); left -= delta; }
       snapshotClock += dt; if (snapshotClock >= .1 - 1e-8) notify();
     },
     getSnapshot: () => snapshot,
-    subscribe(listener) { if (disposed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
+    subscribe(listener: () => void) { if (disposed) return () => {}; listeners.add(listener); return () => { listeners.delete(listener); }; },
     dispose() { disposed = true; listeners.clear(); },
   };
 }

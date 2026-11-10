@@ -30,7 +30,7 @@ test('paired rows face one another across low partitions', () => {
 test('every capacity reaches every desk and amenity without clipping furniture', () => {
   for (let capacity = 2; capacity <= 16; capacity++) {
     const layout = createMultiLayout(capacity); let start = layout.spawn;
-    for (const goal of [...layout.desks.map(d => d.seat), layout.coffee, layout.lounge, layout.spawn]) {
+    for (const goal of [...layout.desks.map(d => d.seat), layout.coffee, layout.snacks, layout.copier, layout.boss, layout.lounge, layout.spawn]) {
       const path = multiPath(layout, start, goal);
       assert.ok(path.length, `capacity ${capacity}: ${JSON.stringify({ start, goal })}`);
       assert.deepEqual(path.at(-1), goal);

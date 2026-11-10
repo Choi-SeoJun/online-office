@@ -22,6 +22,7 @@ export type GameState = {
   activity: Activity | null; inventory: Inventory; weapon: Weapon; settings: Settings;
   warning: number; scold: number; bossPhase: 'routine' | 'watch' | 'scold' | 'hit' | 'recover';
   lastHit: { id: number; weapon: Weapon; at: number } | null;
+  bossHit?: { id: number; weapon: Weapon; at: number } | null;
   event: GameEvent | null; message: string; messageUntil: number;
 };
 export type PersistedState = { version: 1; name: string; avatar?: AvatarStyle; weapon: Weapon; settings: Settings; snacks: Record<Snack, number> };

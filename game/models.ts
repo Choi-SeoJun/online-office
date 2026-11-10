@@ -229,7 +229,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     for (const [style, group] of Object.entries(r.hairStyles)) { group.visible = style === avatar; group.scale.setScalar(group.visible ? 1 : 0); }
     r.lastAvatar = avatar;
   }
-  const reduced = state.settings.reducedMotion; const player = a.id === 'player'; const walk = a.moving || a.pose === 'walk';
+  const reduced = state.settings.reducedMotion; const player = a.id === state.player.id; const walk = a.moving || a.pose === 'walk';
   const roofRest = player && state.floor === 'rooftop' && !walk ? state.roofRest : null;
   // A long tail rests to one side of the shoulder when the back meets a wall.
   r.ponytail.rotation.y = roofRest === 'wall' ? 1.5 : 0;
@@ -340,8 +340,9 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     const presentation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(16, 20, 24), new THREE.Vector3(), new THREE.Vector3(0, 1, 0)));
     tool.quaternion.copy(r.hand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(presentation));
   }
-  const hitAge = state.lastHit ? state.elapsed - state.lastHit.at : 10;
-  const swingDuration = state.lastHit ? WEAPONS[state.lastHit.weapon].interval : .55;
+  const visualHit = r.isBoss ? state.bossHit ?? state.lastHit : state.lastHit;
+  const hitAge = visualHit ? state.elapsed - visualHit.at : 10;
+  const swingDuration = visualHit ? WEAPONS[visualHit.weapon].interval : .55;
   if (player && a.pose === 'hit' && hitAge >= 0 && hitAge < swingDuration && state.lastHit) {
     const p = hitAge / swingDuration, windup = THREE.MathUtils.smoothstep(p, 0, .23), strike = THREE.MathUtils.smoothstep(p, .23, WEAPON_IMPACT), recover = THREE.MathUtils.smoothstep(p, .62, 1);
     const weapon = state.lastHit.weapon; const finish = 1 - recover;
@@ -378,7 +379,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   const hit = reactionAge >= 0 && hitAge < 2;
   r.effect.visible = r.isBoss && hit;
   if (r.isBoss && hit) {
-    const amount = THREE.MathUtils.smoothstep(reactionAge, 0, .07) * Math.exp(-reactionAge * 2.6); const weapon = state.lastHit!.weapon;
+    const amount = THREE.MathUtils.smoothstep(reactionAge, 0, .07) * Math.exp(-reactionAge * 2.6); const weapon = visualHit!.weapon;
     if (weapon === 'punch') { r.head.rotation.z = Math.sin(reactionAge * 27) * amount * (reduced ? .08 : .38); r.body.rotation.x = -.12 * amount; }
     if (weapon === 'hammer') { const squash = Math.sin(Math.min(reactionAge * 8, Math.PI)) * amount; r.body.scale.set(1 + squash * .15, 1 - squash * .18, 1 + squash * .15); r.body.position.y += Math.max(0, Math.sin(reactionAge * 12)) * amount * (reduced ? .04 : .20); }
     if (weapon === 'fan') { r.head.rotation.x = (reduced ? .08 : .25) * amount; r.body.position.y -= (reduced ? .025 : .09) * amount; r.body.rotation.x = .06 * amount; }

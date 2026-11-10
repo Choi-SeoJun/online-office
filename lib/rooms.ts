@@ -1,12 +1,14 @@
 import { createMultiLayout, isMultiWalkable } from '../game/multi-layout.ts';
-import type { RoomError, RoomPlayerUpdate, RoomPose, RoomResponse, RoomSession, RoomSnapshot } from '../game/multi-types.ts';
-import type { AvatarStyle } from '../game/types.ts';
+import type { RoomBoss, RoomBossUpdate, RoomError, RoomPlayerUpdate, RoomPose, RoomResponse, RoomSession, RoomSnapshot, RoomVisualState } from '../game/multi-types.ts';
+import type { AvatarStyle, Floor, GameState, Point, Weapon } from '../game/types.ts';
+import { ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, WEAPONS } from '../game/layout.ts';
+import { getRoofLean } from '../game/roof-rest.ts';
 
 export type RoomDatabase = Pick<D1Database, 'prepare' | 'batch'>;
 export const ROOM_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const ROOM_SEAT_LEASE_MS = 120_000;
-type RoomRow = { code: string; name: string; capacity: number; host_id: string; created_at: number; expires_at: number };
-type MemberRow = { id: string; room_code: string; token_hash: string; seat_index: number; name: string; avatar: AvatarStyle; x: number; z: number; angle: number; pose: RoomPose; moving: number; joined_at: number; last_seen: number; last_sync: number; last_chat: number; last_poke: number };
+type RoomRow = { code: string; name: string; capacity: number; host_id: string; created_at: number; expires_at: number; boss_state: string | null; boss_hit: string | null; boss_hit_id: number };
+type MemberRow = { id: string; room_code: string; token_hash: string; seat_index: number; name: string; avatar: AvatarStyle; x: number; z: number; angle: number; pose: RoomPose; moving: number; joined_at: number; last_seen: number; last_sync: number; last_chat: number; last_poke: number; floor: Floor; visual: string | null; last_attack: number };
 type MessageRow = { id: number; player_id: string; name: string; text: string; created_at: number };
 type NotificationRow = { id: number; sender_id: string; sender_name: string; created_at: number; read_at: number | null };
 type Context = { now?: number; rateKey?: string };
@@ -57,10 +59,34 @@ function newCode(): string {
 }
 const transferHost = (db: RoomDatabase, code: string, now: number) => db.prepare(`UPDATE office_rooms SET host_id = COALESCE((SELECT id FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY joined_at, seat_index LIMIT 1), '') WHERE code = ? AND NOT EXISTS (SELECT 1 FROM office_members WHERE room_code = ? AND id = office_rooms.host_id AND last_seen >= ?)`).bind(code, now - ROOM_SEAT_LEASE_MS, code, code, now - ROOM_SEAT_LEASE_MS);
 
+const gap = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
+const visualDefaults = (floor: Floor = 'office'): RoomVisualState => ({ floor, seat: null, deskMode: null, roofRest: null, roofWallSide: null, candyInMouth: false, activity: null, weapon: 'punch', elapsed: 0, lastHit: null, carryingCoffee: false });
+function memberVisual(member: MemberRow): RoomVisualState {
+  if (member.visual) return { ...visualDefaults(member.floor), ...JSON.parse(member.visual), floor: member.floor };
+  const value = visualDefaults(member.floor);
+  // Existing room members keep the meaning of their pre-migration seated pose.
+  if (member.floor === 'office' && ['sit', 'type'].includes(member.pose)) { value.seat = 'desk'; value.deskMode = member.pose === 'type' ? 'work' : null; }
+  return value;
+}
+function visualOnly(player: RoomPlayerUpdate): RoomVisualState {
+  const { floor, seat, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee } = player;
+  return { floor, seat, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee };
+}
+function sharedBoss(room: RoomRow, now: number): RoomBoss {
+  const point = createMultiLayout(room.capacity).boss;
+  const stored = room.boss_state ? JSON.parse(room.boss_state) as RoomBossUpdate & { updatedAt: number } : null;
+  const lastHit = room.boss_hit ? { ...JSON.parse(room.boss_hit), id: room.boss_hit_id } as NonNullable<RoomBoss['lastHit']> : null;
+  const actor = stored?.actor ?? { id: 'boss', name: '박부장', ...point, angle: 0, pose: 'idle', moving: false };
+  const age = lastHit ? now - lastHit.at : Infinity;
+  const phase = age < 2000 ? 'hit' : age < 2600 ? 'recover' : stored?.phase === 'hit' || stored?.phase === 'recover' ? 'routine' : stored?.phase ?? 'routine';
+  return { actor: { ...actor, id: 'boss', name: '박부장', ...(phase === 'hit' ? { pose: 'hit', moving: false } : actor.pose === 'hit' ? { pose: 'idle', moving: false } : {}) }, phase,
+    lastHit: lastHit ? { id: lastHit.id, playerId: lastHit.playerId, weapon: lastHit.weapon, at: lastHit.at } : null, updatedAt: stored?.updatedAt ?? room.created_at };
+}
+
 async function snapshot(db: RoomDatabase, code: string, selfId: string, now: number): Promise<RoomSnapshot> {
   const [rooms, members, messages, notifications] = await db.batch([
     db.prepare('SELECT * FROM office_rooms WHERE code = ?').bind(code),
-    db.prepare('SELECT id, name, avatar, seat_index, x, z, angle, pose, moving, last_seen FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY seat_index LIMIT 16').bind(code, now - ROOM_SEAT_LEASE_MS),
+    db.prepare('SELECT id, name, avatar, seat_index, x, z, angle, pose, moving, last_seen, floor, visual FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY seat_index LIMIT 16').bind(code, now - ROOM_SEAT_LEASE_MS),
     db.prepare('SELECT id, player_id, name, text, created_at FROM office_messages WHERE room_code = ? ORDER BY id DESC LIMIT 100').bind(code),
     db.prepare('SELECT id, sender_id, sender_name, created_at, read_at FROM office_notifications WHERE room_code = ? AND recipient_id = ? ORDER BY id DESC LIMIT 100').bind(code, selfId),
   ]);
@@ -68,7 +94,8 @@ async function snapshot(db: RoomDatabase, code: string, selfId: string, now: num
   if (!room || room.expires_at <= now) fail(410, 'ROOM_EXPIRED', '이 회사의 하루가 끝났어요. 새 방을 만들어 주세요.');
   return {
     room: { code: room.code, name: room.name, capacity: room.capacity, hostId: room.host_id, expiresAt: room.expires_at }, selfId, serverTime: now,
-    players: (members.results as unknown as MemberRow[]).map(m => ({ id: m.id, name: m.name, avatar: m.avatar, seatIndex: m.seat_index, x: m.x, z: m.z, angle: m.angle, pose: m.pose, moving: !!m.moving, lastSeen: m.last_seen })),
+    players: (members.results as unknown as MemberRow[]).map(m => ({ id: m.id, name: m.name, avatar: m.avatar, seatIndex: m.seat_index, x: m.x, z: m.z, angle: m.angle, pose: m.pose, moving: !!m.moving, lastSeen: m.last_seen, ...memberVisual(m) })),
+    boss: sharedBoss(room, now),
     messages: (messages.results as unknown as MessageRow[]).reverse().map(m => ({ id: m.id, playerId: m.player_id, name: m.name, text: m.text, createdAt: m.created_at })),
     notifications: (notifications.results as unknown as NotificationRow[]).map(n => ({ id: n.id, senderId: n.sender_id, senderName: n.sender_name, createdAt: n.created_at, readAt: n.read_at })),
   };
@@ -91,19 +118,71 @@ async function authenticate(db: RoomDatabase, input: Record<string, unknown>, no
 }
 function playerValue(input: unknown, room: RoomRow, member: MemberRow): RoomPlayerUpdate {
   const value = object(input), { x, z, angle, pose, moving } = value;
-  if (typeof x !== 'number' || typeof z !== 'number' || typeof angle !== 'number' || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(angle) || typeof moving !== 'boolean' || !['idle', 'walk', 'sit', 'type', 'drink'].includes(String(pose))) fail(400, 'INVALID_REQUEST', '캐릭터 위치를 확인해 주세요.');
+  if (typeof x !== 'number' || typeof z !== 'number' || typeof angle !== 'number' || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(angle) || typeof moving !== 'boolean' || !['idle', 'walk', 'sit', 'type', 'sleep', 'drink', 'eat', 'brew', 'take', 'spin', 'lean', 'wallLean', 'hit', 'watch', 'scold', 'candy'].includes(String(pose))) fail(400, 'INVALID_REQUEST', '캐릭터 위치를 확인해 주세요.');
+  const choice = <T extends string | null>(key: string, options: readonly T[], fallback: T): T => {
+    if (value[key] === undefined) return fallback;
+    if (!options.includes(value[key] as T)) fail(400, 'INVALID_REQUEST', '캐릭터 동작을 확인해 주세요.');
+    return value[key] as T;
+  };
+  const flag = (key: string) => { if (value[key] !== undefined && typeof value[key] !== 'boolean') fail(400, 'INVALID_REQUEST', '캐릭터 동작을 확인해 주세요.'); return value[key] === true; };
+  const floor = choice('floor', ['office', 'rooftop'] as const, 'office');
+  const seat = choice('seat', ['desk', 'lounge', 'roof-bench', null] as const, pose === 'sit' || pose === 'type' ? 'desk' : null);
+  const deskMode = choice('deskMode', ['work', 'shopping', 'game', 'sleep', null] as const, seat === 'desk' ? 'work' : null);
+  const roofRest = choice('roofRest', ['bench', 'wall', null] as const, null);
+  const roofWallSide = choice('roofWallSide', ['north', 'south', 'east', 'west', null] as const, null);
+  const weapon = choice('weapon', ['punch', 'hammer', 'fan'] as const, 'punch');
+  const candyInMouth = flag('candyInMouth'), carryingCoffee = flag('carryingCoffee');
+  const elapsed = value.elapsed ?? 0;
+  if (typeof elapsed !== 'number' || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > 1e9) fail(400, 'INVALID_REQUEST', '동작 시간을 확인해 주세요.');
+  let activity: GameState['activity'] = null, lastHit: GameState['lastHit'] = null;
+  if (value.activity != null) {
+    const a = object(value.activity);
+    if (!['brew', 'take', 'eat', 'drink', 'spin', 'candy'].includes(String(a.kind)) || typeof a.duration !== 'number' || !Number.isFinite(a.duration) || a.duration < .1 || a.duration > 10 || typeof a.remaining !== 'number' || !Number.isFinite(a.remaining) || a.remaining < 0 || a.remaining > a.duration || (a.snack !== undefined && !['cookie', 'choco', 'cracker'].includes(String(a.snack)))) fail(400, 'INVALID_REQUEST', '동작 시간을 확인해 주세요.');
+    activity = { kind: a.kind as NonNullable<GameState['activity']>['kind'], duration: a.duration, remaining: a.remaining, ...(a.snack === undefined ? {} : { snack: a.snack as 'cookie' | 'choco' | 'cracker' }) };
+    if (pose !== activity.kind || (['take', 'eat'].includes(activity.kind) && !activity.snack)) fail(400, 'INVALID_REQUEST', '캐릭터 동작을 확인해 주세요.');
+  }
+  if (value.lastHit != null) {
+    const hit = object(value.lastHit);
+    if (typeof hit.id !== 'number' || !Number.isSafeInteger(hit.id) || hit.id < 1 || !['punch', 'hammer', 'fan'].includes(String(hit.weapon)) || typeof hit.at !== 'number' || !Number.isFinite(hit.at) || hit.at < 0 || hit.at > elapsed) fail(400, 'INVALID_REQUEST', '장난 동작을 확인해 주세요.');
+    lastHit = { id: hit.id, weapon: hit.weapon as Weapon, at: hit.at };
+  }
   const layout = createMultiLayout(room.capacity);
-  if (!isMultiWalkable(layout, { x, z })) fail(400, 'INVALID_REQUEST', '걸어갈 수 있는 곳을 골라 주세요.');
-  const seated = pose === 'sit' || pose === 'type', seat = layout.desks[member.seat_index].seat;
-  if (seated && (moving || Math.hypot(x - seat.x, z - seat.z) > .12)) fail(400, 'INVALID_REQUEST', '내 자리에 앉아 주세요.');
-  return { x, z, angle: Math.atan2(Math.sin(angle), Math.cos(angle)), pose: pose as RoomPose, moving };
+  if (floor === 'office') {
+    if (!isMultiWalkable(layout, { x, z })) fail(400, 'INVALID_REQUEST', '걸어갈 수 있는 곳을 골라 주세요.');
+    if (roofRest || roofWallSide || seat === 'roof-bench' || candyInMouth || pose === 'candy' || pose === 'wallLean') fail(400, 'INVALID_REQUEST', '옥상에서 할 수 있는 동작이에요.');
+    if (seat === 'desk' && (moving || gap({ x, z }, layout.desks[member.seat_index].seat) > .12)) fail(400, 'INVALID_REQUEST', '내 자리에 앉아 주세요.');
+    if (seat === 'lounge' && (moving || gap({ x, z }, layout.lounge) > .12)) fail(400, 'INVALID_REQUEST', '탕비실 의자에 앉아 주세요.');
+    if (pose === 'brew' && gap({ x, z }, layout.coffee) > 1.25 || pose === 'take' && gap({ x, z }, layout.snacks) > 1.25) fail(400, 'INVALID_REQUEST', '탕비실 가까이 가 주세요.');
+  } else {
+    if (seat === 'desk' || seat === 'lounge' || deskMode !== null || ['brew', 'take', 'spin', 'type', 'sleep', 'hit', 'watch', 'scold'].includes(String(pose))) fail(400, 'INVALID_REQUEST', '사무실에서 할 수 있는 동작이에요.');
+    const b = ROOF_BOUNDS;
+    if (x < b.minX + .22 || x > b.maxX - .22 || z < b.minZ + .22 || z > b.maxZ - .22) fail(400, 'INVALID_REQUEST', '옥상 안에서 쉬어 주세요.');
+    const atBench = seat === 'roof-bench' && roofRest === 'bench' && !moving && gap({ x, z }, ROOF_REST.bench.seat) <= .12;
+    if (seat === 'roof-bench' && !atBench || roofRest === 'bench' && !atBench) fail(400, 'INVALID_REQUEST', '벤치에 앉아 주세요.');
+    if (!atBench && ROOF_OBSTACLES.some(o => Math.abs(x - o.x) < o.w / 2 + .22 && Math.abs(z - o.z) < o.d / 2 + .22)) fail(400, 'INVALID_REQUEST', '걸어갈 수 있는 곳을 골라 주세요.');
+    if (roofRest === 'wall') {
+      const lean = roofWallSide ? getRoofLean({ x, z }, roofWallSide) : null;
+      if (moving || !lean || gap({ x, z }, lean.point) > .15 || seat !== null) fail(400, 'INVALID_REQUEST', '벽 가까이에 기대 주세요.');
+    } else if (roofWallSide || pose === 'wallLean') fail(400, 'INVALID_REQUEST', '벽 가까이에 기대 주세요.');
+  }
+  if (deskMode !== null && seat !== 'desk' || ['type', 'sleep', 'spin'].includes(String(pose)) && seat !== 'desk' || ['sit', 'lean'].includes(String(pose)) && seat === null) fail(400, 'INVALID_REQUEST', '먼저 자리에 앉아 주세요.');
+  return { x, z, angle: Math.atan2(Math.sin(angle), Math.cos(angle)), pose: pose as RoomPose, moving, floor, seat, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee };
+}
+
+function bossValue(input: unknown, room: RoomRow, now: number): RoomBossUpdate & { updatedAt: number } {
+  const value = object(input), actor = object(value.actor), { x, z, angle, pose, moving } = actor;
+  if (typeof x !== 'number' || typeof z !== 'number' || typeof angle !== 'number' || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(angle) || typeof moving !== 'boolean' || !['idle', 'walk', 'watch', 'scold', 'hit'].includes(String(pose)) || !['routine', 'watch', 'scold', 'hit', 'recover'].includes(String(value.phase)) || !isMultiWalkable(createMultiLayout(room.capacity), { x, z })) fail(400, 'INVALID_REQUEST', '상사의 위치를 확인해 주세요.');
+  const current = sharedBoss(room, now);
+  // A delayed host packet must not undo another member's accepted hit.
+  if (current.lastHit && now - current.lastHit.at < 2000) return { actor: current.actor, phase: 'hit', updatedAt: now };
+  return { actor: { id: 'boss', name: '박부장', x, z, angle: Math.atan2(Math.sin(angle), Math.cos(angle)), pose: pose as RoomPose, moving }, phase: value.phase as GameState['bossPhase'], updatedAt: now };
 }
 
 export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: Context = {}): Promise<Result> {
   const now = context.now ?? Date.now();
   try {
     const input = object(raw), action = input.action;
-    if (!['create', 'join', 'sync', 'chat', 'poke', 'readNotifications', 'capacity', 'leave'].includes(String(action))) fail(400, 'INVALID_REQUEST', '요청한 행동을 확인해 주세요.');
+    if (!['create', 'join', 'sync', 'attack', 'chat', 'poke', 'readNotifications', 'capacity', 'leave'].includes(String(action))) fail(400, 'INVALID_REQUEST', '요청한 행동을 확인해 주세요.');
     if (action === 'create') {
       const name = label(input.name, 10, '이름'), roomName = label(input.roomName, 24, '회사 이름'), capacity = capacityValue(input.capacity), avatar = avatarValue(input.avatar);
       await admissionLimit(db, 'create', context.rateKey ?? 'unknown', now);
@@ -150,9 +229,12 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
     }
     const { code, member, room, tokenHash } = await authenticate(db, input, now);
     if (action === 'sync') {
-      const p = input.player === undefined ? member : playerValue(input.player, room, member);
+      const p: RoomPlayerUpdate = input.player === undefined ? { ...member, moving: !!member.moving, ...memberVisual(member) } : playerValue(input.player, room, member);
+      if (input.boss !== undefined && room.host_id !== member.id) fail(403, 'NOT_HOST', '상사의 동작을 동기화할 수 없어요.');
+      const boss = input.boss === undefined ? null : bossValue(input.boss, room, now);
       const [result] = await db.batch([
-        db.prepare('UPDATE office_members SET x = ?, z = ?, angle = ?, pose = ?, moving = ?, last_seen = ?, last_sync = ? WHERE id = ? AND room_code = ? AND token_hash = ? AND last_sync <= ? AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND capacity = ?) RETURNING id').bind(p.x, p.z, p.angle, p.pose, p.moving ? 1 : 0, now, now, member.id, code, tokenHash, now - 250, code, room.capacity),
+        db.prepare('UPDATE office_members SET x = ?, z = ?, angle = ?, pose = ?, moving = ?, floor = ?, visual = ?, last_seen = ?, last_sync = ? WHERE id = ? AND room_code = ? AND token_hash = ? AND last_sync <= ? AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND capacity = ?) RETURNING id').bind(p.x, p.z, p.angle, p.pose, p.moving ? 1 : 0, p.floor, JSON.stringify(visualOnly(p)), now, now, member.id, code, tokenHash, now - 250, code, room.capacity),
+        ...(boss ? [db.prepare('UPDATE office_rooms SET boss_state = ? WHERE code = ? AND host_id = ? AND boss_hit_id = ? AND EXISTS (SELECT 1 FROM office_members WHERE id = ? AND last_sync = ?)').bind(JSON.stringify(boss), code, member.id, room.boss_hit_id, member.id, now)] : []),
         transferHost(db, code, now),
       ]);
       if (!result.results.length) {
@@ -160,6 +242,21 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
         if (current?.capacity !== room.capacity) return { status: 200, body: { snapshot: await snapshot(db, code, member.id, now) } };
         fail(429, 'RATE_LIMITED', '연결을 확인하고 있어요. 잠시만 기다려 주세요.');
       }
+    } else if (action === 'attack') {
+      if (!['punch', 'hammer', 'fan'].includes(String(input.weapon))) fail(400, 'INVALID_REQUEST', '장난칠 도구를 골라 주세요.');
+      const weapon = input.weapon as Weapon;
+      const p: RoomPlayerUpdate = input.player === undefined ? { ...member, moving: !!member.moving, ...memberVisual(member) } : playerValue(input.player, room, member);
+      const boss = sharedBoss(room, now), distance = gap(p, boss.actor);
+      if (p.floor !== 'office' || p.seat !== null || distance < .8 || distance > 2.3) fail(400, 'INVALID_REQUEST', '상사 옆으로 다가가 장난쳐 주세요.');
+      const requestId = crypto.randomUUID(), hit = { requestId, playerId: member.id, weapon, at: now };
+      const bossState = { actor: { ...boss.actor, angle: Math.atan2(p.x - boss.actor.x, p.z - boss.actor.z), pose: 'hit', moving: false }, phase: 'hit', updatedAt: now };
+      const result = await db.batch([
+        db.prepare('UPDATE office_members SET x = ?, z = ?, angle = ?, pose = ?, moving = ?, floor = ?, visual = ? WHERE id = ? AND room_code = ? AND token_hash = ?').bind(p.x, p.z, p.angle, p.pose, p.moving ? 1 : 0, p.floor, JSON.stringify(visualOnly(p)), member.id, code, tokenHash),
+        db.prepare('UPDATE office_rooms SET boss_state = ?, boss_hit = ?, boss_hit_id = boss_hit_id + 1 WHERE code = ? AND EXISTS (SELECT 1 FROM office_members WHERE id = ? AND room_code = ? AND token_hash = ? AND last_attack <= ?) RETURNING boss_hit_id').bind(JSON.stringify(bossState), JSON.stringify(hit), code, member.id, code, tokenHash, now - Math.round(WEAPONS[weapon].interval * 1000)),
+        db.prepare("UPDATE office_members SET last_attack = ?, last_seen = ? WHERE id = ? AND room_code = ? AND token_hash = ? AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND json_extract(boss_hit, '$.requestId') = ?)").bind(now, now, member.id, code, tokenHash, code, requestId),
+        transferHost(db, code, now),
+      ]);
+      if (!result[1].results.length) fail(429, 'RATE_LIMITED', '한 박자 쉬고 장난쳐 주세요.');
     } else if (action === 'chat') {
       const text = chatText(input.text), requestId = crypto.randomUUID();
       const result = await db.batch([
@@ -200,15 +297,23 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
     } else if (action === 'capacity') {
       const capacity = capacityValue(input.capacity);
       if (room.host_id !== member.id) fail(403, 'NOT_HOST', '정원은 방장만 바꿀 수 있어요.');
-      const { bounds, spawn, obstacles } = createMultiLayout(capacity);
-      // The same footprint validates movement and relocates anyone beneath a new desk.
-      const blocked = obstacles.map(() => '(ABS(x - ?) < ? AND ABS(z - ?) < ?)').join(' OR ');
-      const obstacleValues = obstacles.flatMap(o => [o.x, o.w / 2 + .24, o.z, o.d / 2 + .24]);
+      const layout = createMultiLayout(capacity), { bounds, spawn, obstacles } = layout;
+      const currentBoss = sharedBoss(room, now);
+      const resetBoss = !isMultiWalkable(layout, currentBoss.actor) ? { actor: { ...currentBoss.actor, ...layout.boss, pose: 'idle', moving: false }, phase: 'routine', updatedAt: now } : null;
+      // Keep the relocation in the same atomic batch as resizing. One JSON
+      // footprint avoids exceeding D1's 100-parameter limit at 16 desks.
+      const footprint = JSON.stringify(obstacles.map(o => [o.x, o.z, o.w / 2 + .24, o.d / 2 + .24]));
       const result = await db.batch([
         db.prepare('DELETE FROM office_members WHERE room_code = ? AND last_seen < ? AND id != ?').bind(code, now - ROOM_SEAT_LEASE_MS, member.id),
         db.prepare('UPDATE office_rooms SET capacity = ? WHERE code = ? AND host_id = ? AND NOT EXISTS (SELECT 1 FROM office_members WHERE room_code = ? AND seat_index >= ?) RETURNING code').bind(capacity, code, member.id, code, capacity),
-        db.prepare(`UPDATE office_members SET x = ?, z = ?, pose = 'idle', moving = 0 WHERE room_code = ? AND (x < ? OR x > ? OR z < ? OR z > ? OR ${blocked}) AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND capacity = ?)`).bind(spawn.x, spawn.z, code, bounds.minX + .24, bounds.maxX - .24, bounds.minZ + .24, bounds.maxZ - .24, ...obstacleValues, code, capacity),
+        db.prepare(`UPDATE office_members SET x = ?, z = ?, pose = 'idle', moving = 0, visual = NULL WHERE room_code = ? AND floor = 'office'
+          AND (x < ? OR x > ? OR z < ? OR z > ? OR EXISTS (
+            SELECT 1 FROM json_each(?) AS obstacle
+            WHERE ABS(office_members.x - json_extract(obstacle.value, '$[0]')) < json_extract(obstacle.value, '$[2]')
+              AND ABS(office_members.z - json_extract(obstacle.value, '$[1]')) < json_extract(obstacle.value, '$[3]')))
+          AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND capacity = ?)`).bind(spawn.x, spawn.z, code, bounds.minX + .24, bounds.maxX - .24, bounds.minZ + .24, bounds.maxZ - .24, footprint, code, capacity),
         db.prepare('UPDATE office_members SET last_seen = ? WHERE id = ? AND token_hash = ?').bind(now, member.id, tokenHash),
+        ...(resetBoss ? [db.prepare('UPDATE office_rooms SET boss_state = ? WHERE code = ? AND capacity = ?').bind(JSON.stringify(resetBoss), code, capacity)] : []),
       ]);
       if (!result[1].results.length) fail(409, 'CAPACITY_OCCUPIED', '사용 중인 자리가 있어요. 빈 자리만 줄일 수 있어요.');
     } else if (action === 'leave') {

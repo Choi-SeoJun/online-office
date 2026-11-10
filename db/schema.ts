@@ -3,12 +3,14 @@ import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-or
 export const officeRooms = sqliteTable('office_rooms', {
   code: text('code').primaryKey(), name: text('name').notNull(), capacity: integer('capacity').notNull(),
   hostId: text('host_id').notNull(), createdAt: integer('created_at').notNull(), expiresAt: integer('expires_at').notNull(),
+  bossState: text('boss_state'), bossHit: text('boss_hit'), bossHitId: integer('boss_hit_id').notNull().default(0),
 }, t => [index('office_rooms_expiry').on(t.expiresAt)]);
 
 export const officeMembers = sqliteTable('office_members', {
   id: text('id').primaryKey(), roomCode: text('room_code').notNull().references(() => officeRooms.code, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull(), seatIndex: integer('seat_index').notNull(), name: text('name').notNull(),
   avatar: text('avatar').notNull().default('short'), lastPoke: integer('last_poke').notNull().default(0),
+  floor: text('floor').notNull().default('office'), visual: text('visual'), lastAttack: integer('last_attack').notNull().default(0),
   x: real('x').notNull(), z: real('z').notNull(), angle: real('angle').notNull(), pose: text('pose').notNull(), moving: integer('moving').notNull(),
   joinedAt: integer('joined_at').notNull(), lastSeen: integer('last_seen').notNull(), lastSync: integer('last_sync').notNull().default(0), lastChat: integer('last_chat').notNull().default(0),
 }, t => [uniqueIndex('office_member_seat').on(t.roomCode, t.seatIndex), uniqueIndex('office_member_token').on(t.tokenHash), index('office_members_active').on(t.roomCode, t.lastSeen)]);

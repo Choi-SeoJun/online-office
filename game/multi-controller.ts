@@ -1,67 +1,107 @@
-import type { Point } from './types.ts';
-import type { RoomPlayer } from './multi-types.ts';
-import { createMultiLayout, isMultiWalkable, multiPath } from './multi-layout.ts';
+import type { Actor, Command, GameState, PersistedState, Point } from './types.ts';
+import type { RoomBossUpdate, RoomPlayer, RoomPlayerUpdate, RoomSnapshot } from './multi-types.ts';
+import { createMultiLayout, isMultiWalkable } from './multi-layout.ts';
+import { createGameEngine, type OfficeEnvironment } from './engine.ts';
+import { ROOF_REST, ROOF_WALLS } from './layout.ts';
 
-/** Local movement stays responsive; only the resulting pose is synchronized. */
-export function createMultiController(initial: RoomPlayer, capacity: number) {
-  const player:RoomPlayer = { ...initial, pose:initial.pose==='drink'?'idle':initial.pose };
-  let layout = createMultiLayout(capacity), path: Point[] = [], axis = { x: 0, z: 0 };
-  let arrival: 'sit' | 'type' | 'drink' | null = null, drinkTime = 0;
-  const stop = () => { path = []; arrival = null; axis = { x: 0, z: 0 }; drinkTime = 0; player.moving = false; };
-  const move = (point: Point) => {
-    stop(); player.pose = 'idle'; path = multiPath(layout, player, point);
+/** The same simulation drives both play modes; rooms only add shared presence. */
+export function createMultiController(initial: RoomPlayer, capacity: number, saved?: PersistedState) {
+  let layout = createMultiLayout(capacity), seatIndex = initial.seatIndex;
+  let hostAuthority = true, initializedBoss = false, latestSnapshot: RoomSnapshot | null = null;
+  let lastAppliedTime = -Infinity, lastBossHit = 0;
+  let axis: Point = { x: 0, z: 0 }, autoInteract: 'desk' | 'coffee' | null = null;
+  const office = (): OfficeEnvironment => {
+    const desk = layout.desks[seatIndex] ?? layout.desks[0];
+    // First patrol point observes the local desk; remaining aisle points keep
+    // the shared boss moving through every row without entering desk solids.
+    const besideDesk = { x: desk.seat.x - 1.4, z: desk.seat.z };
+    const first = isMultiWalkable(layout, besideDesk) ? besideDesk : { x: -2.6, z: desk.seat.z };
+    return {
+      bounds: layout.bounds, obstacles: layout.obstacles, start: layout.spawn,
+      targets: { ...layout.targets, desk: { ...layout.targets.desk, point: desk.seat } },
+      deskAngle: desk.angle, loungeAngle: Math.PI,
+      coffeeFacing: layout.furniture.coffee, snacksFacing: layout.furniture.snacks,
+      patrol: [first, { x: -2.6, z: layout.bounds.maxZ - .9 }, layout.boss, { x: layout.bounds.maxX - .65, z: -3.15 }],
+    };
   };
-  const approach = (point: Point, pose: 'sit' | 'type' | 'drink') => {
-    move(point);
-    if (path.length || Math.hypot(player.x-point.x, player.z-point.z) < .1) arrival = pose;
+  const engine = createGameEngine(saved, {
+    getOffice: office, coworkers: false, bossAuthority: () => hostAuthority, continueBossOnRoof: true,
+    getPeers: () => latestSnapshot?.players.filter(p => p.id !== initial.id).map(actor => ({ actor, floor: actor.floor, seat: actor.seat, deskMode: actor.deskMode })) ?? [],
+  });
+  const state = engine.state;
+  Object.assign(state.player, { id: initial.id, name: initial.name, avatar: initial.avatar ?? saved?.avatar ?? 'short', x: initial.x, z: initial.z, angle: initial.angle, pose: 'idle', moving: false });
+  state.floor = initial.floor ?? 'office';
+  if (initial.seat === 'desk' && state.floor === 'office') {
+    state.seat = 'desk'; state.deskMode = initial.deskMode ?? 'work';
+    Object.assign(state.player, layout.desks[seatIndex].seat, { angle: layout.desks[seatIndex].angle, pose: state.deskMode === 'sleep' ? 'sleep' : 'type' });
+  } else if (initial.seat === 'lounge' && state.floor === 'office') {
+    state.seat = 'lounge'; Object.assign(state.player, layout.lounge, { angle: Math.PI, pose: initial.pose === 'lean' ? 'lean' : 'sit' });
+  } else if (initial.seat === 'roof-bench' && state.floor === 'rooftop') {
+    state.seat = 'roof-bench'; state.roofRest = 'bench'; Object.assign(state.player, ROOF_REST.bench.seat, { angle: ROOF_REST.bench.angle, pose: 'sit' });
+  } else if (initial.roofRest === 'wall' && initial.roofWallSide && state.floor === 'rooftop') {
+    state.roofRest = 'wall'; state.roofWallSide = initial.roofWallSide; state.roofLeanPoint = { x: initial.x, z: initial.z };
+    state.player.pose = 'wallLean'; state.player.angle = ROOF_WALLS[initial.roofWallSide].angle;
+  }
+  state.candyInMouth = state.floor === 'rooftop' && !!initial.candyInMouth;
+  if (initial.carryingCoffee) state.inventory.coffee = 1;
+  engine.dispatch({ type: 'enter', name: initial.name, avatar: initial.avatar });
+  // Keep stable membership metadata on the public actor for existing callers.
+  const player = state.player as Actor & { seatIndex: number; lastSeen: number };
+  player.seatIndex = seatIndex; player.lastSeen = initial.lastSeen;
+  const setLayout = (nextCapacity: number, nextSeat: number) => {
+    const changed = layout.capacity !== nextCapacity || seatIndex !== nextSeat;
+    seatIndex = nextSeat; player.seatIndex = nextSeat;
+    if (!changed) return;
+    layout = createMultiLayout(nextCapacity); autoInteract = null; axis = { x: 0, z: 0 };
+    engine.refreshEnvironment();
   };
+  const serializePlayer = (): RoomPlayerUpdate => ({
+    x: player.x, z: player.z, angle: player.angle, pose: player.pose, moving: player.moving,
+    floor: state.floor, seat: state.seat, deskMode: state.deskMode, roofRest: state.roofRest, roofWallSide: state.roofWallSide,
+    candyInMouth: state.candyInMouth, activity: state.activity ? { ...state.activity } : null, weapon: state.weapon,
+    elapsed: state.elapsed, lastHit: state.lastHit ? { ...state.lastHit } : null, carryingCoffee: state.inventory.coffee > 0,
+  });
+  const dispatch = (command: Command) => { autoInteract = null; engine.dispatch(command); };
   return {
-    player,
-    get layout() { return layout; },
-    setLayout(capacity: number, seatIndex: number) {
-      player.seatIndex = seatIndex;
-      if (layout.capacity === capacity) return;
-      stop(); layout = createMultiLayout(capacity);
-      if (!isMultiWalkable(layout, player)) Object.assign(player, layout.spawn, { pose: 'idle' });
+    engine, player, get layout() { return layout; }, setLayout, serializePlayer,
+    serializeBoss(): RoomBossUpdate | undefined {
+      return hostAuthority ? { actor: { ...state.boss }, phase: state.bossPhase } : undefined;
     },
-    move,
-    sit(work = false) { const desk = layout.desks[player.seatIndex]; if (desk) approach(desk.seat, work ? 'type' : 'sit'); },
-    stand() { stop(); player.pose = 'idle'; },
-    coffee() { approach(layout.coffee, 'drink'); },
-    rest() { move(layout.lounge); },
+    applySnapshot(snapshot: RoomSnapshot) {
+      if (snapshot.serverTime < lastAppliedTime) return;
+      lastAppliedTime = snapshot.serverTime;
+      const self = snapshot.players.find(p => p.id === initial.id); if (!self) return;
+      const wasHost = hostAuthority;
+      hostAuthority = snapshot.room.hostId === initial.id; latestSnapshot = snapshot;
+      setLayout(snapshot.room.capacity, self.seatIndex);
+      player.lastSeen = self.lastSeen;
+      const shared = snapshot.boss;
+      if (!shared) return;
+      const newHit = shared.lastHit && shared.lastHit.id !== lastBossHit;
+      const hit = newHit && shared.lastHit ? { id: shared.lastHit.id, weapon: shared.lastHit.weapon,
+        at: state.elapsed - Math.max(0, snapshot.serverTime - shared.lastHit.at) / 1000 } : null;
+      if (newHit && shared.lastHit) lastBossHit = shared.lastHit.id;
+      // A host keeps its responsive local patrol, but adopts the exact shared
+      // point on takeover or an accepted hit, which also freezes that patrol.
+      const replacePosition = !initializedBoss || !hostAuthority || !wasHost || !!newHit;
+      engine.applyBossState(shared.actor, shared.phase, hit, replacePosition);
+      initializedBoss = true;
+    },
+    move(point: Point) { dispatch({ type: 'move', point }); },
+    sit(_work = false) { dispatch({ type: 'select', target: 'desk' }); autoInteract = 'desk'; },
+    stand() { dispatch({ type: 'stand' }); },
+    coffee() { dispatch({ type: 'select', target: 'coffee' }); autoInteract = 'coffee'; },
+    rest() { dispatch({ type: 'select', target: 'lounge' }); },
     setAxis(next: Point) {
-      axis = next;
-      if (axis.x || axis.z) { path = []; arrival = null; drinkTime = 0; player.pose = 'idle'; }
+      if (next.x === axis.x && next.z === axis.z) return;
+      axis = { ...next }; if (axis.x || axis.z) autoInteract = null;
+      engine.dispatch({ type: 'axis', x: next.x, z: next.z });
     },
     step(dt: number) {
-      dt = Math.max(0, Math.min(.05, dt));
-      let moving = false;
-      if (axis.x || axis.z) {
-        const length = Math.hypot(axis.x, axis.z), dx = axis.x / length * 3.2 * dt, dz = axis.z / length * 3.2 * dt;
-        const next = {x: player.x + dx, z: player.z + dz};
-        if (isMultiWalkable(layout, next)) { Object.assign(player, next); moving = true; }
-        else {
-          if (isMultiWalkable(layout, {x:next.x,z:player.z})) { player.x=next.x; moving=Math.abs(dx)>0; }
-          if (isMultiWalkable(layout, {x:player.x,z:next.z})) { player.z=next.z; moving ||= Math.abs(dz)>0; }
-        }
-        if (moving) player.angle = Math.atan2(axis.x, axis.z);
-      } else if (path.length) {
-        const point=path[0], dx=point.x-player.x, dz=point.z-player.z, distance=Math.hypot(dx,dz), step=3.2*dt;
-        if (distance <= step) { Object.assign(player, point); path.shift(); }
-        else { player.x += dx/distance*step; player.z += dz/distance*step; }
-        if(distance>.0001) player.angle=Math.atan2(dx,dz);
-        moving = true;
+      engine.step(dt);
+      if (autoInteract && state.target === autoInteract && state.ready && !state.player.moving) {
+        autoInteract = null; engine.dispatch({ type: 'interact' });
       }
-      player.moving=moving;
-      if (moving) player.pose='walk';
-      else if (player.pose==='walk') player.pose='idle';
-      if (!path.length && arrival && !axis.x && !axis.z) {
-        player.pose=arrival; player.moving=false;
-        if (arrival==='drink') { player.angle=Math.PI/2; drinkTime=3; }
-        else player.angle=layout.desks[player.seatIndex].angle;
-        arrival=null;
-      }
-      if(drinkTime>0) { drinkTime-=dt; if(drinkTime<=0) player.pose='idle'; }
     },
   };
 }

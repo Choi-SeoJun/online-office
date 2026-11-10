@@ -1,4 +1,5 @@
-import type { Point } from './types.ts';
+import type { Point, TargetId } from './types.ts';
+import { TARGETS } from './layout.ts';
 
 export type MultiObstacle = Point & { w: number; d: number };
 export type MultiDesk = { index: number; point: Point; angle: number; seat: Point };
@@ -10,6 +11,11 @@ export type MultiLayout = {
   spawn: Point;
   coffee: Point;
   lounge: Point;
+  snacks: Point;
+  copier: Point;
+  boss: Point;
+  furniture: { coffee: Point; snacks: Point; copier: Point; lounge: Point; bossDesk: Point };
+  targets: Record<TargetId, { label: string; point: Point; action: string }>;
 };
 
 export const MULTI_RADIUS = .24;
@@ -26,14 +32,21 @@ export function createMultiLayout(capacity: number): MultiLayout {
     const point = { x: pair % 4 * PITCH_X, z: Math.floor(pair / 4) * PITCH_Z + side * .66 };
     return { index, point, angle: side === 1 ? Math.PI : 0, seat: { x: point.x, z: point.z + side * 1.05 } };
   });
-  const bounds = { minX: -6.2, maxX: (columns - 1) * PITCH_X + 2.8, minZ: -3.6, maxZ: (rows - 1) * PITCH_Z + 3.6 };
+  const bounds = { minX: -6.2, maxX: (columns - 1) * PITCH_X + 2.8, minZ: -7.2, maxZ: (rows - 1) * PITCH_Z + 3.6 };
+  const spawn = { x: -2.6, z: 2.7 }, coffee = { x: -3.45, z: -1.8 }, lounge = { x: -4.7, z: 2.7 };
+  const snacks = { x: -3.45, z: -4.6 }, copier = { x: .1, z: -4.7 }, boss = { x: -2.6, z: -4.65 };
+  const furniture = { coffee: { x: -4.7, z: -1.8 }, snacks: { x: -4.7, z: -4.6 }, copier: { x: .1, z: -6.1 }, lounge: { x: -4.7, z: 1.55 }, bossDesk: { x: -2.6, z: -6.1 } };
   return {
     capacity,
     bounds,
     desks,
-    obstacles: [...desks.map(desk => ({ ...desk.point, w: 2.55, d: 1.2 })), { x: -4.7, z: -1.8, w: 1.5, d: 1.2 }, { x: -4.7, z: 1.55, w: 1.2, d: 1.2 },
+    obstacles: [...desks.map(desk => ({ ...desk.point, w: 2.55, d: 1.2 })), { ...furniture.coffee, w: 1.5, d: 1.2 }, { ...furniture.lounge, w: 1.2, d: 1.2 },
+      { ...furniture.snacks, w: 1.5, d: 1.2 }, { ...furniture.copier, w: 1.35, d: 1.15 }, { ...furniture.bossDesk, w: 2.55, d: 1.2 },
       { x: bounds.maxX - .6, z: bounds.maxZ - .6, w: .42, d: .42 }, { x: bounds.minX + .65, z: bounds.minZ + .65, w: .42, d: .42 }],
-    spawn: { x: -2.6, z: 2.7 }, coffee: { x: -3.45, z: -1.8 }, lounge: { x: -4.7, z: 2.7 },
+    spawn, coffee, lounge, snacks, copier, boss, furniture,
+    targets: { ...TARGETS, desk: { ...TARGETS.desk, point: desks[0].seat }, boss: { ...TARGETS.boss, point: boss },
+      coffee: { ...TARGETS.coffee, point: coffee }, snacks: { ...TARGETS.snacks, point: snacks }, lounge: { ...TARGETS.lounge, point: lounge },
+      copier: { ...TARGETS.copier, point: copier }, exit: { ...TARGETS.exit, point: spawn } },
   };
 }
 
