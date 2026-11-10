@@ -7,10 +7,10 @@ import type { GameState, Weapon } from './types.ts';
 
 // Node has no Web Audio device. This boundary double records emitted voices,
 // while the real audio scheduler, mute logic and synthesis run unchanged.
-function audioDevice() {
-  const voices: { at: number; until: number; kind: string }[] = [];
+function audioDevice(load?: (url: string) => Promise<ArrayBuffer>) {
+  const voices: { at: number; until: number; kind: string; offset: number }[] = [], requests: string[] = [];
   type Automation = { method: string; value: number; at: number; timeConstant?: number };
-  type Buffer = { data: Float32Array[]; getChannelData(i: number): Float32Array };
+  type Buffer = { data: Float32Array[]; duration: number; asset?: string; getChannelData(i: number): Float32Array };
   const nodes: Node[] = [], buffers: Buffer[] = [], contexts: Device[] = [];
   class Param {
     value = 0; schedule: Automation[] = [];
@@ -27,14 +27,15 @@ function audioDevice() {
     connect(other: Node) { this.connections.push(other); return other; }
     disconnect() { this.disconnected = true; }
   }
-  class Source extends Node { voice = { at: 0, until: Infinity, kind: '' }; constructor(kind: string) { super(kind); this.voice.kind = kind; } start(at = 0) { this.voice.at = at; voices.push(this.voice); } stop(until = 0) { this.voice.until = until; } }
-  class Device { state = 'running'; currentTime = 0; sampleRate = 8000; destination = new Node('destination'); constructor() { contexts.push(this); } createGain() { return new Node('gain'); } createOscillator() { return new Source('tone'); } createBufferSource() { return new Source('noise'); } createBiquadFilter() { return new Node('filter'); } createBuffer(channels: number, length: number) { const data = Array.from({length:channels}, () => new Float32Array(length)); const buffer = { data, getChannelData: (i: number) => data[i] }; buffers.push(buffer); return buffer; } async resume() { this.state = 'running'; } async close() { this.state = 'closed'; } }
-  const oldAudio = Object.getOwnPropertyDescriptor(globalThis, 'AudioContext'), oldDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  class Source extends Node { voice = { at: 0, until: Infinity, kind: '', offset: 0 }; constructor(kind: string) { super(kind); this.voice.kind = kind; } start(at = 0, offset = 0) { this.voice.at = at; this.voice.offset = offset; if(this.buffer?.asset)this.voice.kind='sample'; voices.push(this.voice); } stop(until = 0) { this.voice.until = until; } }
+  class Device { state = 'running'; currentTime = 0; sampleRate = 8000; destination = new Node('destination'); constructor() { contexts.push(this); } createGain() { return new Node('gain'); } createOscillator() { return new Source('tone'); } createBufferSource() { return new Source('noise'); } createBiquadFilter() { return new Node('filter'); } createBuffer(channels: number, length: number): Buffer { const data = Array.from({length:channels}, () => new Float32Array(length)); const buffer = { data, duration:length/this.sampleRate, getChannelData: (i: number) => data[i] }; buffers.push(buffer); return buffer; } async decodeAudioData(bytes:ArrayBuffer) { const buffer=this.createBuffer(1,this.sampleRate);buffer.asset=new TextDecoder().decode(bytes);return buffer; } async resume() { this.state = 'running'; } async close() { this.state = 'closed'; } }
+  const oldAudio = Object.getOwnPropertyDescriptor(globalThis, 'AudioContext'), oldDocument = Object.getOwnPropertyDescriptor(globalThis, 'document'), oldFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => { requests.push(url);return {ok:true,arrayBuffer:()=>load?load(url):Promise.resolve(new TextEncoder().encode(url).buffer)}; }) as typeof fetch;
   Object.defineProperty(globalThis, 'AudioContext', { value: Device, configurable: true });
   const document = { hidden: false };
   Object.defineProperty(globalThis, 'document', { value: document, configurable: true });
   return {
-    voices, nodes, buffers, contexts, document,
+    voices, nodes, buffers, contexts, document, requests,
     wind() {
       const source = nodes.find(n => n instanceof Source && n.loop) as Source | undefined;
       assert.ok(source, 'the rooftop needs a reusable looping wind source');
@@ -42,7 +43,7 @@ function audioDevice() {
       assert.equal(highpass?.type, 'highpass'); assert.equal(lowpass?.type, 'lowpass'); assert.equal(level?.kind, 'gain');
       return { source, highpass, lowpass, level, master: level.connections[0] };
     },
-    restore() { if (oldAudio) Object.defineProperty(globalThis, 'AudioContext', oldAudio); else Reflect.deleteProperty(globalThis, 'AudioContext'); if (oldDocument) Object.defineProperty(globalThis, 'document', oldDocument); else Reflect.deleteProperty(globalThis, 'document'); }
+    restore() { globalThis.fetch=oldFetch;if (oldAudio) Object.defineProperty(globalThis, 'AudioContext', oldAudio); else Reflect.deleteProperty(globalThis, 'AudioContext'); if (oldDocument) Object.defineProperty(globalThis, 'document', oldDocument); else Reflect.deleteProperty(globalThis, 'document'); }
   };
 }
 
@@ -194,20 +195,22 @@ function hit(state: GameState, weapon: Weapon, id = 1) {
   state.event = {id,kind:weapon,text:'타격',at:state.elapsed};
 }
 
-test('each weapon sounds once at visible contact, not when its windup starts', () => {
+test('each supplied weapon sample sounds once at visible contact, not during windup', async () => {
   for (const weapon of Object.keys(WEAPONS) as Weapon[]) {
     const device=audioDevice(), sound=createOfficeAudio(), engine=createGameEngine();
     try {
-      engine.dispatch({type:'enter'});engine.state.settings.sound=true;sound.start();sound.sync(engine.state);
+      engine.dispatch({type:'enter'});engine.state.settings.sound=true;await sound.start();sound.sync(engine.state);
       const before=device.voices.length;hit(engine.state,weapon);sound.sync(engine.state);
       assert.equal(device.voices.length,before,'starting the swing is not its impact');
       engine.state.elapsed=WEAPONS[weapon].interval*WEAPON_IMPACT-.002;sound.sync(engine.state);
       assert.equal(device.voices.length,before);
       engine.state.elapsed+=.004;device.contexts[0].currentTime=engine.state.elapsed;sound.sync(engine.state);
-      const impact=device.voices.slice(before);assert.ok(impact.length>=2,'layer impact body and texture');
-      assert.ok(impact.some(v=>v.kind==='noise'),'the impact needs a physical texture');
-      assert.ok(impact.some(v=>v.kind==='tone'),'the impact needs a low body or rubber tone');
-      assert.ok(impact.every(v=>v.at===device.contexts[0].currentTime && v.until-v.at<=.35));
+      const impact=device.voices.slice(before);assert.equal(impact.length,1,'play only the provided recording, without synthesized layers');
+      assert.equal(impact[0].kind,'sample');assert.equal(impact[0].at,device.contexts[0].currentTime);
+      const expected={fan:['/audio/ribhavagrawal-hit-by-a-wood-230542.mp3',.048],hammer:['/audio/bithuh-villager-hit-4-hd-402179.mp3',.035],punch:['/audio/soraatwod-punch-416719.mp3',.375]}[weapon];
+      const source=device.nodes.find(n=>n.buffer?.asset&&n.onended)!;
+      assert.equal(source.buffer!.asset,expected[0]);assert.equal(impact[0].offset,expected[1]);assert.equal(source.loop,false);
+      assert.equal(source.connections[0].connections[0],device.nodes.find(n=>n.kind==='gain'),'recordings use the existing master volume');
       const after=device.voices.length;for(let i=0;i<20;i++)sound.sync(engine.state);
       assert.equal(device.voices.length,after,'render frames cannot replay a hit');
       engine.state.elapsed=WEAPONS[weapon].interval+.1;engine.state.player.pose='idle';sound.sync(engine.state);
@@ -216,7 +219,7 @@ test('each weapon sounds once at visible contact, not when its windup starts', (
   }
 });
 
-test('interrupted impacts never catch up after mute, pause, travel, cancellation or a hidden tab', () => {
+test('interrupted impacts never catch up after mute, pause, travel, cancellation or a hidden tab', async () => {
   const interruptions: {name:string;on:(state:GameState,doc:{hidden:boolean})=>void;off:(state:GameState,doc:{hidden:boolean})=>void}[]=[
     {name:'mute',on:s=>{s.settings.sound=false;},off:s=>{s.settings.sound=true;}},
     {name:'volume',on:s=>{s.settings.volume=0;},off:s=>{s.settings.volume=.4;}},
@@ -229,7 +232,7 @@ test('interrupted impacts never catch up after mute, pause, travel, cancellation
   for(const interruption of interruptions){
     const device=audioDevice(),sound=createOfficeAudio(),engine=createGameEngine();
     try{
-      engine.dispatch({type:'enter'});engine.state.settings.sound=true;sound.start();sound.sync(engine.state);
+      engine.dispatch({type:'enter'});engine.state.settings.sound=true;await sound.start();sound.sync(engine.state);
       hit(engine.state,'fan');sound.sync(engine.state);const before=device.voices.length;
       interruption.on(engine.state,device.document);sound.sync(engine.state);
       engine.state.elapsed=WEAPONS.fan.interval*WEAPON_IMPACT+.01;interruption.off(engine.state,device.document);sound.sync(engine.state);
@@ -243,17 +246,19 @@ test('interrupted impacts never catch up after mute, pause, travel, cancellation
   }
 });
 
-test('paper slap, rubber pop and punch have distinct bounded textures and reusable noise', () => {
+test('supplied samples are cached, finish naturally and release their voice chains', async () => {
   const device=audioDevice(),sound=createOfficeAudio(),engine=createGameEngine();
   try{
-    engine.dispatch({type:'enter'});engine.state.settings.sound=true;sound.start();sound.sync(engine.state);
+    engine.dispatch({type:'enter'});engine.state.settings.sound=true;await sound.start();sound.sync(engine.state);
     const profiles: string[]=[];
     for(const [index,weapon] of (Object.keys(WEAPONS) as Weapon[]).entries()){
       engine.state.elapsed=index*2;hit(engine.state,weapon,index+1);sound.sync(engine.state);
       const first=device.nodes.length;engine.state.elapsed+=WEAPONS[weapon].interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
       const nodes=device.nodes.slice(first);
-      profiles.push(JSON.stringify(nodes.filter(n=>n.kind==='filter'||n.kind==='tone').map(n=>({kind:n.kind,type:n.type,frequency:n.frequency.schedule[0]?.value??n.frequency.value}))));
-      const sources=nodes.filter(n=>n.onended);assert.ok(sources.length<=4,'only a few short voices per impact');
+      profiles.push(nodes.find(n=>n.buffer?.asset)!.buffer!.asset!);
+      const sources=nodes.filter(n=>n.onended);assert.equal(sources.length,1);
+      engine.state.elapsed=index*2+WEAPONS[weapon].interval+.01;engine.state.player.pose='idle';sound.sync(engine.state);
+      assert.ok(!sources[0].disconnected,'ordinary animation completion preserves the recording tail');
       for(const source of sources)source.onended?.();assert.ok(nodes.every(n=>n.disconnected),'natural completion releases the entire voice chain');
     }
     assert.equal(new Set(profiles).size,3,'each object has its own material sound');
@@ -263,11 +268,38 @@ test('paper slap, rubber pop and punch have distinct bounded textures and reusab
       engine.state.elapsed+=WEAPONS.fan.interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
       for(const node of device.nodes)node.onended?.();
     }
-    assert.equal(device.buffers.length,bufferCount,'hits reuse their noise data');
+    assert.equal(device.buffers.length,bufferCount,'hits reuse decoded recordings');
+    await sound.start();assert.equal(device.requests.length,3,'repeated gestures do not download the samples again');
     engine.dispatch({type:'reset'});sound.sync(engine.state);
     engine.dispatch({type:'enter'});engine.state.settings.sound=true;hit(engine.state,'fan');sound.sync(engine.state);
     const before=device.voices.length;engine.state.elapsed+=WEAPONS.fan.interval*WEAPON_IMPACT+.01;sound.sync(engine.state);
     assert.ok(device.voices.length>before,'resetting hit IDs must not suppress a fresh game');
     const live=device.nodes.filter(n=>n.onended&&!n.disconnected);sound.dispose();assert.ok(live.every(n=>n.disconnected));
   }finally{sound.dispose();device.restore();}
+});
+
+
+test('late sample loading never plays a missed impact and still serves the next hit', async () => {
+  let release!:()=>void;const wait=new Promise<void>(resolve=>{release=resolve;});
+  const device=audioDevice(async url=>{await wait;return new TextEncoder().encode(url).buffer;}),sound=createOfficeAudio(),engine=createGameEngine();
+  try{
+    engine.dispatch({type:'enter'});engine.state.settings.sound=true;const loading=sound.start();
+    hit(engine.state,'punch');sound.sync(engine.state);engine.state.elapsed=.25;sound.sync(engine.state);
+    release();await loading;sound.sync(engine.state);assert.equal(device.voices.length,0,'load completion must not replay an old contact');
+    engine.state.elapsed=2;hit(engine.state,'punch',2);sound.sync(engine.state);engine.state.elapsed+=.25;sound.sync(engine.state);
+    assert.equal(device.voices.length,1);assert.equal(device.voices[0].kind,'sample');
+  }finally{release();sound.dispose();device.restore();}
+});
+
+test('missing audio files and disposal during loading do not interrupt the game', async () => {
+  const device=audioDevice(async()=>{throw new Error('offline');}),sound=createOfficeAudio(),engine=createGameEngine();
+  try{
+    engine.dispatch({type:'enter'});engine.state.settings.sound=true;await sound.start();hit(engine.state,'hammer');engine.state.elapsed=.4;
+    assert.doesNotThrow(()=>sound.sync(engine.state));assert.equal(device.voices.length,0);
+    sound.dispose();await sound.start();assert.equal(device.requests.length,3);
+  }finally{sound.dispose();device.restore();}
+  let release!:()=>void;const wait=new Promise<void>(resolve=>{release=resolve;});
+  const delayed=audioDevice(async url=>{await wait;return new TextEncoder().encode(url).buffer;}),closed=createOfficeAudio();
+  try{const loading=closed.start();closed.dispose();release();await loading;assert.equal(delayed.voices.length,0);assert.equal(delayed.contexts[0].state,'closed');}
+  finally{release();closed.dispose();delayed.restore();}
 });

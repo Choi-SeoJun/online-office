@@ -1,17 +1,24 @@
 import type { GameState, Weapon } from './types.ts';
 import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
 
-/** Original synthesized office and rooftop sound; no downloads or background timers. */
+const IMPACT_SAMPLES: Record<Weapon, { url: string; offset: number }> = {
+  fan: { url: '/audio/ribhavagrawal-hit-by-a-wood-230542.mp3', offset: .048 },
+  hammer: { url: '/audio/bithuh-villager-hit-4-hd-402179.mp3', offset: .035 },
+  punch: { url: '/audio/soraatwod-punch-416719.mp3', offset: .375 },
+};
+
+/** Uploaded impact recordings, synthesized keyboard and wind; no background timers. */
 export function createOfficeAudio() {
   let context: AudioContext | null = null, master: GainNode | null = null;
   let keyNoise: AudioBuffer | null = null, currentState: GameState | null = null;
   let wind: AudioBufferSourceNode | null = null, windHighpass: BiquadFilterNode | null = null, windLowpass: BiquadFilterNode | null = null, windLevel: GainNode | null = null;
   let windActive = false, nextWindUpdate = 0;
-  let impactNoise: AudioBuffer | null = null, paperNoise: AudioBuffer | null = null;
+  const impactBuffers = new Map<Weapon, AudioBuffer>(), sampleRequest = new AbortController();
+  let impactLoading: Promise<void> | null = null;
   let hitKey: string | null = null, impactDone = false;
   const impactVoices = new Set<() => void>();
   let lastEvent = 0, nextTyping = 0, burstLeft = 0, directUntil = 0, lastDirect = -Infinity, disposed = false;
-  function start() {
+  async function start() {
     if (disposed) return;
     try {
       if (!context) {
@@ -21,6 +28,8 @@ export function createOfficeAudio() {
         for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (context.sampleRate * .012));
       }
       if (context.state === 'suspended') void context.resume().catch(() => {});
+      impactLoading ??= loadImpacts(context);
+      await impactLoading;
     } catch { /* Optional sound must not prevent play. */ }
   }
   function tone(frequency: number, duration: number, level: number, type: OscillatorType = 'sine', end = frequency) {
@@ -31,60 +40,44 @@ export function createOfficeAudio() {
     oscillator.connect(gain).connect(master); oscillator.start(t); oscillator.stop(t + duration);
     oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
   }
+  async function loadImpacts(device: AudioContext) {
+    await Promise.all((Object.keys(IMPACT_SAMPLES) as Weapon[]).map(async weapon => {
+      try {
+        const response = await fetch(IMPACT_SAMPLES[weapon].url, { signal: sampleRequest.signal });
+        if (!response.ok || disposed) return;
+        const bytes = await response.arrayBuffer();
+        if (disposed) return;
+        const buffer = await device.decodeAudioData(bytes);
+        if (!disposed && context === device) impactBuffers.set(weapon, buffer);
+      } catch { /* Missing optional audio must not prevent an attack or start a late one. */ }
+    }));
+  }
   function stopImpacts() { for (const stop of [...impactVoices]) stop(); }
-  function playImpactVoice(source: AudioScheduledSourceNode, nodes: AudioNode[], duration: number) {
-    if (!context) return;
+  function impact(weapon: Weapon) {
+    const buffer = impactBuffers.get(weapon);
+    if (!context || !master || !buffer) return;
+    const source = context.createBufferSource(), level = context.createGain();
+    source.buffer = buffer; level.gain.value = .8;
+    source.connect(level).connect(master);
     let ended = false;
     const cleanup = () => {
       if (ended) return;
-      ended = true; source.disconnect(); for (const node of nodes) node.disconnect(); impactVoices.delete(stop);
+      ended = true; source.disconnect(); level.disconnect(); impactVoices.delete(stop);
     };
     const stop = () => { if (!ended) { source.stop(); cleanup(); } };
     impactVoices.add(stop); source.onended = cleanup;
-    source.start(context.currentTime); source.stop(context.currentTime + duration);
-  }
-  function impactTone(frequency: number, end: number, duration: number, level: number, type: OscillatorType) {
-    if (!context || !master) return;
-    const at = context.currentTime, source = context.createOscillator(), gain = context.createGain();
-    source.type = type; source.frequency.setValueAtTime(frequency, at); source.frequency.exponentialRampToValueAtTime(end, at + duration);
-    gain.gain.setValueAtTime(level, at); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
-    source.connect(gain).connect(master); playImpactVoice(source, [gain], duration);
-  }
-  function impactTexture(frequency: number, duration: number, level: number, filterType: BiquadFilterType, flutter = false) {
-    if (!context || !master) return;
-    if (!impactNoise || !paperNoise) {
-      const length = Math.ceil(context.sampleRate * .32);
-      impactNoise = context.createBuffer(1, length, context.sampleRate); paperNoise = context.createBuffer(1, length, context.sampleRate);
-      const noise = impactNoise.getChannelData(0), paper = paperNoise.getChannelData(0);
-      for (let i = 0; i < length; i++) {
-        const time = i / context.sampleRate, sample = Math.random() * 2 - 1;
-        noise[i] = sample;
-        // Short uneven flutter gives the stack a paper tail rather than a beep.
-        paper[i] = sample * (.25 + .75 * Math.sin(time * 95) ** 2);
-      }
-    }
-    const at = context.currentTime, source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
-    source.buffer = flutter ? paperNoise : impactNoise;
-    filter.type = filterType; filter.frequency.value = frequency; filter.Q.value = .6;
-    gain.gain.setValueAtTime(level, at); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
-    source.connect(filter).connect(gain).connect(master); playImpactVoice(source, [filter, gain], duration);
-  }
-  function impact(weapon: Weapon) {
-    if (weapon === 'punch') {
-      impactTone(125, 42, .14, .30, 'triangle'); impactTexture(850, .08, .18, 'lowpass');
-    } else if (weapon === 'hammer') {
-      impactTone(620, 145, .25, .23, 'sine'); impactTone(145, 48, .12, .14, 'triangle'); impactTexture(1200, .06, .11, 'lowpass');
-    } else {
-      impactTone(175, 58, .15, .21, 'triangle'); impactTexture(1800, .11, .30, 'bandpass'); impactTexture(2200, .26, .12, 'highpass', true);
-    }
+    // Keep the original recordings; skip measured leading silence at playback only.
+    const offset = Math.min(IMPACT_SAMPLES[weapon].offset, buffer.duration);
+    source.start(context.currentTime, offset);
   }
   function syncImpact(state: GameState, enabled: boolean) {
     const hit = state.lastHit, key = hit ? `${hit.id}:${hit.at}:${hit.weapon}` : null;
     if (key !== hitKey) { stopImpacts(); hitKey = key; impactDone = false; }
-    const active = enabled && inOffice(state) && !state.transition && state.player.pose === 'hit' && !state.activity && context?.state === 'running';
+    const age = hit ? state.elapsed - hit.at : 0, duration = hit ? WEAPONS[hit.weapon].interval : 0;
+    const finishedSwing = !!hit && age >= duration && state.player.pose === 'idle';
+    const active = enabled && inOffice(state) && !state.transition && (state.player.pose === 'hit' || finishedSwing) && !state.activity && context?.state === 'running';
     if (!active) { if (hit) impactDone = true; stopImpacts(); return; }
     if (!hit || impactDone) return;
-    const age = state.elapsed - hit.at, duration = WEAPONS[hit.weapon].interval;
     if (age < 0 || age >= duration) { impactDone = true; return; }
     // Consume only the current contact. No wall-clock timers or missed-hit backlog.
     if (age + 1e-8 >= duration * WEAPON_IMPACT) { impactDone = true; impact(hit.weapon); }
@@ -177,9 +170,9 @@ export function createOfficeAudio() {
   }
   return { start, sync, typeKey, dispose() {
     if (disposed) return;
-    disposed = true; currentState = null; stopImpacts();
+    disposed = true; currentState = null; sampleRequest.abort(); impactBuffers.clear(); stopImpacts();
     wind?.stop(); wind?.disconnect(); windHighpass?.disconnect(); windLowpass?.disconnect(); windLevel?.disconnect();
     master?.disconnect(); if (context) void context.close().catch(() => {});
-    context = null; master = null; keyNoise = null; impactNoise = null; paperNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;
+    context = null; master = null; keyNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;
   } };
 }
