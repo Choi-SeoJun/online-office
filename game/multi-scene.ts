@@ -151,7 +151,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     if (!down || down.id !== event.pointerId) return;
     const delta = cameraDragRotation(event.clientX - down.x, event.clientY - down.y);
     if (delta !== null) down.dragging = true;
-    if (down.dragging) { desiredOrbit = normalizeCameraAngle(down.angle - (event.clientX - down.x) * .009); desiredPitch = clampCameraPitch(down.pitch - (event.clientY - down.y) * .006); renderer.domElement.style.cursor = 'grabbing'; }
+    if (down.dragging) { desiredOrbit = normalizeCameraAngle(down.angle - (event.clientX - down.x) * .009); desiredPitch = clampCameraPitch(down.pitch + (event.clientY - down.y) * .006); renderer.domElement.style.cursor = 'grabbing'; }
   };
   const pointerUp = (event: PointerEvent) => {
     const start = down; if (start?.id !== event.pointerId) return; down = null; renderer.domElement.style.cursor = '';

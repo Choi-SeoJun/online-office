@@ -16,8 +16,8 @@ test('drag threshold separates walking clicks from camera gestures', () => {
   assert.equal(cameraDragRotation(6, 3), null);
   assert.ok(Math.abs(cameraDragRotation(30, 0)!.orbit + .27) < 1e-10);
   assert.equal(cameraDragRotation(0, -20)!.orbit, 0);
-  assert.ok(cameraDragRotation(0, -20)!.pitch > 0);
-  assert.ok(cameraDragRotation(30, 20)!.pitch < 0);
+  assert.ok(cameraDragRotation(0, -20)!.pitch < 0);
+  assert.ok(cameraDragRotation(30, 20)!.pitch > 0);
 });
 
 test('screen movement follows the camera on every quarter turn', () => {

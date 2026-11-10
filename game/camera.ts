@@ -34,7 +34,7 @@ export function smoothCameraAngle(current: number, target: number, dt: number, r
 
 /** Null means a tap; once a drag starts, the caller must retain that decision. */
 export function cameraDragRotation(dx: number, dy: number): {orbit: number; pitch: number} | null {
-  return Math.hypot(dx, dy) > CAMERA_DRAG_THRESHOLD ? {orbit: -dx * .009 + 0, pitch: -dy * .006 + 0} : null;
+  return Math.hypot(dx, dy) > CAMERA_DRAG_THRESHOLD ? {orbit: -dx * .009 + 0, pitch: dy * .006 + 0} : null;
 }
 
 export function screenAxisToWorld(axis: Point, orbit: number): Point {
