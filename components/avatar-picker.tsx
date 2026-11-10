@@ -7,5 +7,5 @@ export function AvatarPortrait({avatar}:{avatar:AvatarStyle}) {
 }
 
 export function AvatarPicker({value,onChange,disabled=false}:{value:AvatarStyle;onChange:(value:AvatarStyle)=>void;disabled?:boolean}) {
-  return <fieldset className="avatar-picker" disabled={disabled}><legend>오늘의 캐릭터</legend><div role="radiogroup" aria-label="캐릭터 선택">{([{value:'short',label:'남성',hair:'짧은 머리'},{value:'ponytail',label:'여성',hair:'포니테일'}] as const).map(option=><button type="button" role="radio" aria-checked={value===option.value} aria-label={`${option.label} 캐릭터, ${option.hair}`} key={option.value} onClick={()=>onChange(option.value)}><AvatarPortrait avatar={option.value}/><span><strong>{option.label}</strong><small>{option.hair}</small></span><i/></button>)}</div></fieldset>;
+  return <fieldset className="avatar-picker" disabled={disabled}><legend>오늘의 캐릭터</legend><div role="radiogroup" aria-label="캐릭터 선택">{([{value:'short',label:'남성'},{value:'ponytail',label:'여성'}] as const).map(option=><button type="button" role="radio" aria-checked={value===option.value} aria-label={`${option.label} 캐릭터`} key={option.value} onClick={()=>onChange(option.value)}><AvatarPortrait avatar={option.value}/><span><strong>{option.label}</strong></span><i/></button>)}</div></fieldset>;
 }

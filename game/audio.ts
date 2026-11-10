@@ -3,7 +3,7 @@ import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
 
 /** Original synthesized office and rooftop sound; no downloads or background timers. */
 export function createOfficeAudio() {
-  let context: AudioContext | null = null, master: GainNode | null = null, hum: OscillatorNode | null = null, humLevel: GainNode | null = null;
+  let context: AudioContext | null = null, master: GainNode | null = null;
   let keyNoise: AudioBuffer | null = null, currentState: GameState | null = null;
   let wind: AudioBufferSourceNode | null = null, windHighpass: BiquadFilterNode | null = null, windLowpass: BiquadFilterNode | null = null, windLevel: GainNode | null = null;
   let windActive = false, nextWindUpdate = 0;
@@ -16,8 +16,6 @@ export function createOfficeAudio() {
     try {
       if (!context) {
         context = new AudioContext(); master = context.createGain(); master.gain.value = 0; master.connect(context.destination);
-        hum = context.createOscillator(); hum.frequency.value = 90;
-        humLevel = context.createGain(); humLevel.gain.value = 0.008; hum.connect(humLevel).connect(master); hum.start();
         keyNoise = context.createBuffer(1, Math.ceil(context.sampleRate * .05), context.sampleRate);
         const data = keyNoise.getChannelData(0);
         for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (context.sampleRate * .012));
@@ -157,7 +155,6 @@ export function createOfficeAudio() {
     currentState = state;
     const enabled = audible(state);
     if (master && context) master.gain.setTargetAtTime(enabled ? Math.min(1, Math.max(0, state.settings.volume)) : 0, context.currentTime, 0.04);
-    if (humLevel && context) humLevel.gain.setTargetAtTime(inOffice(state) ? .008 : 0, context.currentTime, .15);
     syncWind(state, enabled);
     syncImpact(state, enabled);
     if (!enabled) { lastEvent = state.event?.id ?? lastEvent; nextTyping = state.elapsed + .08; burstLeft = 0; return; }
@@ -181,7 +178,6 @@ export function createOfficeAudio() {
   return { start, sync, typeKey, dispose() {
     if (disposed) return;
     disposed = true; currentState = null; stopImpacts();
-    hum?.stop(); hum?.disconnect(); humLevel?.disconnect();
     wind?.stop(); wind?.disconnect(); windHighpass?.disconnect(); windLowpass?.disconnect(); windLevel?.disconnect();
     master?.disconnect(); if (context) void context.close().catch(() => {});
     context = null; master = null; keyNoise = null; impactNoise = null; paperNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;

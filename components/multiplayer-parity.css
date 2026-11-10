@@ -1,5 +1,6 @@
 /* Shared play controls use the same actions in both kinds of company. */
-.multi-room .location-nav{left:29px;right:auto;top:143px;transform:none}
+.multi-room .location-nav{left:29px;right:auto;top:143px;bottom:auto;width:max-content;height:auto;max-width:none;margin:0;transform:none;flex-direction:column;justify-content:flex-start}
+.multi-room .location-nav button{flex:none;flex-direction:column;white-space:nowrap}
 .multi-room .floor-travel-button{top:94px;right:30px}
 .multi-room .bottom-area{width:min(650px,calc(100% - 280px));bottom:25px}
 .multi-room .play-extra-actions{position:absolute;right:calc(100% + 12px);bottom:0}

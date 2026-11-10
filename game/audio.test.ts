@@ -51,7 +51,7 @@ test('keyboard ASMR only plays at the active work desk, with no backlog after pa
   try {
     engine.dispatch({type:'enter'}); engine.dispatch({type:'settings',value:{sound:true}}); sound.start();
     engine.state.elapsed = 2; sound.sync(engine.state);
-    assert.equal(device.voices.length, 1, 'standing in the office must not emit keyboard voices');
+    assert.equal(device.voices.length, 0, 'standing in the office must remain silent');
     engine.state.seat = 'desk'; engine.state.deskMode = 'work'; engine.state.player.pose = 'type';
     engine.state.elapsed += 1; sound.sync(engine.state);
     assert.ok(device.voices.some(v => v.kind === 'noise'), 'typing needs a mechanical click, not only an oscillator beep');
@@ -62,6 +62,27 @@ test('keyboard ASMR only plays at the active work desk, with no backlog after pa
     engine.state.deskMode = 'work'; engine.state.elapsed += .05; sound.sync(engine.state);
     assert.ok(device.voices.length - count <= 4, 'resuming must not schedule all missed keys');
     assert.ok(device.voices.filter(v => Number.isFinite(v.until)).every(v => v.until - v.at < .2));
+  } finally { sound.dispose(); device.restore(); }
+});
+
+test('entering, walking and returning to the office never start a background tone', () => {
+  const device = audioDevice(), sound = createOfficeAudio(), engine = createGameEngine();
+  try {
+    engine.state.settings.sound = true;
+    sound.start(); sound.sync(engine.state);
+    assert.equal(device.voices.length, 0, 'opening the audio device must not start a pitched loop');
+    for (let visit = 0; visit < 3; visit++) {
+      engine.dispatch({type:'enter'}); sound.start();
+      for (let frame = 0; frame < 600; frame++) {
+        engine.state.elapsed += 1 / 60; device.contexts[0].currentTime += 1 / 60;
+        engine.state.player.pose = frame < 300 ? 'idle' : 'walk';
+        engine.state.player.moving = frame >= 300;
+        sound.sync(engine.state);
+      }
+      assert.equal(device.voices.length, 0, 'idle and movement frames do not create recurring tones');
+      engine.dispatch({type:'exit'}); sound.sync(engine.state);
+    }
+    assert.equal(device.contexts.length, 1, 'returning reuses the existing audio device');
   } finally { sound.dispose(); device.restore(); }
 });
 
