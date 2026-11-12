@@ -1,4 +1,5 @@
 import type { Floor, Point } from './types.ts';
+import { SOLO_OFFICE_PLAN, MULTI_OFFICE_PLAN } from './office-plan.ts';
 
 export type RestSeat = { id: string; floor: Floor; seat: Point; approach: Point; angle: number };
 
@@ -10,8 +11,8 @@ const loungeSeats = (x: number, z: number, offset: number): RestSeat[] => [
 ];
 
 /** Stable IDs and positions are shared by scene geometry, navigation and server validation. */
-export const SOLO_LOUNGE_SEATS = loungeSeats(6.8, 2.1, 1.3);
-export const MULTI_LOUNGE_SEATS = loungeSeats(-4.7, 1.55, 1.15);
+export const SOLO_LOUNGE_SEATS = loungeSeats(SOLO_OFFICE_PLAN.furniture.lounge.x, SOLO_OFFICE_PLAN.furniture.lounge.z, SOLO_OFFICE_PLAN.loungeOffset);
+export const MULTI_LOUNGE_SEATS = loungeSeats(MULTI_OFFICE_PLAN.furniture.lounge.x, MULTI_OFFICE_PLAN.furniture.lounge.z, MULTI_OFFICE_PLAN.loungeOffset);
 export const ROOF_BENCH_SEATS: RestSeat[] = [0, -.9, .9].map((offset, index) => ({
   id: ['roof-middle', 'roof-left', 'roof-right'][index], floor: 'rooftop',
   seat: { x: 1.2 + offset, z: -4.65 }, approach: { x: 1.2 + offset, z: -3.95 }, angle: 0,

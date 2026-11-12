@@ -42,7 +42,7 @@ function fixture() {
 test('concurrent lounge occupancy admits one member and rejects the other atomically', async () => {
   const f = fixture(), host = await f.create();
   const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
-  const seated = { ...host.snapshot.players[0], ...createMultiLayout(4).lounge, seat: 'lounge', restSeatId: 'lounge-south', pose: 'sit' };
+  const seated = { ...host.snapshot.players[0], ...MULTI_LOUNGE_SEATS[0].seat, seat: 'lounge', restSeatId: 'lounge-south', pose: 'sit' };
   const results = await Promise.all([host, guest].map(({ session }) => f.send({ action: 'sync', ...session, player: seated })));
   assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
   assert.equal((results.find(result => result.status === 409)!.body as { code: string }).code, 'SEAT_TAKEN');
@@ -86,6 +86,70 @@ test('legacy clients infer the seat identity and cannot omit it to bypass occupa
   assert.equal(accepted.status, 200);
   assert.equal((accepted.body as { snapshot: RoomSnapshot }).snapshot.players[0].restSeatId, 'lounge-south');
   assert.equal((await f.send({ action: 'sync', ...guest.session, player: seated })).status, 409);
+});
+
+test('stored lounge occupants move by stable identity and still block a new chair claim', async () => {
+  for (const restSeatId of ['lounge-south', null]) {
+    const f = fixture(), host = await f.create();
+    const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession };
+    const visual = { seat: 'lounge', restSeatId };
+    f.sql.prepare("UPDATE office_members SET x = -4.7, z = 2.7, angle = 0, pose = 'sit', visual = ? WHERE id = ?")
+      .run(JSON.stringify(visual), host.session.playerId);
+    const seated = { ...host.snapshot.players[0], x: 9.1, z: -3.9, angle: Math.PI, seat: 'lounge', restSeatId: 'lounge-south', pose: 'sit' };
+    const denied = await f.send({ action: 'sync', ...guest.session, player: seated });
+    assert.equal(denied.status, 409);
+    assert.equal((denied.body as { code: string }).code, 'SEAT_TAKEN');
+    const result = await f.send({ action: 'sync', ...host.session });
+    assert.equal(result.status, 200);
+    const restored = (result.body as { snapshot: RoomSnapshot }).snapshot.players.find(p => p.id === host.session.playerId)!;
+    assert.ok(Math.abs(restored.x - 9.1) < 1e-10); assert.ok(Math.abs(restored.z + 3.9) < 1e-10);
+    assert.equal(restored.angle, Math.PI); assert.equal(restored.restSeatId, 'lounge-south'); assert.equal(restored.seat, 'lounge');
+    const stored = f.sql.prepare('SELECT x, z, visual FROM office_members WHERE id = ?').get(host.session.playerId)!;
+    assert.equal(stored.x, restored.x); assert.equal(stored.z, restored.z);
+    assert.equal(JSON.parse(String(stored.visual)).restSeatId, 'lounge-south');
+  }
+});
+
+test('persisted obstructed actors recover without changing valid coworkers or messages', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const guestBefore = guest.snapshot.players.find(p => p.id === guest.session.playerId)!;
+  f.sql.prepare("UPDATE office_members SET x = 5.2, z = -6.1, pose = 'brew', moving = 1, visual = ? WHERE id = ?")
+    .run(JSON.stringify({ activity: { kind: 'brew', duration: 3, remaining: 2 }, carryingCoffee: true }), host.session.playerId);
+  const boss = { actor: { id: 'boss', name: '박부장', x: 5.2, z: -6.1, angle: 1, pose: 'walk', moving: true }, phase: 'watch', updatedAt: 500 };
+  f.sql.prepare('UPDATE office_rooms SET boss_state = ? WHERE code = ?').run(JSON.stringify(boss), host.session.code);
+  const response = await f.send({ action: 'chat', ...host.session, text: '배치가 달라도 대화는 그대로' });
+  assert.equal(response.status, 200);
+  const state = (response.body as { snapshot: RoomSnapshot }).snapshot;
+  const own = state.players.find(p => p.id === host.session.playerId)!;
+  assert.deepEqual({ x: own.x, z: own.z }, { x: -2.6, z: 2.7 });
+  assert.equal(own.pose, 'idle'); assert.equal(own.moving, false); assert.equal(own.activity, null); assert.equal(own.carryingCoffee, true);
+  assert.deepEqual(state.players.find(p => p.id === guest.session.playerId), guestBefore);
+  assert.ok(Math.abs(state.boss.actor.x + 3.9) < 1e-10); assert.ok(Math.abs(state.boss.actor.z + 4.65) < 1e-10);
+  assert.equal(state.boss.actor.moving, false); assert.equal(state.boss.phase, 'routine');
+  assert.equal(state.messages[0].text, '배치가 달라도 대화는 그대로');
+  assert.equal(f.sql.prepare('SELECT x FROM office_members WHERE id = ?').get(host.session.playerId)!.x, -2.6);
+  assert.equal(JSON.parse(String(f.sql.prepare('SELECT boss_state FROM office_rooms').get()!.boss_state)).actor.x, state.boss.actor.x);
+});
+
+test('a delayed layout repair preserves a newer movement instead of restoring its stale chair', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession };
+  f.sql.prepare("UPDATE office_members SET x = -4.7, z = 2.7, pose = 'sit', visual = ? WHERE id = ?")
+    .run(JSON.stringify({ seat: 'lounge', restSeatId: 'lounge-south' }), host.session.playerId);
+  f.beforeNextBatch('AND x = ? AND z = ? AND angle = ?', async () => {
+    const moved = await f.send({ action: 'sync', ...host.session, player: { ...host.snapshot.players[0], x: -2.6, z: 1.5 } });
+    assert.equal(moved.status, 200);
+  });
+  const response = await f.send({ action: 'sync', ...guest.session });
+  assert.equal(response.status, 200);
+  const own = (response.body as { snapshot: RoomSnapshot }).snapshot.players.find(p => p.id === host.session.playerId)!;
+  assert.deepEqual({ x: own.x, z: own.z, seat: own.seat }, { x: -2.6, z: 1.5, seat: null });
+  const claim = await f.send({ action: 'sync', ...guest.session, player: { ...host.snapshot.players[0], x: 9.1, z: -3.9, angle: Math.PI, seat: 'lounge', restSeatId: 'lounge-south', pose: 'sit' } });
+  // The preceding heartbeat still owns its ordinary sync cooldown.
+  assert.equal(claim.status, 429);
+  f.advance(300);
+  assert.equal((await f.send({ action: 'sync', ...guest.session, player: { ...host.snapshot.players[0], x: 9.1, z: -3.9, angle: Math.PI, seat: 'lounge', restSeatId: 'lounge-south', pose: 'sit' } })).status, 200);
 });
 
 test('expired chair leases release safely even when an earlier chat renews after the new claim', async () => {

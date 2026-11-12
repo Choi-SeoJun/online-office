@@ -109,6 +109,7 @@ function database(t: TestContext) {
   const statement = (query: string, values: (string | number | null)[] = []) => ({
     bind(...next: (string | number | null)[]) { return statement(query, next); },
     async first() { return sql.prepare(query).get(...values) ?? null; },
+    async all() { return this.execute(); },
     execute() {
       const results = sql.prepare(query).all(...values);
       return { success: true, results, meta: { changes: Number(sql.prepare('SELECT changes() AS n').get()!.n) } };
@@ -125,7 +126,7 @@ function database(t: TestContext) {
   return { db, sql };
 }
 
-const createBody = JSON.stringify({ action: 'create', name: '김사원', roomName: '공유 회사', capacity: 4 });
+const createBody = JSON.stringify({ action: 'create', name: '김사원', roomName: '공유 회사', capacity: 4, layoutVersion: 2 });
 function jsonRequest(body: string | null = createBody, headers: Record<string, string> = {}) {
   return new Request(`${apiOrigin}/api/rooms`, { method: 'POST', headers: {
     'content-type': 'application/json', origin: pagesOrigin, 'cf-connecting-ip': '192.0.2.7', ...headers,
@@ -147,7 +148,7 @@ test('Pages room creation and same-origin room creation share the real room serv
 
 test('invalid bodies and content types remain readable to the approved origin', async t => {
   const { db } = database(t);
-  for (const body of [null, '', '{broken', 'null', '[]', '{"action":"unknown"}']) {
+  for (const body of [null, '', '{broken', 'null', '[]', '{"action":"unknown","layoutVersion":2}']) {
     const response = await handleRoomRequest(jsonRequest(body), db);
     assert.equal(response.status, 400);
     assert.equal((await response.json() as RoomError).code, 'INVALID_REQUEST');
@@ -182,7 +183,7 @@ test('a permitted origin still needs a valid room session', async t => {
   const created = await handleRoomRequest(jsonRequest(), db);
   const { session } = await created.json() as { session: RoomSession; snapshot: RoomSnapshot };
   const token = (session.token[0] === '0' ? '1' : '0') + session.token.slice(1);
-  const response = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, token })), db);
+  const response = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, token, layoutVersion: 2 })), db);
   assert.equal(response.status, 401);
   assert.equal((await response.json() as RoomError).code, 'SESSION_EXPIRED');
   assertCors(response, pagesOrigin);
@@ -212,4 +213,29 @@ test('backend faults become a readable unavailable response', async t => {
   assert.equal(response.status, 503);
   assert.equal((await response.json() as RoomError).code, 'UNAVAILABLE');
   assertCors(response, pagesOrigin);
+});
+
+test('missing, older and future layout clients must refresh without changing rooms or messages', async t => {
+  const { db, sql } = database(t);
+  const created = await handleRoomRequest(jsonRequest(), db);
+  assert.equal(created.status, 201);
+  const { session } = await created.json() as { session: RoomSession };
+  const chat = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'chat', ...session, text: '기존 대화', layoutVersion: 2 })), db);
+  assert.equal(chat.status, 200);
+  const before = sql.prepare('SELECT * FROM office_members').get();
+  for (const layoutVersion of [undefined, 1, 3, '2']) {
+    for (const action of ['sync', 'create', 'join']) {
+      const response = await handleRoomRequest(jsonRequest(JSON.stringify({ ...JSON.parse(createBody), ...session, action, layoutVersion })), db);
+      assert.equal(response.status, 409, `${action} version ${layoutVersion}`);
+      const error = await response.json() as RoomError;
+      assert.equal(error.code, 'ROOM_EXPIRED');
+      assert.match(error.error, /새로고침/);
+      assertCors(response, pagesOrigin);
+    }
+  }
+  assert.deepEqual(sql.prepare('SELECT * FROM office_members').get(), before);
+  assert.equal(sql.prepare('SELECT count(*) AS n FROM office_rooms').get()!.n, 1);
+  assert.equal(sql.prepare('SELECT text FROM office_messages').get()!.text, '기존 대화');
+  const restored = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, layoutVersion: 2 })), db);
+  assert.equal(restored.status, 200);
 });

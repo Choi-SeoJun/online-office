@@ -3,6 +3,7 @@ import { BOUNDS, DESKS, OBSTACLES, ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, ROOF_
 import { readSavedState, toPersistedState } from './storage.ts';
 import { getRoofLean, ROOF_LEAN_DISTANCE } from './roof-rest.ts';
 import { ROOF_BENCH_SEATS, SOLO_LOUNGE_SEATS, restSeatById, type RestSeat } from './rest-seats.ts';
+import { SOLO_OFFICE_PLAN } from './office-plan.ts';
 
 const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -20,8 +21,8 @@ export type GameEnvironment = {
   getPeers?: () => { actor: Actor; floor: Floor; seat: GameState['seat']; restSeatId?: string | null; deskMode: GameState['deskMode'] }[];
 };
 const SOLO_OFFICE: OfficeEnvironment = { bounds: BOUNDS, obstacles: OBSTACLES, start: START, targets: TARGETS, deskAngle: Math.PI, loungeAngle: Math.PI,
-  coffeeFacing: { x: 7.6, z: -4.3 }, snacksFacing: { x: 7.6, z: -1.8 },
-  patrol: [{ x: 3.5, z: 3.25 }, { x: -3.8, z: 4 }, { x: -6, z: -3.55 }, { x: 3.5, z: .3 }] };
+  coffeeFacing: SOLO_OFFICE_PLAN.furniture.coffee, snacksFacing: SOLO_OFFICE_PLAN.furniture.snacks,
+  patrol: [{ x: TARGETS.desk.point.x + 1.5, z: TARGETS.desk.point.z }, { x: -3.8, z: 4 }, TARGETS.boss.point, { x: 3.5, z: .3 }] };
 function createNavigation(office: OfficeEnvironment) {
 const RADIUS = office === SOLO_OFFICE ? .22 : .24;
 const valid = (p: Point, floor: Floor = 'office') => {
@@ -502,11 +503,13 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     typing.pose = state.elapsed % 16 < 12 ? 'type' : 'lean';
     sleeping.pose = state.elapsed % 24 < 19 ? 'sleep' : 'drink';
     const phase = Math.floor(state.elapsed / 12) % 4;
-    const home = { x: -2, z: 3.25 };
+    const ownDesk = DESKS.find(desk => desk.owner === coffee.id)!;
+    const home = { x: ownDesk.x, z: ownDesk.z + 1.05 };
     // Keep the visiting coworker beside the pantry aisle, leaving the machine
     // approach free so the player's brewing and drinking motions remain visible.
-    const points = [home, { x: 5.5, z: -2.9 }, office.targets.copier.point, home];
-    if (phase !== coworkerPhase) { coworkerPhase = phase; coworkerPath = route(coffee, points[phase]); }
+    const coffeeStop = { x: office.targets.coffee.point.x + 1.7, z: office.targets.coffee.point.z + .2 };
+    const points = [home, coffeeStop, office.targets.copier.point, home];
+    if (phase !== coworkerPhase) { coworkerPhase = phase; coworkerPath = route(coffee, points[phase], office.targets.coffee.point); }
     travel(coffee, coworkerPath, 1.3, dt);
     if (!coffee.moving) { coffee.pose = phase === 1 ? 'drink' : phase === 2 ? 'idle' : 'type'; coffee.angle = coffee.pose === 'type' ? Math.PI : 0; }
   };
@@ -582,6 +585,10 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       office = next; navigation = createNavigation(office); patrol = office.patrol;
       path = []; bossPath = []; pendingRest = null; state.destination = null; axis = { x: 0, z: 0 };
       if (!valid(officeReturn)) officeReturn = { ...office.start };
+      if (state.floor === 'office' && state.seat === 'lounge') {
+        const seat = currentRestSeat();
+        if (seat?.floor === 'office') { selectedRestSeat = seat; Object.assign(state.player, seat.seat); restorePose(); }
+      }
       if (state.floor === 'office' && !valid(state.player)) { cancel(); stand(); Object.assign(state.player, office.start); }
       if (!valid(state.boss)) Object.assign(state.boss, office.targets.boss.point);
       if (state.seat === 'desk') { Object.assign(state.player, office.targets.desk.point); restorePose(); }

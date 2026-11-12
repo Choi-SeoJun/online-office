@@ -24,6 +24,14 @@ test('capacity change preserves valid player location and seat assignment',()=>{
   const c=createMultiController(member(4,1),4), before={x:c.player.x,z:c.player.z};
   c.setLayout(16,1); assert.deepEqual({x:c.player.x,z:c.player.z},before); assert.equal(c.layout.capacity,16); assert.equal(c.player.seatIndex,1);
 });
+test('restoring an office player inside moved furniture repairs the position before movement',()=>{
+ const blocked=createMultiLayout(4).desks[0].point;
+ const c=createMultiController({...member(4,1),...blocked},4);
+ assert.ok(isMultiWalkable(c.layout,c.player));
+ assert.deepEqual({x:c.player.x,z:c.player.z},c.layout.spawn);
+ c.sit();for(let i=0;i<1800&&c.player.pose!=='type';i++)c.step(.05);
+ assert.equal(c.player.pose,'type');c.engine.dispose();
+});
 test('restoring a transient coffee pose never leaves the avatar drinking forever',()=>{
   const c=createMultiController({...member(8,0),pose:'drink'},8);
   for(let i=0;i<600;i++)c.step(1/30);
@@ -50,6 +58,24 @@ const roomSnapshot = (host: ReturnType<typeof createMultiController>, guest?: Re
   room:{code:'ABCDEFGH',name:'우리 회사',capacity:host.layout.capacity,hostId:host.player.id,expiresAt:999999},selfId:guest?.player.id??host.player.id,
   players:[sharedPlayer(host),...(guest?[sharedPlayer(guest)]:[])],messages:[],notifications:[],serverTime:now,
   boss:{actor:{...host.engine.state.boss},phase:host.engine.state.bossPhase,lastHit:null,updatedAt:now},
+});
+test('a corrected snapshot repairs only an obstructed local player and preserves responsive valid movement',()=>{
+ const c=createMultiController(member(4,0),4),snapshot=roomSnapshot(c);
+ const valid={x:c.layout.spawn.x,z:c.layout.spawn.z-.5};
+ Object.assign(c.player,valid);c.applySnapshot(snapshot);
+ assert.deepEqual({x:c.player.x,z:c.player.z},valid,'a delayed self snapshot does not rewind local movement');
+ Object.assign(c.player,c.layout.desks[0].point);snapshot.serverTime++;
+ snapshot.players[0].x=valid.x;snapshot.players[0].z=valid.z;
+ c.applySnapshot(snapshot);
+ assert.deepEqual({x:c.player.x,z:c.player.z},valid);assert.ok(isMultiWalkable(c.layout,c.player));c.engine.dispose();
+});
+test('a stale shared boss inside furniture is placed on safe floor before its patrol resumes',()=>{
+ const c=createMultiController(member(4,0),4),snapshot=roomSnapshot(c);
+ Object.assign(snapshot.boss.actor,c.layout.desks[0].point,{moving:true,pose:'walk'});
+ c.applySnapshot(snapshot);
+ assert.ok(isMultiWalkable(c.layout,c.engine.state.boss));
+ assert.deepEqual({x:c.engine.state.boss.x,z:c.engine.state.boss.z},c.layout.boss);
+ for(let i=0;i<200;i++){c.step(.05);assert.ok(isMultiWalkable(c.layout,c.engine.state.boss));}c.engine.dispose();
 });
 
 test('occupied chairs are avoided and generic rest selects a different free chair', () => {
@@ -95,7 +121,7 @@ test('restored noncentral lounge and roof seats preserve their own location and 
 test('multiplayer uses the full pantry, desk activities and all three boss tools',()=>{
   const c=createMultiController(member(16,15),16),e=c.engine;
   arrive(c,'coffee');e.dispatch({type:'interact'});advance(c,3.3);assert.equal(e.state.inventory.coffee,3);
-  assert.ok(e.state.player.angle<0,'face coffee cabinet to the left');
+  assert.ok(Math.cos(e.state.player.angle)<-.99,'face the rear coffee cabinet');
   arrive(c,'snacks');e.dispatch({type:'take',snack:'choco'});advance(c,1.4);assert.equal(e.state.inventory.choco,1);
   e.dispatch({type:'eat',snack:'choco'});advance(c,1.6);assert.equal(e.state.inventory.choco,0);
   arrive(c,'desk');e.dispatch({type:'interact'});

@@ -1,4 +1,5 @@
 import { handleRoomAction, hashRoomToken, type RoomDatabase } from './rooms.ts';
+import { OFFICE_LAYOUT_VERSION } from '../game/office-version.ts';
 
 const pagesOrigin = 'https://choi-seojun.github.io';
 
@@ -46,6 +47,10 @@ export async function handleRoomRequest(request: Request, db?: RoomDatabase): Pr
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     let body: unknown;
     try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { return error(400, 'INVALID_REQUEST', '입력 내용을 확인해 주세요.'); }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return error(400, 'INVALID_REQUEST', '입력 내용을 확인해 주세요.');
+    if ((body as Record<string, unknown>).layoutVersion !== OFFICE_LAYOUT_VERSION) {
+      return error(409, 'ROOM_EXPIRED', '사무실 배치가 바뀌었어요. 화면을 새로고침한 뒤 다시 입장해 주세요.');
+    }
     // Cloudflare sets this header at its trusted edge. Persist only a daily hash.
     const rateKey = await hashRoomToken(`${Math.floor(Date.now() / 86400000)}:${request.headers.get('cf-connecting-ip') ?? 'local'}`);
     const result = await handleRoomAction(db, body, { rateKey });

@@ -1,5 +1,6 @@
 import type { Point, RoofWallSide, TargetId } from './types.ts';
 import { ROOF_BENCH_SEATS } from './rest-seats.ts';
+import { SOLO_OFFICE_PLAN } from './office-plan.ts';
 
 export const BOUNDS = { minX: -8.6, maxX: 8.6, minZ: -5.6, maxZ: 5.6 };
 export const START: Point = { x: 1.8, z: 5.0 };
@@ -22,12 +23,12 @@ export const ROOF_REST = {
 } as const;
 export const isRoofTarget = (target: TargetId) => target === 'roofBench' || roofWallForTarget(target) !== null;
 export const DESKS = [
-  { x: -6, z: -1.2, owner: 'colleague-0' },
-  { x: -2, z: -1.2, owner: 'colleague-1' },
-  { x: 2, z: -1.2, owner: null },
-  { x: -6, z: 2.2, owner: null },
-  { x: -2, z: 2.2, owner: 'colleague-2' },
-  { x: 2, z: 2.2, owner: 'player' },
+  { x: -6, z: -.8, owner: 'colleague-0' },
+  { x: -2, z: -.8, owner: 'colleague-1' },
+  { x: 2, z: -.8, owner: null },
+  { x: -6, z: 2.6, owner: null },
+  { x: -2, z: 2.6, owner: 'colleague-2' },
+  { x: 2, z: 2.6, owner: 'player' },
 ] as const;
 export type Obstacle = { x: number; z: number; w: number; d: number };
 export const ROOF_OBSTACLES: Obstacle[] = [
@@ -38,20 +39,16 @@ export const ROOF_OBSTACLES: Obstacle[] = [
 ];
 export const OBSTACLES: Obstacle[] = [
   ...DESKS.map(d => ({ x: d.x, z: d.z, w: 2.55, d: 1.2 })),
-  { x: -6, z: -4.7, w: 3.0, d: 1.2 },
-  { x: 7.6, z: -4.3, w: 1.7, d: 1.5 },
-  { x: 7.6, z: -1.8, w: 1.7, d: 1.5 },
-  { x: 6.8, z: 2.1, w: 1.5, d: 1.4 },
-  { x: -7.8, z: 4.6, w: 1.35, d: 1.15 },
-  { x: 4.3, z: -3.0, w: 0.18, d: 4.6 },
+  ...Object.values(SOLO_OFFICE_PLAN.furniture),
+  SOLO_OFFICE_PLAN.partition,
 ];
 export const TARGETS: Record<TargetId, { label: string; point: Point; action: string }> = {
-  desk: { label: '내 자리', point: { x: 2, z: 3.25 }, action: '앉기' },
-  boss: { label: '상사', point: { x: -6, z: -3.55 }, action: '골탕먹이기' },
-  coffee: { label: '커피 머신', point: { x: 6.0, z: -4.1 }, action: '커피 내리기' },
-  snacks: { label: '과자 선반', point: { x: 6.0, z: -1.8 }, action: '과자 챙기기' },
-  lounge: { label: '탕비실', point: { x: 6.8, z: 3.4 }, action: '잠깐 앉기' },
-  copier: { label: '복사기', point: { x: -6.4, z: 4.6 }, action: '구경하기' },
+  desk: { label: '내 자리', point: { x: 2, z: 3.65 }, action: '앉기' },
+  boss: { label: '상사', point: SOLO_OFFICE_PLAN.targets.boss, action: '골탕먹이기' },
+  coffee: { label: '커피 머신', point: SOLO_OFFICE_PLAN.targets.coffee, action: '커피 내리기' },
+  snacks: { label: '과자 선반', point: SOLO_OFFICE_PLAN.targets.snacks, action: '과자 챙기기' },
+  lounge: { label: '탕비실', point: SOLO_OFFICE_PLAN.targets.lounge, action: '잠깐 앉기' },
+  copier: { label: '복사기', point: SOLO_OFFICE_PLAN.targets.copier, action: '구경하기' },
   exit: { label: '출입구', point: START, action: '퇴근하기' },
   roofBench: { label: '옥상 벤치', point: ROOF_REST.bench.point, action: '벤치에 앉기' },
   roofWall: { label: '뒤쪽 벽', point: ROOF_WALLS.north.point, action: '벽에 기대기' },

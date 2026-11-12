@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, mug, plant, plaque, spriteLabel } from './models.ts';
-import { batchArchitecture, isPointerEligible, targetSelectionForHit } from './scene.ts';
+import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelectionForHit } from './scene.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { ROOF_BOUNDS, isRoofTarget, roofWallForTarget } from './layout.ts';
 import { remoteAnimationState } from './multi-animation.ts';
@@ -33,12 +33,16 @@ export type MultiSceneCallbacks = {
 
 export function createMultiArchitecture(layout: MultiLayout) {
   const group = new THREE.Group(); group.name = 'shared-office';
+  const { partition, furniture } = layout;
   const b = layout.bounds, w = b.maxX - b.minX, d = b.maxZ - b.minZ, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
   box(group, w + .4, .36, d + .4, '#aab6ad', cx, -.25, cz, .12);
   const floor = box(group, w, .12, d, '#c7cec4', cx, -.04, cz); floor.userData.ground = true;
   const nx = Math.ceil(w), nz = Math.ceil(d), tw = w / nx, td = d / nz;
   for (let x = 0; x < nx; x++) for (let z = 0; z < nz; z++) {
-    const tile = box(group, tw - .01, .012, td - .01, ['#d3d9ce', '#cdd5ca', '#d8dcd1'][(x + z * 2) % 3], b.minX + tw * (x + .5), .028, b.minZ + td * (z + .5), 0); tile.userData.ground = true;
+    const px = b.minX + tw * (x + .5), pz = b.minZ + td * (z + .5);
+    const pantry = px > partition.x && pz < partition.z + partition.d / 2 + .9;
+    const color = (pantry ? ['#d8c6a6', '#ddccae', '#d2c09f'] : ['#d3d9ce', '#cdd5ca', '#d8dcd1'])[(x + z * 2) % 3];
+    const tile = box(group, tw - .01, .012, td - .01, color, px, .028, pz, 0); tile.userData.ground = true;
   }
   const walls: { side: RoofWallSide; x: number; z: number; w: number; d: number }[] = [
     { side: 'north', x: cx, z: b.minZ - .07, w: w + .16, d: .14 },
@@ -73,17 +77,18 @@ export function createMultiArchitecture(layout: MultiLayout) {
     const number = plaque(model.group, `${String(item.index + 1).padStart(2, '0')}번 자리`, .6, .16, .78, 1.28, .55, '#607f76');
     number.userData.target = `seat:${item.index}`; number.userData.uniqueGeometry = true;
   }
-  // The left-hand break strip stays fixed as more desk rows are added.
+  // Shared amenities fill the rear row; the front of the privacy screen stays open.
+  createPantryDivider(group, partition);
   const coffee = new THREE.Group(); coffee.name = 'shared-coffee'; coffee.userData.target = 'coffee'; coffee.position.set(layout.furniture.coffee.x, 0, layout.furniture.coffee.z); group.add(coffee);
-  box(coffee, 1.5, 1, 1.2, '#e4e7dc', 0, .5);
-  box(coffee, 1.57, .09, 1.26, '#b69a78', 0, 1.045);
-  const machine = new THREE.Group(); machine.rotation.y = Math.PI / 2; coffee.add(machine);
+  box(coffee, furniture.coffee.w, 1, furniture.coffee.d, '#e4e7dc', 0, .5);
+  box(coffee, furniture.coffee.w + .07, .09, furniture.coffee.d + .06, '#b69a78', 0, 1.045);
+  const machine = new THREE.Group(); coffee.add(machine);
   box(machine, .58, .56, .44, '#3f5550', -.2, 1.37, -.13, .04);
   box(machine, .38, .19, .04, '#a7c6bd', -.2, 1.45, .1);
   mug(machine, -.2, 1.1, .18); mug(machine, .45, 1.1, .23, '#87aaa1');
   const coffeeLabel = spriteLabel(coffee, '커피 한 잔', '#395b50', 1.08); coffeeLabel.position.set(0, 2.05, 0);
   const snacks = new THREE.Group(); snacks.name = 'shared-snacks'; snacks.userData.target = 'snacks';
-  snacks.position.set(layout.furniture.snacks.x, 0, layout.furniture.snacks.z); snacks.rotation.y = Math.PI / 2; group.add(snacks);
+  snacks.position.set(layout.furniture.snacks.x, 0, layout.furniture.snacks.z); group.add(snacks);
   box(snacks, 1.2, .18, 1.5, '#b29974', 0, .14);
   box(snacks, .07, 1.5, 1.5, '#baa17d', -.565, .87); box(snacks, .07, 1.5, 1.5, '#baa17d', .565, .87);
   box(snacks, 1.14, 1.46, .07, '#e0dac1', 0, .85, -.715);
@@ -97,7 +102,7 @@ export function createMultiArchitecture(layout: MultiLayout) {
   const lounge = new THREE.Group(); lounge.name = 'shared-lounge'; lounge.userData.target = 'lounge'; group.add(lounge);
   const table = layout.furniture.lounge;
   cylinder(lounge, .07, .09, .94, '#748a7c', table.x, .47, table.z);
-  box(lounge, 1.2, .1, 1.2, '#c6ab84', table.x, 1, table.z, .15);
+  box(lounge, table.w, .1, table.d, '#c6ab84', table.x, 1, table.z, .15);
   mug(lounge, table.x + .25, 1.06, table.z - .05, '#799d8d');
   for (const seat of layout.loungeSeats) {
     const model = chair(lounge, seat.seat.x, seat.seat.z, '#6a8f81', seat.angle + Math.PI); model.name = seat.id;
@@ -108,6 +113,7 @@ export function createMultiArchitecture(layout: MultiLayout) {
   box(copier, 1.12, .05, .85, '#98b4aa', -.04, 1.265, -.05); box(copier, 1.17, .07, .89, '#eff0e5', -.04, 1.31, -.05);
   box(copier, .52, .10, .27, '#64746c', .30, 1.24, .52); box(copier, .29, .012, .15, '#a4d2c1', .25, 1.305, .54);
   for (let i = 0; i < 3; i++) { box(copier, 1.13, .025, .018, '#b4c0b3', 0, .30 + i * .25, .585); box(copier, .23, .045, .023, '#8d9c90', 0, .39 + i * .25, .60); }
+  const copierLabel = spriteLabel(copier, '복사기', '#617368', .95); copierLabel.position.set(0, 1.95, 0);
   const chief = new THREE.Group(); chief.name = 'shared-boss-desk'; chief.userData.target = 'boss'; chief.position.set(layout.furniture.bossDesk.x, 0, layout.furniture.bossDesk.z); group.add(chief);
   const bossDesk = desk(chief, 0, 0, 0, true); bossDesk.group.scale.x = .85;
   const chiefLabel = spriteLabel(chief, '부장님 자리', '#51372d', 1.10); chiefLabel.position.set(0, 2.10, 0);

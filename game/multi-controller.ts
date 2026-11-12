@@ -16,14 +16,15 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
     // First patrol point observes the local desk; remaining aisle points keep
     // the shared boss moving through every row without entering desk solids.
     const besideDesk = { x: desk.seat.x - 1.4, z: desk.seat.z };
-    const first = isMultiWalkable(layout, besideDesk) ? besideDesk : { x: -2.6, z: desk.seat.z };
+    const first = isMultiWalkable(layout, besideDesk) ? besideDesk : { x: layout.spawn.x, z: desk.seat.z };
     return {
       bounds: layout.bounds, obstacles: layout.obstacles, start: layout.spawn,
       targets: { ...layout.targets, desk: { ...layout.targets.desk, point: desk.seat } },
       deskAngle: desk.angle, loungeAngle: Math.PI,
       loungeSeats: layout.loungeSeats,
       coffeeFacing: layout.furniture.coffee, snacksFacing: layout.furniture.snacks,
-      patrol: [first, { x: -2.6, z: layout.bounds.maxZ - .9 }, layout.boss, { x: layout.bounds.maxX - .65, z: -3.15 }],
+      patrol: [first, { x: layout.spawn.x, z: layout.bounds.maxZ - .9 }, layout.boss,
+        { x: layout.bounds.maxX - .65, z: Math.max(...layout.desks.map(desk => desk.seat.z)) + .6 }],
     };
   };
   const engine = createGameEngine(saved, {
@@ -48,6 +49,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
   }
   state.candyInMouth = state.floor === 'rooftop' && !!initial.candyInMouth;
   if (initial.carryingCoffee) state.inventory.coffee = 1;
+  if (state.floor === 'office' && !isMultiWalkable(layout, state.player)) engine.refreshEnvironment();
   engine.dispatch({ type: 'enter', name: initial.name, avatar: initial.avatar });
   // Keep stable membership metadata on the public actor for existing callers.
   const player = state.player as Actor & { seatIndex: number; lastSeen: number };
@@ -79,6 +81,10 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       const wasHost = hostAuthority;
       hostAuthority = snapshot.room.hostId === initial.id; latestSnapshot = snapshot;
       setLayout(snapshot.room.capacity, self.seatIndex);
+      if (state.floor === 'office' && !isMultiWalkable(layout, player)) {
+        engine.refreshEnvironment();
+        if (self.floor === 'office' && !self.seat && isMultiWalkable(layout, self)) Object.assign(player, { x: self.x, z: self.z });
+      }
       if (state.restSeatId && snapshot.players.some(peer => peer.id !== initial.id && peer.floor === state.floor
         && (peer.seat === 'lounge' || peer.seat === 'roof-bench')
         && (peer.restSeatId === state.restSeatId || Math.hypot(peer.x - player.x, peer.z - player.z) < .5))) engine.rejectRestSeat(state.restSeatId);
@@ -92,7 +98,8 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       // A host keeps its responsive local patrol, but adopts the exact shared
       // point on takeover or an accepted hit, which also freezes that patrol.
       const replacePosition = !initializedBoss || !hostAuthority || !wasHost || !!newHit;
-      engine.applyBossState(shared.actor, shared.phase, hit, replacePosition);
+      const sharedActor = isMultiWalkable(layout, shared.actor) ? shared.actor : { ...shared.actor, ...layout.boss, pose: 'idle' as const, moving: false };
+      engine.applyBossState(sharedActor, shared.phase, hit, replacePosition);
       initializedBoss = true;
     },
     move(point: Point) { dispatch({ type: 'move', point }); },

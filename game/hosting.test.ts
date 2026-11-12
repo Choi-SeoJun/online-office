@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { feedbackAdminUrl, feedbackEndpoint, publicAssetPath } from './hosting.ts';
 import { requestRoom, roomInviteUrl } from './multi-client.ts';
+import { OFFICE_LAYOUT_VERSION } from './office-version.ts';
 
 test('asset paths honor the deployment prefix and preserve the Sites root default', () => {
   assert.equal(publicAssetPath('audio/hit.mp3'), '/audio/hit.mp3');
@@ -17,7 +18,7 @@ test('Pages sends room actions to its fixed backend without browser cookies or r
     globalThis.fetch=async(input,init)=>{
       assert.equal(input,'https://backend.test/api/rooms');
       assert.equal(init?.credentials,'omit');assert.equal(init?.redirect,'error');
-      assert.deepEqual(JSON.parse(String(init?.body)),{action:'sync',code:'ABCD2345',token:'private-session'});
+      assert.deepEqual(JSON.parse(String(init?.body)),{action:'sync',code:'ABCD2345',token:'private-session',layoutVersion:OFFICE_LAYOUT_VERSION});
       return Response.json({ok:true});
     };
     assert.deepEqual(await requestRoom({action:'sync',code:'ABCD2345',token:'private-session'}),{ok:true});

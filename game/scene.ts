@@ -8,6 +8,7 @@ import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotati
 import { prepareCameraCutaways } from './camera-cutaway.ts';
 import { SOLO_LOUNGE_SEATS, restSeatById } from './rest-seats.ts';
 import { chairSpinAngle } from './expression.ts';
+import { SOLO_OFFICE_PLAN, type OfficePlan } from './office-plan.ts';
 
 /** Three raycasts hidden descendants; only visible, interactive ancestors may capture a click. */
 export function isPointerEligible(object: THREE.Object3D): boolean {
@@ -59,6 +60,14 @@ export function batchArchitecture(group: THREE.Group) {
   originals.forEach(mesh => mesh.removeFromParent());
 }
 
+/** This internal screen stays solid when the exterior camera cutaways fade. */
+export function createPantryDivider(parent: THREE.Object3D, partition: OfficePlan['partition']) {
+  const { x, z, w, d, height } = partition;
+  box(parent, w, height, d, '#e8e1ce', x, height / 2, z, .018);
+  box(parent, w + .06, .08, d + .04, '#ac916f', x, height + .04, z, .012);
+  box(parent, w + .025, .14, d, '#c6b292', x, .10, z, .01);
+}
+
 export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks): OfficeScene {
   let renderer: THREE.WebGLRenderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' }); }
@@ -69,6 +78,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const scene = new THREE.Scene(); scene.background = new THREE.Color('#e6e5dc'); scene.fog = new THREE.Fog('#e6e5dc', 34, 70);
   const camera = new THREE.OrthographicCamera(-14, 14, 10, -10, .1, 90);
   const room = new THREE.Group(); room.name = 'office'; scene.add(room);
+  const plan = SOLO_OFFICE_PLAN, furniture = plan.furniture;
   const ambient = new THREE.HemisphereLight('#f5f5e7', '#91a09a', 2.5); scene.add(ambient);
   const sunlight = new THREE.DirectionalLight('#fff2d7', 3.6); sunlight.position.set(-3, 14, -6); sunlight.castShadow = true; sunlight.shadow.mapSize.set(2048, 2048); sunlight.shadow.camera.left = -13; sunlight.shadow.camera.right = 13; sunlight.shadow.camera.top = 11; sunlight.shadow.camera.bottom = -11; sunlight.shadow.normalBias = .035; sunlight.shadow.bias = -.0002; scene.add(sunlight); scene.add(sunlight.target);
   const fill = new THREE.DirectionalLight('#e1eff4', 1.1); fill.position.set(10, 8, 9); scene.add(fill);
@@ -76,7 +86,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   box(room, 18.4, .40, 12.4, '#a8b1a7', 0, -.28, 0, .14);
   const floor = box(room, 18, .12, 12, '#bbbdad', 0, -.04, 0, .025); floor.userData.ground = true;
   for (let x = 0; x < 18; x++) for (let z = 0; z < 12; z++) {
-    const pantry = x >= 13;
+    const pantry = x - 8.5 > plan.partition.x && z - 5.5 < plan.partition.z + plan.partition.d / 2 + .9;
     const color = pantry ? ['#d8c6a6', '#ddccae', '#d2c09f'][(x + z * 3) % 3] : ['#c8cbbd', '#c2c6b7', '#c4c8ba', '#cbd0c2'][(x * 7 + z * 3) % 4];
     const tile = box(room, .992, .012, .992, color, x - 8.5, .028, z - 5.5, 0); tile.userData.ground = true;
   }
@@ -112,18 +122,18 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const desks = DESKS.map((d, i) => desk(room, d.x, d.z, i));
   desks[5].group.userData.target = 'desk'; desks[5].chair.userData.target = 'desk';
   desks[5].chair.userData.dynamic = true;
-  desk(room, -6, -4.7, 0, true).group.userData.target = 'boss';
-  for (let i = 0; i < 3; i++) {
-    box(room, 2.55, .54, .055, '#e0e1d2', -6 + i * 4, 1.28, -1.79);
-    box(room, 2.57, .035, .065, '#9fae9f', -6 + i * 4, 1.56, -1.79);
-    box(room, 2.55, .43, .055, '#dfe0d1', -6 + i * 4, 1.23, 1.61);
+  desk(room, furniture.bossDesk.x, furniture.bossDesk.z, 0, true).group.userData.target = 'boss';
+  const rearDeskZ = Math.min(...DESKS.map(item => item.z));
+  for (const item of DESKS) {
+    const rearRow = item.z === rearDeskZ;
+    box(room, 2.55, rearRow ? .54 : .43, .055, rearRow ? '#e0e1d2' : '#dfe0d1', item.x, rearRow ? 1.28 : 1.23, item.z - .59);
+    if (rearRow) box(room, 2.57, .035, .065, '#9fae9f', item.x, 1.56, item.z - .59);
   }
-  // Pantry divider, timber ribs and a useful little ledge.
-  box(room, .18, 1.43, 4.6, '#ece8d8', 4.3, .72, -3); box(room, .24, .09, 4.66, '#b39772', 4.3, 1.47, -3);
-  for (let i = 0; i < 11; i++) box(room, .21, .82, .045, '#c7b397', 4.3, 1.90, -5.15 + i * .42);
+  // The solid rear screen hides the pantry while its open front keeps the aisle clear.
+  createPantryDivider(room, plan.partition);
   // Coffee cabinet.
-  const coffee = new THREE.Group(); coffee.position.set(7.6, 0, -4.3); coffee.userData.target = 'coffee'; room.add(coffee);
-  box(coffee, 1.7, .98, 1.5, '#e8e4d4', 0, .50); box(coffee, 1.77, .10, 1.56, '#b7956e', 0, 1.04);
+  const coffee = new THREE.Group(); coffee.position.set(furniture.coffee.x, 0, furniture.coffee.z); coffee.userData.target = 'coffee'; room.add(coffee);
+  box(coffee, furniture.coffee.w, .98, furniture.coffee.d, '#e8e4d4', 0, .50); box(coffee, furniture.coffee.w + .07, .10, furniture.coffee.d + .06, '#b7956e', 0, 1.04);
   for (const x of [-.42, .42]) { box(coffee, .79, .78, .028, '#d8dccd', x, .53, .762); box(coffee, .09, .035, .035, '#809185', x, .77, .791); }
   box(coffee, .64, .61, .48, '#3f4d49', -.18, 1.39, -.15, .05); box(coffee, .55, .11, .52, '#263935', -.18, 1.14, -.10);
   box(coffee, .44, .26, .045, '#9baaa0', -.18, 1.48, .105); box(coffee, .13, .07, .015, '#a0cfc0', -.18, 1.55, .135);
@@ -133,7 +143,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   plaque(coffee, 'COFFEE BREAK', 1.11, .19, 0, .72, .78, '#d8dccd', '#557165');
   const coffeeLabel = spriteLabel(coffee, '☕ 커피', '#43645a', .95); coffeeLabel.position.set(0, 2.02, 0);
   // Snack display: open shelves, wrapped bars, jars and cookie trays.
-  const snacks = new THREE.Group(); snacks.position.set(7.6, 0, -1.8); snacks.userData.target = 'snacks'; room.add(snacks);
+  const snacks = new THREE.Group(); snacks.position.set(furniture.snacks.x, 0, furniture.snacks.z); snacks.userData.target = 'snacks'; room.add(snacks);
   box(snacks, 1.7, .18, 1.5, '#b29974', 0, .14); box(snacks, .08, 1.5, 1.50, '#baa17d', -.81, .87); box(snacks, .08, 1.5, 1.5, '#baa17d', .81, .87); box(snacks, 1.63, 1.46, .07, '#e0dac1', 0, .85, -.715);
   for (const y of [.38, .90, 1.48]) box(snacks, 1.7, .075, 1.5, '#cab08a', 0, y);
   for (let row = 0; row < 2; row++) for (let i = 0; i < 5; i++) { const p = box(snacks, .20, .28, .22, ['#b36f5a', '#d7b65e', '#7c9a7f', '#e7d8b8', '#879fa6'][i], -.59 + i * .29, .56 + row * .52, .19, .018); p.rotation.z = (i % 2 ? .08 : -.08); box(snacks, .12, .075, .008, '#f6ebd0', -.59 + i * .29, .59 + row * .52, .305, .004); }
@@ -141,25 +151,27 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const snackLabel = spriteLabel(snacks, '간식 창고', '#7d634a', 1.12); snackLabel.position.set(0, 2.03, 0);
   // Lounge bistro table and upholstered bench aligned with its seat point.
   const lounge = new THREE.Group(); lounge.userData.target = 'lounge'; room.add(lounge);
-  cylinder(lounge, .06, .08, .94, '#718074', 6.8, .48, 2.1); cylinder(lounge, .45, .45, .08, '#79887b', 6.8, .08, 2.1);
-  box(lounge, 1.5, .10, 1.4, '#c7aa7c', 6.8, 1.0, 2.1, .17);
-  mug(lounge, 6.48, 1.06, 2.2, '#e9d9b1'); box(lounge, .36, .022, .45, '#758a76', 7.03, 1.064, 2.02, .005);
+  const table = furniture.lounge;
+  cylinder(lounge, .06, .08, .94, '#718074', table.x, .48, table.z); cylinder(lounge, .45, .45, .08, '#79887b', table.x, .08, table.z);
+  box(lounge, table.w, .10, table.d, '#c7aa7c', table.x, 1.0, table.z, .17);
+  mug(lounge, table.x - .32, 1.06, table.z + .1, '#e9d9b1'); box(lounge, .36, .022, .45, '#758a76', table.x + .23, 1.064, table.z - .08, .005);
   for (const seat of SOLO_LOUNGE_SEATS) {
     const model = chair(lounge, seat.seat.x, seat.seat.z, '#587c72', seat.angle + Math.PI);
     model.name = seat.id;
   }
-  const loungeSign = spriteLabel(lounge, '잠깐, 쉬어 가요', '#537063', 1.40); loungeSign.position.set(7.0, 1.88, 2.35);
+  const loungeSign = spriteLabel(lounge, '잠깐, 쉬어 가요', '#537063', 1.40); loungeSign.position.set(table.x, 1.88, table.z);
   // Copier with tinted display, scan bed, paper drawers and tray stack.
-  const copier = new THREE.Group(); copier.position.set(-7.8, 0, 4.6); copier.userData.target = 'copier'; room.add(copier);
+  const copier = new THREE.Group(); copier.position.set(furniture.copier.x, 0, furniture.copier.z); copier.userData.target = 'copier'; room.add(copier);
   box(copier, 1.35, 1.1, 1.15, '#dedfd3', 0, .58, 0, .05); box(copier, 1.30, .13, 1.1, '#525e58', 0, 1.18, 0, .025);
   box(copier, 1.12, .05, .85, '#98b4aa', -.04, 1.265, -.05); box(copier, 1.17, .07, .89, '#eff0e5', -.04, 1.31, -.05);
   const console = box(copier, .52, .10, .27, '#64746c', .30, 1.24, .52); console.rotation.x = .12; box(copier, .29, .012, .15, '#a4d2c1', .25, 1.305, .54);
   for (let i = 0; i < 3; i++) { box(copier, 1.13, .025, .018, '#b4c0b3', 0, .30 + i * .25, .585); box(copier, .23, .045, .023, '#8d9c90', 0, .39 + i * .25, .60); }
   box(copier, .55, .045, .75, '#6b7970', .90, .88, 0); for (let i = 0; i < 5; i++) box(copier, .43, .015, .60, '#f6f2df', .88, .92 + i * .016, 0, .003);
+  const copierLabel = spriteLabel(copier, '복사기', '#617368', .95); copierLabel.position.set(0, 1.95, 0);
   // Entry mat and polished directional sign occupy the open front edge.
   const entry = box(room, 2.20, .025, .72, '#648377', 1.8, .05, 5.45, .06); entry.userData.target = 'exit';
   const entryText = plaque(room, '출입구  →', 1.45, .24, 1.8, .072, 5.44, '#648377', '#e8efdd'); entryText.rotation.x = -Math.PI / 2; entryText.userData.target = 'exit';
-  plant(room, -8.20, -5.25, 1.1); plant(room, 3.15, -5.25, .9); plant(room, 8.15, 4.72, 1.30); plant(room, -8.30, 2.65, .85);
+  plant(room, -8.20, -5.25, 1.1); plant(room, 8.15, 4.72, 1.30); plant(room, -8.30, 2.65, .85);
   // Desktop succulent and tasteful desk name plate.
   const succ = plant(desks[5].group, 1.01, .30, .22); succ.position.y = 1.14;
   plaque(desks[5].group, '내 자리', .43, .14, .71, 1.25, .53, '#5c8372');

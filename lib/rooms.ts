@@ -82,7 +82,14 @@ const visualDefaults = (floor: Floor = 'office'): RoomVisualState => ({ floor, s
 function memberVisual(member: MemberRow): RoomVisualState {
   if (member.visual) {
     const visual = { ...visualDefaults(member.floor), ...JSON.parse(member.visual), floor: member.floor } as RoomVisualState;
-    if (visual.seat === 'lounge' || visual.seat === 'roof-bench') visual.restSeatId ??= restSeatAt(member, member.floor, MULTI_LOUNGE_SEATS)?.id ?? null;
+    if (visual.seat === 'lounge' || visual.seat === 'roof-bench') {
+      visual.restSeatId ??= restSeatAt(member, member.floor, MULTI_LOUNGE_SEATS)?.id ?? null;
+      // Pre-ID records still refer to the four chairs in the previous layout.
+      if (visual.seat === 'lounge' && member.floor === 'office') visual.restSeatId ??= [
+        { id: 'lounge-south', x: -4.7, z: 2.7 }, { id: 'lounge-east', x: -3.55, z: 1.55 },
+        { id: 'lounge-north', x: -4.7, z: .4 }, { id: 'lounge-west', x: -5.85, z: 1.55 },
+      ].find(seat => gap(member, seat) <= .12)?.id ?? null;
+    }
     return visual;
   }
   const value = visualDefaults(member.floor);
@@ -95,14 +102,48 @@ function visualOnly(player: RoomPlayerUpdate): RoomVisualState {
   return { floor, seat, restSeatId: restSeatId ?? null, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee };
 }
 function sharedBoss(room: RoomRow, now: number): RoomBoss {
-  const point = createMultiLayout(room.capacity).boss;
+  const layout = createMultiLayout(room.capacity), point = layout.boss;
   const stored = room.boss_state ? JSON.parse(room.boss_state) as RoomBossUpdate & { updatedAt: number } : null;
   const lastHit = room.boss_hit ? { ...JSON.parse(room.boss_hit), id: room.boss_hit_id } as NonNullable<RoomBoss['lastHit']> : null;
-  const actor = stored?.actor ?? { id: 'boss', name: '박부장', ...point, angle: 0, pose: 'idle', moving: false };
+  const obstructed = !!stored && !isMultiWalkable(layout, stored.actor);
+  const actor = !stored || obstructed ? { id: 'boss', name: '박부장', ...point, angle: 0, pose: 'idle' as const, moving: false } : stored.actor;
   const age = lastHit ? now - lastHit.at : Infinity;
-  const phase = age < 2000 ? 'hit' : age < 2600 ? 'recover' : stored?.phase === 'hit' || stored?.phase === 'recover' ? 'routine' : stored?.phase ?? 'routine';
+  const phase = age < 2000 ? 'hit' : age < 2600 ? 'recover' : obstructed || stored?.phase === 'hit' || stored?.phase === 'recover' ? 'routine' : stored?.phase ?? 'routine';
   return { actor: { ...actor, id: 'boss', name: '박부장', ...(phase === 'hit' ? { pose: 'hit', moving: false } : actor.pose === 'hit' ? { pose: 'idle', moving: false } : {}) }, phase,
     lastHit: lastHit ? { id: lastHit.id, playerId: lastHit.playerId, weapon: lastHit.weapon, at: lastHit.at } : null, updatedAt: stored?.updatedAt ?? room.created_at };
+}
+
+async function repairRoomLayout(db: RoomDatabase, room: RoomRow, now: number) {
+  const layout = createMultiLayout(room.capacity);
+  const result = await db.prepare("SELECT * FROM office_members WHERE room_code = ? AND floor = 'office'").bind(room.code).all<MemberRow>();
+  const repairs: D1PreparedStatement[] = [];
+  for (const member of result.results) {
+    const visual = memberVisual(member);
+    let point: Point = member, angle = member.angle, pose = member.pose, moving = member.moving, savedVisual = member.visual;
+    const seat = visual.seat === 'lounge' ? restSeatById(visual.restSeatId, layout.loungeSeats) : undefined;
+    if (seat?.floor === 'office') {
+      point = seat.seat; angle = seat.angle; moving = 0; savedVisual = JSON.stringify(visual);
+    } else if (!isMultiWalkable(layout, member) || visual.seat === 'lounge') {
+      point = layout.spawn; pose = 'idle'; moving = 0;
+      savedVisual = JSON.stringify({ ...visual, seat: null, restSeatId: null, deskMode: null, roofRest: null, roofWallSide: null, activity: null });
+    }
+    if (point.x === member.x && point.z === member.z && angle === member.angle && pose === member.pose && moving === member.moving && savedVisual === member.visual) continue;
+    // Never renew a lease or overwrite a move/claim that won while this repair
+    // was awaiting D1. The original state and room capacity must still match.
+    repairs.push(db.prepare(`UPDATE office_members SET x = ?, z = ?, angle = ?, pose = ?, moving = ?, visual = ?
+      WHERE id = ? AND room_code = ? AND floor = 'office' AND x = ? AND z = ? AND angle = ?
+        AND pose = ? AND moving = ? AND visual IS ? AND last_seen = ?
+        AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND capacity = ?)`)
+      .bind(point.x, point.z, angle, pose, moving, savedVisual, member.id, room.code, member.x, member.z, member.angle,
+        member.pose, member.moving, member.visual, member.last_seen, room.code, room.capacity));
+  }
+  if (room.boss_state && !isMultiWalkable(layout, JSON.parse(room.boss_state).actor)) {
+    const boss = sharedBoss(room, now);
+    repairs.push(db.prepare('UPDATE office_rooms SET boss_state = ? WHERE code = ? AND capacity = ? AND boss_state = ? AND boss_hit_id = ?')
+      .bind(JSON.stringify({ actor: boss.actor, phase: boss.phase, updatedAt: now }), room.code, room.capacity, room.boss_state, room.boss_hit_id));
+  }
+  if (repairs.length) await db.batch(repairs);
+  return repairs.length > 0;
 }
 
 async function snapshot(db: RoomDatabase, code: string, selfId: string, now: number): Promise<RoomSnapshot> {
@@ -136,6 +177,10 @@ async function authenticate(db: RoomDatabase, input: Record<string, unknown>, no
   const tokenHash = await hashRoomToken(input.token);
   let member = await db.prepare('SELECT * FROM office_members WHERE room_code = ? AND token_hash = ?').bind(code, tokenHash).first<MemberRow>();
   if (!member) fail(401, 'SESSION_EXPIRED', '자리가 비워졌어요. 참여 코드로 다시 입장해 주세요.');
+  if (await repairRoomLayout(db, room, now)) {
+    member = await db.prepare('SELECT * FROM office_members WHERE room_code = ? AND token_hash = ?').bind(code, tokenHash).first<MemberRow>();
+    if (!member) fail(401, 'SESSION_EXPIRED', '자리가 비워졌어요. 참여 코드로 다시 입장해 주세요.');
+  }
   // Chat/pokes can renew membership too: a stale client must not revive its old
   // shared chair after another member has taken it during the expired lease.
   if (member.last_seen < now - ROOM_SEAT_LEASE_MS && ['lounge', 'roof-bench'].includes(memberVisual(member).seat ?? '')) {
@@ -249,6 +294,7 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
       const room = await db.prepare('SELECT * FROM office_rooms WHERE code = ?').bind(code).first<RoomRow>();
       if (!room) fail(404, 'ROOM_NOT_FOUND', '이 참여 코드의 회사를 찾지 못했어요.');
       if (room.expires_at <= now) fail(410, 'ROOM_EXPIRED', '이 회사의 하루가 끝났어요. 새 방을 만들어 주세요.');
+      await repairRoomLayout(db, room, now);
       const token = secret(), tokenHash = await hashRoomToken(token), id = crypto.randomUUID(), spawn = createMultiLayout(room.capacity).spawn;
       const results = await db.batch([
         db.prepare('DELETE FROM office_members WHERE room_code = ? AND last_seen < ?').bind(code, now - ROOM_SEAT_LEASE_MS),

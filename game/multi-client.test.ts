@@ -59,6 +59,26 @@ test('request failures and cancellation are bounded and do not echo request data
   } finally {globalThis.fetch=original;}
 });
 
+test('room requests stamp the current layout while board requests retain their own payload', async t => {
+  const sent: Record<string, unknown>[] = [];
+  t.mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    sent.push(JSON.parse(String(init?.body))); return Response.json({ snapshot: { players: [] } });
+  });
+  const original = { action: 'sync', ...session, layoutVersion: -1 };
+  await requestRoom(original);
+  await requestRoom({ action: 'list', ...session }, undefined, 'board');
+  assert.equal(sent[0].layoutVersion, 2);
+  assert.equal(original.layoutVersion, -1);
+  assert.equal('layoutVersion' in sent[1], false);
+});
+
+test('layout mismatch responses retain the refresh message for old-room fatal handling', async t => {
+  const message = '사무실 배치가 바뀌었어요. 화면을 새로고침한 뒤 다시 입장해 주세요.';
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ code: 'ROOM_EXPIRED', error: message }, { status: 409 }));
+  await assert.rejects(requestRoom({ action: 'sync', ...session }), error => error instanceof RoomApiError
+    && error.code === 'ROOM_EXPIRED' && error.status === 409 && error.message === message);
+});
+
 test('slow room requests abort after twelve seconds and caller cancellation stays distinct',async context=>{
   const original=globalThis.fetch;
   context.mock.timers.enable({apis:['setTimeout']});

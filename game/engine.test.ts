@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameEngine } from './engine.ts';
-import { BOUNDS, DESKS, OBSTACLES, WEAPONS } from './layout.ts';
+import { createGameEngine, type OfficeEnvironment } from './engine.ts';
+import { BOUNDS, DESKS, OBSTACLES, TARGETS, WEAPONS } from './layout.ts';
+import { SOLO_OFFICE_PLAN } from './office-plan.ts';
+import type { RestSeat } from './rest-seats.ts';
 import type { GameEngine, TargetId } from './types.ts';
 
 function advance(e: GameEngine, seconds: number) { for (let t = 0; t < seconds; t += .05) e.step(.05); }
@@ -19,8 +21,8 @@ test('selection reaches targets around furniture but never seats automatically',
  for(const target of ['desk','coffee','snacks','lounge','copier','desk'] as TargetId[]) {
   e.dispatch({type:'select',target}); for(let i=0;i<400;i++){e.step(.05);clear(e);} assert.equal(e.state.ready,true,target); assert.equal(e.state.seat,null);
  }
- e.dispatch({type:'interact'});assert.equal(e.state.seat,'desk');assert.equal(e.state.player.z,3.25);
- e.dispatch({type:'move',point:{x:2,z:-4}});advance(e,15);clear(e);assert.equal(e.state.seat,null);assert.ok(Math.abs(e.state.player.z+4)<.3);
+ e.dispatch({type:'interact'});assert.equal(e.state.seat,'desk');assert.equal(e.state.player.z,3.65);
+ e.dispatch({type:'move',point:{x:4.5,z:-2.8}});advance(e,15);clear(e);assert.equal(e.state.seat,null);assert.ok(Math.hypot(e.state.player.x-4.5,e.state.player.z+2.8)<.05);
 });
 test('distance attack is ignored and weapon intervals prevent repeated hit duplication',()=>{
  const e=enter();e.dispatch({type:'attack'});assert.equal(e.state.lastHit,null);
@@ -88,7 +90,7 @@ test('approaching the boss after a coffee visit never cuts a desk corner or gets
  e.dispatch({type:'attack'});assert.equal(e.state.lastHit?.id,1);
 });
 test('following from the pantry reaches the moving boss instead of oscillating across a desk corner',()=>{
- const e=enter();Object.assign(e.state.boss,{x:-2.8300214458494115,z:.08498927707529425});Object.assign(e.state.player,{x:6,z:-4.1});
+ const e=enter();Object.assign(e.state.boss,{x:-2.8300214458494115,z:.08498927707529425});Object.assign(e.state.player,TARGETS.coffee.point);
  e.dispatch({type:'select',target:'boss'});
  for(let i=0;i<1200;i++){e.step(.05);clear(e);clear(e,e.state.boss);}
  assert.equal(e.state.ready,true);assert.equal(e.state.player.moving,false);
@@ -119,12 +121,35 @@ test('coffee and snacks complete once, respect capacity, and cancellation grants
 });
 test('pantry actions face their fixture and give the full visible action time before inventory commits',()=>{
  const e=enter();arrived(e,'coffee');e.dispatch({type:'interact'});
- assert.equal(e.state.activity?.duration,3.2);assert.ok(Math.sin(e.state.player.angle)>.95);
+ const faces=(point:{x:number;z:number})=>{
+  const dx=point.x-e.state.player.x,dz=point.z-e.state.player.z;
+  return (Math.sin(e.state.player.angle)*dx+Math.cos(e.state.player.angle)*dz)/Math.hypot(dx,dz);
+ };
+ assert.equal(e.state.activity?.duration,3.2);assert.ok(faces(SOLO_OFFICE_PLAN.furniture.coffee)>.99);
  advance(e,1.6);assert.equal(e.state.player.pose,'brew');assert.equal(e.state.inventory.coffee,0);finishActivity(e);
  e.dispatch({type:'drink'});assert.equal(e.state.activity?.duration,1.6);advance(e,.8);assert.equal(e.state.player.pose,'drink');assert.equal(e.state.inventory.coffee,3);finishActivity(e);assert.equal(e.state.inventory.coffee,2);
- arrived(e,'snacks');e.dispatch({type:'take',snack:'choco'});assert.equal(e.state.activity?.duration,1.3);assert.ok(Math.sin(e.state.player.angle)>.95);
+ arrived(e,'snacks');e.dispatch({type:'take',snack:'choco'});assert.equal(e.state.activity?.duration,1.3);assert.ok(faces(SOLO_OFFICE_PLAN.furniture.snacks)>.99);
  advance(e,.65);assert.equal(e.state.player.pose,'take');assert.equal(e.state.inventory.choco,0);finishActivity(e);
  e.dispatch({type:'eat',snack:'choco'});assert.equal(e.state.activity?.duration,1.5);advance(e,.75);assert.equal(e.state.inventory.choco,1);finishActivity(e);assert.equal(e.state.inventory.choco,0);
+});
+test('refreshing the office keeps a lounge occupant on the same chair after it moves',()=>{
+ let seats:RestSeat[]=[{id:'lounge-south',floor:'office',seat:{x:3,z:0},approach:{x:3.8,z:0},angle:Math.PI}];
+ const office=():OfficeEnvironment=>({bounds:BOUNDS,obstacles:[],start:{x:0,z:0},targets:TARGETS,
+  deskAngle:Math.PI,loungeAngle:Math.PI,loungeSeats:seats,coffeeFacing:{x:0,z:0},snacksFacing:{x:0,z:0},patrol:[]});
+ const e=createGameEngine(undefined,{getOffice:office,coworkers:false,bossAuthority:()=>false});
+ e.dispatch({type:'enter'});e.dispatch({type:'select',target:'lounge'});advance(e,4);e.dispatch({type:'interact'});
+ assert.equal(e.state.restSeatId,'lounge-south');
+ seats=[{...seats[0],seat:{x:4,z:2},approach:{x:4.8,z:2},angle:Math.PI/2}];
+ e.refreshEnvironment();
+ assert.equal(e.state.seat,'lounge');assert.deepEqual({x:e.state.player.x,z:e.state.player.z},{x:4,z:2});
+ assert.equal(e.state.player.angle,Math.PI/2);
+ e.dispatch({type:'stand'});assert.deepEqual({x:e.state.player.x,z:e.state.player.z},{x:4.8,z:2});e.dispose();
+});
+test('the visiting coworker returns to the moved desk before resuming typing',()=>{
+ const e=enter();advance(e,49);
+ const colleague=e.state.coworkers[2],desk=DESKS.find(d=>d.owner===colleague.id)!;
+ assert.equal(colleague.pose,'type');assert.ok(Math.hypot(colleague.x-desk.x,colleague.z-desk.z-1.05)<.01);
+ assert.ok(Math.cos(colleague.angle)<-.99);clear(e,colleague);e.dispose();
 });
 test('the coffee visiting coworker leaves the player machine position unobstructed',()=>{
  const e=enter();arrived(e,'coffee');let sawCoffeeBreak=false;

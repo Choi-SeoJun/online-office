@@ -6,6 +6,7 @@ import { createMultiLayout } from './multi-layout.ts';
 import { createMultiArchitecture } from './multi-scene.ts';
 import { animateActor, createActor } from './models.ts';
 import { remoteAnimationState } from './multi-animation.ts';
+import { MULTI_OFFICE_PLAN } from './office-plan.ts';
 import type { RoomPlayer } from './multi-types.ts';
 
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
@@ -80,4 +81,38 @@ test('every office size includes selectable amenities and moving chairs without 
     });
     architecture.release();
   }
+});
+
+test('the rear pantry remains hidden behind an opaque divider as the camera turns', () => {
+  const plan = MULTI_OFFICE_PLAN, architecture = createMultiArchitecture(createMultiLayout(16));
+  const start = new THREE.Vector3(plan.targets.boss.x, 1.55, plan.targets.boss.z);
+  architecture.group.updateMatrixWorld(true);
+  for (const camera of [{ x: 16, z: 24 }, { x: -16, z: 24 }, { x: -16, z: -24 }, { x: 16, z: -24 }]) {
+    architecture.cutaways(camera);
+    for (const target of [plan.targets.snacks, plan.targets.coffee, plan.targets.lounge]) {
+      const end = new THREE.Vector3(target.x, 1.55, target.z), delta = end.clone().sub(start);
+      const ray = new THREE.Raycaster(start, delta.clone().normalize(), 0, delta.length());
+      const meshes: THREE.Mesh[] = []; architecture.group.traverse(object => { if (object instanceof THREE.Mesh) meshes.push(object); });
+      const screen = ray.intersectObjects(meshes, false).find(hit =>
+        Math.abs(hit.point.x - plan.partition.x) <= plan.partition.w / 2 + .001
+        && Math.abs(hit.point.z - plan.partition.z) < plan.partition.d / 2);
+      assert.ok(screen, 'a continuous screen blocks the boss eye line to each pantry activity');
+      const material = (screen.object as THREE.Mesh).material as THREE.Material;
+      assert.equal(material.opacity, 1); assert.equal(material.transparent, false); assert.equal(material.depthWrite, true);
+    }
+  }
+  // The privacy screen ends before the front aisle, preserving the walking entrance.
+  const crossing = new THREE.Raycaster(new THREE.Vector3(plan.partition.x - 1, 1.55, -3.5), new THREE.Vector3(1, 0, 0), 0, 2);
+  const meshes: THREE.Mesh[] = []; architecture.group.traverse(object => { if (object instanceof THREE.Mesh) meshes.push(object); });
+  assert.equal(crossing.intersectObjects(meshes, false).length, 0);
+  architecture.release();
+});
+
+test('the rear snack shelves open toward the player approach', () => {
+  const architecture = createMultiArchitecture(createMultiLayout(16)), plan = MULTI_OFFICE_PLAN;
+  const shelf = architecture.group.getObjectByName('shared-snacks')!;
+  const front = new THREE.Vector3(0, 0, 1).applyQuaternion(shelf.getWorldQuaternion(new THREE.Quaternion()));
+  const approach = new THREE.Vector3(plan.targets.snacks.x - plan.furniture.snacks.x, 0, plan.targets.snacks.z - plan.furniture.snacks.z).normalize();
+  assert.ok(front.dot(approach) > .99, 'snacks remain visible and reachable from the front of the cabinet');
+  architecture.release();
 });
