@@ -13,7 +13,7 @@ export function remoteAnimationState(game: GameState, player: RoomPlayer, server
     ...game,
     name: player.name, player: actor, floor: player.floor, transition: null,
     elapsed: player.elapsed + age, target: null, ready: false,
-    seat: player.seat, deskMode: player.deskMode,
+    seat: player.seat, restSeatId: player.restSeatId ?? null, deskMode: player.deskMode,
     roofRest: player.roofRest, roofWallSide: player.roofWallSide,
     roofLeanPoint: player.roofRest === 'wall' ? { x: player.x, z: player.z } : null,
     candyInMouth: player.candyInMouth || !!(activity?.kind === 'candy' && !activity.remaining),

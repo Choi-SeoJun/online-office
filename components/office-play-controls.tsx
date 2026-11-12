@@ -17,12 +17,12 @@ function ToolButton({ icon: Icon, label, onClick, active, disabled }: { icon: Lu
 }
 
 export type PlayPanel = 'settings' | 'help' | 'bag' | null;
-export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,showMonitor=true,onMonitorClose,extraActions}:{state:GameState;send:(command:Command)=>void;panel:PlayPanel;setPanel:(panel:PlayPanel)=>void;onExit:()=>void;onType:(key:string)=>void;showMonitor?:boolean;onMonitorClose?:()=>void;extraActions?:ReactNode}) {
+export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,showMonitor=true,onMonitorClose,extraActions,boardAction}:{state:GameState;send:(command:Command)=>void;panel:PlayPanel;setPanel:(panel:PlayPanel)=>void;onExit:()=>void;onType:(key:string)=>void;showMonitor?:boolean;onMonitorClose?:()=>void;extraActions?:ReactNode;boardAction?:ReactNode}) {
   const select=(target:TargetId)=>{setPanel(null);send({type:'select',target});};
   const count = state.inventory.cookie + state.inventory.choco + state.inventory.cracker;
   const target = state.target ? TARGETS[state.target] : null;
   const TargetIcon = state.target ? targetIcons[state.target] : MousePointer2;
-  const activityLabels = { brew: '커피 내리는 중', take: '아무도 못 봤겠지?', eat: '잠깐, 한 입만', drink: '커피 한 모금', spin: '의자도 기분 전환', candy: '사탕 하나, 입에 쏙' };
+  const activityLabels = { brew: '커피 내리는 중', take: '아무도 못 봤겠지?', eat: '잠깐, 한 입만', drink: '커피 한 모금', spin: '의자도 기분 전환', candy: '사탕 하나, 입에 쏙', dance: '부장님 몰래, 지금은 내 무대' };
   const roof = state.floor === 'rooftop';
   const nearbyLean = roof && !state.transition && !state.roofRest && !state.activity ? getRoofLean(state.player) : null;
   const nearWall = !!nearbyLean && nearbyLean.distance <= ROOF_LEAN_DISTANCE;
@@ -30,6 +30,7 @@ export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,show
   const travelFade = state.transition ? Math.max(0, 1 - Math.abs(travelProgress - .5) / .3) : 0;
 
   return <>
+      <div className="office-social-tools">{boardAction}{!roof && <button type="button" aria-label={state.activity?.kind === 'dance' ? '춤 그만추기' : '부장님 몰래 춤추기'} aria-pressed={state.activity?.kind === 'dance'} disabled={!!state.transition || (!!state.activity && state.activity.kind !== 'dance')} onClick={() => { setPanel(null); send({ type: state.activity?.kind === 'dance' ? 'cancel' : 'dance' }); }}><Sparkles size={17}/><span>{state.activity?.kind === 'dance' ? '춤 그만추기' : '몰래 춤추기'}</span></button>}</div>
       <button className="floor-travel-button" disabled={!!state.transition} onClick={() => { setPanel(null); send({type:'travel',floor:roof ? 'office' : 'rooftop'}); }}>{roof ? <Building2 size={17} /> : <Wind size={17} />}<span>{roof ? '사무실로' : '옥상으로'}</span><ArrowRight size={15} /></button>
       {!roof && <nav className="location-nav" aria-label="사무실 장소">{(['desk','boss','coffee','snacks','lounge'] as TargetId[]).map(id => { const Icon = targetIcons[id]; return <button key={id} disabled={!!state.transition} className={state.target === id ? 'active' : ''} onClick={() => select(id)} aria-label={`${TARGETS[id].label}로 이동`}><Icon size={17} /><span>{id === 'coffee' ? '커피' : id === 'snacks' ? '과자' : TARGETS[id].label}</span></button>; })}</nav>}
       {roof && !state.activity && !state.transition && <div className="rooftop-note"><span>ROOFTOP BREAK</span><strong>오늘 삼킨 말은<br />달게 녹여 보내요.</strong><p>{state.settings.sound ? '바람 소리에, 잠깐 멍하니.' : '소리를 켜면 바람이 들려요.'}</p></div>}

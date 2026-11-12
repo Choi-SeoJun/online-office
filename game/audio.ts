@@ -1,6 +1,7 @@
 import type { GameState, Weapon } from './types.ts';
 import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
 import { publicAssetPath } from './hosting.ts';
+import { workExpression } from './expression.ts';
 
 const IMPACT_SAMPLES: Record<Weapon, { url: string; offset: number }> = {
   fan: { url: publicAssetPath('audio/ribhavagrawal-hit-by-a-wood-230542.mp3'), offset: .048 },
@@ -161,7 +162,7 @@ export function createOfficeAudio() {
         case 'caught': tone(340, .23, .06, 'triangle', 180); break;
       }
     }
-    if (!working(state)) { nextTyping = state.elapsed + .08; burstLeft = 0; return; }
+    if (!working(state) || !workExpression(state.elapsed).typing) { nextTyping = state.elapsed + .08; burstLeft = 0; return; }
     if (state.elapsed < directUntil || state.elapsed < nextTyping) return;
     // Schedule one key per animation frame, never a backlog of missed sounds.
     keyStroke();

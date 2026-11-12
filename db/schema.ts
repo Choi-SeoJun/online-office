@@ -56,3 +56,18 @@ export const officeFeedbackRate = sqliteTable('office_feedback_rate', {
   index('office_feedback_rate_key').on(t.rateKey, t.acceptedAt),
   index('office_feedback_rate_expiry').on(t.acceptedAt),
 ]);
+
+export const officeBoardEntries = sqliteTable('office_board_entries', {
+  id: text('id').notNull(),
+  roomCode: text('room_code').notNull().references(() => officeRooms.code, { onDelete: 'cascade' }),
+  authorId: text('author_id').notNull(),
+  authorName: text('author_name').notNull(),
+  kind: text('kind', { enum: ['note', 'text', 'doodle'] }).notNull(),
+  color: text('color').notNull(),
+  text: text('text').notNull(),
+  strokes: text('strokes').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, t => [
+  uniqueIndex('office_board_entry_id').on(t.roomCode, t.id),
+  index('office_board_room_created').on(t.roomCode, t.createdAt, t.id),
+]);

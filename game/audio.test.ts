@@ -87,6 +87,19 @@ test('entering, walking and returning to the office never start a background ton
   } finally { sound.dispose(); device.restore(); }
 });
 
+test('automatic keyboard sound pauses with the visible sigh and resumes without a backlog', () => {
+  const device = audioDevice(), sound = createOfficeAudio(), engine = createGameEngine();
+  try {
+    engine.dispatch({type:'enter'}); engine.state.settings.sound = true;
+    engine.state.seat = 'desk'; engine.state.deskMode = 'work'; engine.state.player.pose = 'type'; sound.start();
+    engine.state.elapsed = 3; sound.sync(engine.state); const before = device.voices.length;
+    for (let time = 12; time < 16; time += .1) { engine.state.elapsed = time; sound.sync(engine.state); }
+    assert.equal(device.voices.length, before, 'hands resting at the monitor do not produce automatic key taps');
+    engine.state.elapsed = 18; sound.sync(engine.state);
+    assert.ok(device.voices.length > before && device.voices.length <= before + 3);
+  } finally { sound.dispose(); device.restore(); }
+});
+
 test('direct worksheet keys respect sound, volume, hidden pages and disposal', () => {
   const device = audioDevice(), sound = createOfficeAudio(), engine = createGameEngine();
   try {

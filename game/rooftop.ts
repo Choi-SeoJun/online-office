@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { box, cylinder, plant, plaque, sphere, spriteLabel } from './models.ts';
+import { ROOF_BENCH_SEATS } from './rest-seats.ts';
 import { ROOF_BIN, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
 
 /** Uses simulation progress, so hidden tabs and paused games freeze the turn. */
@@ -80,9 +81,14 @@ export function createRooftop(parent: THREE.Object3D) {
     box(bench, .075, .51, .63, '#627d70', x, .28, 0);
     box(bench, .075, 1.12, .07, '#627d70', x, .60, -.34);
   }
-  cylinder(bench, .12, .12, .16, '#c28e7d', -.94, .70, .04);
-  cylinder(bench, .125, .125, .035, '#e8d7b5', -.94, .795, .04);
-  box(bench, .58, .07, .36, '#6e8597', .81, .66, .03, .035);
+  // Three clear places: keep the candy tin and jacket at the outer ends.
+  cylinder(bench, .08, .08, .16, '#c28e7d', -1.36, .70, .04);
+  cylinder(bench, .085, .085, .035, '#e8d7b5', -1.36, .795, .04);
+  box(bench, .20, .07, .26, '#6e8597', 1.38, .66, .03, .035);
+  for (const seat of ROOF_BENCH_SEATS) {
+    const mark = box(bench, .69, .004, .50, '#d7b68e', seat.seat.x - ROOF_REST.bench.seat.x, ROOF_REST.bench.seatTop - .001, .02, .01);
+    mark.name = seat.id;
+  }
   // Face the camera so steep views cannot flatten the lettering into the wall.
   const sign = spriteLabel(roof, '잠깐, 숨 돌리는 곳', '#243e35', 1.45);
   sign.position.set(ROOF_REST.bench.seat.x, 2.18, -5.68); sign.name = 'rooftop-sign';

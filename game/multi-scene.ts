@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, mug, plant, plaque, spriteLabel } from './models.ts';
-import { batchArchitecture, targetSelectionForHit } from './scene.ts';
+import { batchArchitecture, isPointerEligible, targetSelectionForHit } from './scene.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { ROOF_BOUNDS, isRoofTarget, roofWallForTarget } from './layout.ts';
 import { remoteAnimationState } from './multi-animation.ts';
+import { chairSpinAngle } from './expression.ts';
 import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotation, clampCameraPitch, setCameraOffset, smoothCameraPitch, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
 import type { Actor, GameState, OfficeScene, Point, RoofWallSide, TargetId } from './types.ts';
 import type { MultiLayout } from './multi-layout.ts';
 import type { RoomPlayer } from './multi-types.ts';
+import { restSeatById } from './rest-seats.ts';
 
 export type MultiSceneState = {
   layout: MultiLayout;
@@ -96,7 +98,10 @@ export function createMultiArchitecture(layout: MultiLayout) {
   const table = layout.furniture.lounge;
   cylinder(lounge, .07, .09, .94, '#748a7c', table.x, .47, table.z);
   box(lounge, 1.2, .1, 1.2, '#c6ab84', table.x, 1, table.z, .15);
-  mug(lounge, table.x + .25, 1.06, table.z - .05, '#799d8d'); chair(lounge, layout.lounge.x, layout.lounge.z, '#6a8f81');
+  mug(lounge, table.x + .25, 1.06, table.z - .05, '#799d8d');
+  for (const seat of layout.loungeSeats) {
+    const model = chair(lounge, seat.seat.x, seat.seat.z, '#6a8f81', seat.angle + Math.PI); model.name = seat.id;
+  }
   const loungeLabel = spriteLabel(lounge, '잠깐, 쉬어 가요', '#537063', 1.20); loungeLabel.position.set(table.x, 1.88, table.z);
   const copier = new THREE.Group(); copier.name = 'shared-copier'; copier.userData.target = 'copier'; copier.position.set(layout.furniture.copier.x, 0, layout.furniture.copier.z); group.add(copier);
   box(copier, 1.35, 1.1, 1.15, '#dedfd3', 0, .58, 0, .05); box(copier, 1.30, .13, 1.1, '#525e58', 0, 1.18, 0, .025);
@@ -187,6 +192,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
     const game = callbacks.getState().game, ownId = game.player.id;
     for (const hit of raycaster.intersectObject(actorGroup, true)) {
+      if (!isPointerEligible(hit.object)) continue;
       let object: THREE.Object3D | null = hit.object;
       while (object) {
         if (object.userData.target === 'boss') { callbacks.onTarget('boss'); return; }
@@ -197,9 +203,9 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     }
     // Intersect just the active floor; Three also raycasts children of invisible parents.
     for (const hit of raycaster.intersectObject(game.floor === 'rooftop' ? roof : architecture.group, true)) {
-      let object: THREE.Object3D | null = hit.object, passthrough = false, seat: number | null = null;
-      while (object) { if (object.userData.pointerPassthrough) passthrough = true; if (typeof object.userData.target === 'string' && object.userData.target.startsWith('seat:')) seat = Number(object.userData.target.slice(5)); object = object.parent; }
-      if (passthrough) continue;
+      if (!isPointerEligible(hit.object)) continue;
+      let object: THREE.Object3D | null = hit.object, seat: number | null = null;
+      while (object) { if (typeof object.userData.target === 'string' && object.userData.target.startsWith('seat:')) seat = Number(object.userData.target.slice(5)); object = object.parent; }
       if (seat !== null) { callbacks.onSeat(seat); return; }
       const selected = targetSelectionForHit(hit, game.floor);
       if (selected) { callbacks.onTarget(selected.target, selected.point); return; }
@@ -269,11 +275,12 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     const ownDesk = state.seatIndex === undefined ? null : state.layout.desks[state.seatIndex]; seatRing.visible = !!ownDesk && !onRoof; if (ownDesk) seatRing.position.set(ownDesk.seat.x, .055, ownDesk.seat.z);
     for (const [index, chair] of architecture.chairs) {
       const occupant = index === state.seatIndex ? game.player : state.players.find(player => player.seatIndex === index && player.floor === 'office');
-      chair.rotation.y = occupant?.pose === 'spin' && !settings.reducedMotion ? elapsed * 6 : 0;
+      const visual = occupant ? members.find(member => member.actor.id === occupant.id)?.context : null;
+      chair.rotation.y = visual ? chairSpinAngle(visual) : 0;
     }
     selection.visible = !game.transition && game.target !== null && isRoofTarget(game.target) === onRoof;
     if (game.target && selection.visible) {
-      const point = game.target === 'boss' ? game.boss : roofWallForTarget(game.target) && game.roofLeanPoint ? game.roofLeanPoint : game.target === 'desk' && ownDesk ? ownDesk.seat : state.layout.targets[game.target].point;
+      const point = game.target === 'boss' ? game.boss : roofWallForTarget(game.target) && game.roofLeanPoint ? game.roofLeanPoint : game.target === 'desk' && ownDesk ? ownDesk.seat : (game.target === 'lounge' || game.target === 'roofBench') ? restSeatById(game.restSeatId, state.layout.loungeSeats)?.approach ?? game.destination ?? (game.ready ? game.player : state.layout.targets[game.target].point) : state.layout.targets[game.target].point;
       selection.position.set(point.x, .065, point.z);
     }
     destination.visible = !!game.destination; if (game.destination) destination.position.set(game.destination.x, .07, game.destination.z);
@@ -286,7 +293,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', pointerCancel);
     architecture.release(); retired.forEach(object => world.add(object)); rigs.forEach(({ rig }) => { if (!rig.root.parent) world.add(rig.root); });
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
-    world.traverse(object => { if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); for (const material of Array.isArray(object.material) ? object.material : [object.material]) { materials.add(material); const texture = (material as THREE.MeshStandardMaterial).map; if (texture) textures.add(texture); } } });
+    world.traverse(object => { if (object instanceof THREE.InstancedMesh) object.dispose(); if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); for (const material of Array.isArray(object.material) ? object.material : [object.material]) { materials.add(material); const texture = (material as THREE.MeshStandardMaterial).map; if (texture) textures.add(texture); } } });
     geometries.forEach(geometry => geometry.dispose()); textures.forEach(texture => texture.dispose()); materials.forEach(material => material.dispose()); sun.shadow.dispose(); renderer.dispose(); renderer.domElement.remove(); bubbleLayer.remove(); disposeModelCaches();
   } };
 }

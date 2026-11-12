@@ -6,11 +6,23 @@ import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCach
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotation, clampCameraPitch, setCameraOffset, smoothCameraPitch, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
+import { SOLO_LOUNGE_SEATS, restSeatById } from './rest-seats.ts';
+import { chairSpinAngle } from './expression.ts';
 
-export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId | null {
+/** Three raycasts hidden descendants; only visible, interactive ancestors may capture a click. */
+export function isPointerEligible(object: THREE.Object3D): boolean {
   let ancestor: THREE.Object3D | null = object;
   while (ancestor) {
-    if (ancestor.userData.pointerPassthrough) return null;
+    if (!ancestor.visible || ancestor.userData.pointerPassthrough) return false;
+    ancestor = ancestor.parent;
+  }
+  return true;
+}
+
+export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId | null {
+  if (!isPointerEligible(object)) return null;
+  let ancestor: THREE.Object3D | null = object;
+  while (ancestor) {
     const target = ancestor.userData.target as TargetId | undefined;
     if (target && target in TARGETS && isRoofTarget(target) === (floor === 'rooftop')) return target;
     ancestor = ancestor.parent;
@@ -21,7 +33,7 @@ export function targetForFloor(object: THREE.Object3D, floor: Floor): TargetId |
 export function targetSelectionForHit(hit: Pick<THREE.Intersection, 'object' | 'point'>, floor: Floor): { target: TargetId; point?: Point } | null {
   const target = targetForFloor(hit.object, floor);
   if (!target) return null;
-  return roofWallForTarget(target) ? { target, point: { x: hit.point.x, z: hit.point.z } } : { target };
+  return roofWallForTarget(target) || target === 'lounge' || target === 'roofBench' ? { target, point: { x: hit.point.x, z: hit.point.z } } : { target };
 }
 
 export function batchArchitecture(group: THREE.Group) {
@@ -132,7 +144,10 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   cylinder(lounge, .06, .08, .94, '#718074', 6.8, .48, 2.1); cylinder(lounge, .45, .45, .08, '#79887b', 6.8, .08, 2.1);
   box(lounge, 1.5, .10, 1.4, '#c7aa7c', 6.8, 1.0, 2.1, .17);
   mug(lounge, 6.48, 1.06, 2.2, '#e9d9b1'); box(lounge, .36, .022, .45, '#758a76', 7.03, 1.064, 2.02, .005);
-  chair(lounge, 6.8, 3.4, '#587c72');
+  for (const seat of SOLO_LOUNGE_SEATS) {
+    const model = chair(lounge, seat.seat.x, seat.seat.z, '#587c72', seat.angle + Math.PI);
+    model.name = seat.id;
+  }
   const loungeSign = spriteLabel(lounge, '잠깐, 쉬어 가요', '#537063', 1.40); loungeSign.position.set(7.0, 1.88, 2.35);
   // Copier with tinted display, scan bed, paper drawers and tray stack.
   const copier = new THREE.Group(); copier.position.set(-7.8, 0, 4.6); copier.userData.target = 'copier'; room.add(copier);
@@ -190,7 +205,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     // Raycaster does not treat an invisible parent as an interaction boundary.
     // Restrict it to the current floor so hidden desks cannot capture roof taps.
     const hits = raycaster.intersectObjects((onRoof ? roof : room).children, true);
-    for (const hit of hits) { const selection = targetSelectionForHit(hit, current.floor); if (selection) { callbacks.onTarget(selection.target, selection.point); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
+    for (const hit of hits) { if (!isPointerEligible(hit.object)) continue; const selection = targetSelectionForHit(hit, current.floor); if (selection) { callbacks.onTarget(selection.target, selection.point); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
   };
   const pointerCancel = () => { down = null; renderer.domElement.style.cursor=''; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
   const contextLoss = (e: Event) => { e.preventDefault(); graphicsLost = true; cancelAnimationFrame(frame); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 다시 열어보기를 누르면 이어서 놀 수 있어요.'); };
@@ -214,8 +229,8 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     else focus.lerp(desired, s.settings.reducedMotion ? 1 : 1 - Math.exp(-dt * 2.5)); updateCamera();
     (onRoof ? [s.player] : [s.player, s.boss, ...s.coworkers]).forEach(a => { const rig = actors.get(a.id); if (rig) animateActor(rig, a, s, s.elapsed); });
     if (onRoof) animateRooftop(roof, s.elapsed, s.settings.reducedMotion);
-    desks[5].chair.rotation.y = s.player.pose === 'spin' && !s.settings.reducedMotion ? s.elapsed * 6 : 0;
-    selection.visible = !s.transition && s.target !== null && isRoofTarget(s.target) === onRoof; if (s.target && selection.visible) { const p = s.target === 'boss' ? s.boss : roofWallForTarget(s.target) && s.roofLeanPoint ? s.roofLeanPoint : TARGETS[s.target].point; selection.position.set(p.x, .065, p.z); selection.scale.setScalar(s.settings.reducedMotion ? 1 : 1 + Math.sin(s.elapsed * 3) * .025); }
+    desks[5].chair.rotation.y = chairSpinAngle(s);
+    selection.visible = !s.transition && s.target !== null && isRoofTarget(s.target) === onRoof; if (s.target && selection.visible) { const p = s.target === 'boss' ? s.boss : roofWallForTarget(s.target) && s.roofLeanPoint ? s.roofLeanPoint : (s.target === 'lounge' || s.target === 'roofBench') ? restSeatById(s.restSeatId)?.approach ?? s.destination ?? (s.ready ? s.player : TARGETS[s.target].point) : TARGETS[s.target].point; selection.position.set(p.x, .065, p.z); selection.scale.setScalar(s.settings.reducedMotion ? 1 : 1 + Math.sin(s.elapsed * 3) * .025); }
     destination.visible = !!s.destination; if (s.destination) destination.position.set(s.destination.x, .07, s.destination.z);
     playerRing.position.set(s.player.x, .065, s.player.z); renderer.render(scene, camera);
   };
@@ -227,7 +242,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
       dead = true; cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener('visibilitychange', visibility);
       renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
       const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
-      scene.traverse(object => { if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); const ms = Array.isArray(object.material) ? object.material : [object.material]; ms.forEach(m => { materials.add(m); const map = (m as THREE.MeshStandardMaterial).map; if (map) textures.add(map); }); } });
+      scene.traverse(object => { if (object instanceof THREE.InstancedMesh) object.dispose(); if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); const ms = Array.isArray(object.material) ? object.material : [object.material]; ms.forEach(m => { materials.add(m); const map = (m as THREE.MeshStandardMaterial).map; if (map) textures.add(map); }); } });
       geometries.forEach(g => g.dispose()); textures.forEach(t => t.dispose()); materials.forEach(m => m.dispose()); sunlight.shadow.dispose(); renderer.dispose(); renderer.domElement.remove(); disposeModelCaches();
     },
   };

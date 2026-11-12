@@ -1,5 +1,6 @@
 import type { Point, TargetId } from './types.ts';
 import { TARGETS } from './layout.ts';
+import { MULTI_LOUNGE_SEATS, type RestSeat } from './rest-seats.ts';
 
 export type MultiObstacle = Point & { w: number; d: number };
 export type MultiDesk = { index: number; point: Point; angle: number; seat: Point };
@@ -11,6 +12,7 @@ export type MultiLayout = {
   spawn: Point;
   coffee: Point;
   lounge: Point;
+  loungeSeats: RestSeat[];
   snacks: Point;
   copier: Point;
   boss: Point;
@@ -43,7 +45,7 @@ export function createMultiLayout(capacity: number): MultiLayout {
     obstacles: [...desks.map(desk => ({ ...desk.point, w: 2.55, d: 1.2 })), { ...furniture.coffee, w: 1.5, d: 1.2 }, { ...furniture.lounge, w: 1.2, d: 1.2 },
       { ...furniture.snacks, w: 1.5, d: 1.2 }, { ...furniture.copier, w: 1.35, d: 1.15 }, { ...furniture.bossDesk, w: 2.55, d: 1.2 },
       { x: bounds.maxX - .6, z: bounds.maxZ - .6, w: .42, d: .42 }, { x: bounds.minX + .65, z: bounds.minZ + .65, w: .42, d: .42 }],
-    spawn, coffee, lounge, snacks, copier, boss, furniture,
+    spawn, coffee, lounge, loungeSeats: MULTI_LOUNGE_SEATS, snacks, copier, boss, furniture,
     targets: { ...TARGETS, desk: { ...TARGETS.desk, point: desks[0].seat }, boss: { ...TARGETS.boss, point: boss },
       coffee: { ...TARGETS.coffee, point: coffee }, snacks: { ...TARGETS.snacks, point: snacks }, lounge: { ...TARGETS.lounge, point: lounge },
       copier: { ...TARGETS.copier, point: copier }, exit: { ...TARGETS.exit, point: spawn } },

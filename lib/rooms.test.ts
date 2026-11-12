@@ -8,19 +8,25 @@ import type { RoomSession, RoomSnapshot } from '../game/multi-types.ts';
 import { ROOF_REST, ROOF_WALLS } from '../game/layout.ts';
 import { createMultiController } from '../game/multi-controller.ts';
 import type { Command, TargetId } from '../game/types.ts';
+import { MULTI_LOUNGE_SEATS, ROOF_BENCH_SEATS } from '../game/rest-seats.ts';
 
 function fixture() {
   const sql = new DatabaseSync(':memory:');
   sql.exec('PRAGMA foreign_keys=ON');
   for (const file of readdirSync(new URL('../drizzle', import.meta.url)).filter(x => x.endsWith('.sql')).sort()) sql.exec(readFileSync(new URL(`../drizzle/${file}`, import.meta.url), 'utf8'));
   const wrap = (query: string, values: (string | number | null)[] = []) => ({
+    query,
     bind(...next: (string | number | null)[]) { assert.ok(next.length <= 100, `D1 permits at most 100 bound parameters; query used ${next.length}`); return wrap(query, next); },
     async all() { return { success: true, results: sql.prepare(query).all(...values), meta: { changes: Number(sql.prepare('SELECT changes() AS n').get()!.n) } }; },
     async first() { return sql.prepare(query).get(...values) ?? null; },
     async run() { const result = sql.prepare(query).run(...values); return { success: true, results: [], meta: { changes: Number(result.changes) } }; },
     execute() { return { success: true, results: sql.prepare(query).all(...values), meta: { changes: Number(sql.prepare('SELECT changes() AS n').get()!.n) } }; },
   });
+  let interleaving: { query: string; run: () => Promise<void> } | null = null;
   const db = { prepare: wrap, async batch(statements: ReturnType<typeof wrap>[]) {
+    if (interleaving && statements.some(statement => statement.query.includes(interleaving!.query))) {
+      const run = interleaving.run; interleaving = null; await run();
+    }
     sql.exec('BEGIN'); try { const results = statements.map(s => s.execute()); sql.exec('COMMIT'); return results; } catch (error) { sql.exec('ROLLBACK'); throw error; }
   } } as unknown as RoomDatabase;
   let now = 1_000_000;
@@ -30,8 +36,80 @@ function fixture() {
     const r = await send({ action: 'create', name: '김사원', roomName: '우리 회사', capacity });
     assert.equal(r.status, 201); return r.body as { session: RoomSession; snapshot: RoomSnapshot };
   };
-  return { sql, send, advance, create };
+  return { sql, send, advance, create, beforeNextBatch(query: string, run: () => Promise<void>) { interleaving = { query, run }; } };
 }
+
+test('concurrent lounge occupancy admits one member and rejects the other atomically', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const seated = { ...host.snapshot.players[0], ...createMultiLayout(4).lounge, seat: 'lounge', restSeatId: 'lounge-south', pose: 'sit' };
+  const results = await Promise.all([host, guest].map(({ session }) => f.send({ action: 'sync', ...session, player: seated })));
+  assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+  assert.equal((results.find(result => result.status === 409)!.body as { code: string }).code, 'SEAT_TAKEN');
+  const rows = f.sql.prepare("SELECT id FROM office_members WHERE json_extract(visual, '$.seat') = 'lounge'").all();
+  assert.equal(rows.length, 1);
+});
+
+test('distinct rest seats coexist, release on standing or departure, and remain room-local', async () => {
+  const f = fixture(), host = await f.create(4);
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const otherRoom = await f.create(4);
+  const seated = (seat = MULTI_LOUNGE_SEATS[0]) => ({ ...host.snapshot.players[0], ...seat.seat, angle: seat.angle,
+    floor: seat.floor, seat: seat.floor === 'office' ? 'lounge' : 'roof-bench', restSeatId: seat.id,
+    roofRest: seat.floor === 'rooftop' ? 'bench' : null, pose: 'sit' });
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: seated() })).status, 200);
+  assert.equal((await f.send({ action: 'sync', ...guest.session, player: seated(MULTI_LOUNGE_SEATS[1]) })).status, 200);
+  assert.equal((await f.send({ action: 'sync', ...otherRoom.session, player: seated() })).status, 200);
+  f.advance(300);
+  assert.equal((await f.send({ action: 'sync', ...guest.session, player: seated() })).status, 409);
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: host.snapshot.players[0] })).status, 200);
+  assert.equal((await f.send({ action: 'sync', ...guest.session, player: seated() })).status, 200);
+  assert.equal((await f.send({ action: 'leave', ...guest.session })).status, 200);
+  f.advance(300);
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: seated() })).status, 200);
+  f.advance(300);
+  const roof = seated(ROOF_BENCH_SEATS[1]);
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: roof })).status, 200);
+  const third = (await f.send({ action: 'join', code: host.session.code, name: '박사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  assert.equal((await f.send({ action: 'sync', ...third.session, player: roof })).status, 409);
+  assert.equal((await f.send({ action: 'sync', ...third.session, player: seated(ROOF_BENCH_SEATS[2]) })).status, 200);
+  f.advance(300);
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: { ...roof, restSeatId: 'lounge-south' } })).status, 400);
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: { ...roof, x: 0 } })).status, 400);
+});
+
+test('legacy clients infer the seat identity and cannot omit it to bypass occupancy', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const seated = { ...host.snapshot.players[0], ...MULTI_LOUNGE_SEATS[0].seat, seat: 'lounge', restSeatId: undefined, pose: 'sit' };
+  const accepted = await f.send({ action: 'sync', ...host.session, player: seated });
+  assert.equal(accepted.status, 200);
+  assert.equal((accepted.body as { snapshot: RoomSnapshot }).snapshot.players[0].restSeatId, 'lounge-south');
+  assert.equal((await f.send({ action: 'sync', ...guest.session, player: seated })).status, 409);
+});
+
+test('expired chair leases release safely even when an earlier chat renews after the new claim', async () => {
+  for (const seat of [MULTI_LOUNGE_SEATS[0], ROOF_BENCH_SEATS[1]]) {
+    const f = fixture(), host = await f.create();
+    const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+    const seated = { ...host.snapshot.players[0], ...seat.seat, angle: seat.angle, floor: seat.floor,
+      seat: seat.floor === 'office' ? 'lounge' : 'roof-bench', restSeatId: seat.id, roofRest: seat.floor === 'rooftop' ? 'bench' : null, pose: 'sit' };
+    assert.equal((await f.send({ action: 'sync', ...host.session, player: seated })).status, 200);
+    f.advance(119_999);
+    f.beforeNextBatch('INSERT INTO office_messages', async () => {
+      f.advance(2);
+      assert.equal((await f.send({ action: 'sync', ...guest.session, player: seated })).status, 200);
+    });
+    const delayed = await f.send({ action: 'chat', ...host.session, text: '조금 늦게 도착한 인사' });
+    assert.equal(delayed.status, 200);
+    const players = (delayed.body as { snapshot: RoomSnapshot }).snapshot.players;
+    const revived = players.find(player => player.id === host.session.playerId)!;
+    assert.equal(revived.seat, null); assert.equal(revived.restSeatId, null); assert.equal(revived.pose, 'idle');
+    assert.deepEqual({ x: revived.x, z: revived.z }, seat.approach);
+    assert.equal(players.filter(player => player.restSeatId === seat.id).length, 1);
+    assert.equal((await f.send({ action: 'sync', ...host.session, player: seated })).status, 409);
+  }
+});
 
 test('shared office keeps full rooftop and pantry visual state without private inventories', async () => {
   const f=fixture(),host=await f.create();

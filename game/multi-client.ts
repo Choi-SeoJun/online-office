@@ -74,7 +74,7 @@ export function clearRoomSession(code:string,storage?:Pick<Storage,'removeItem'>
   } catch {return false;}
 }
 
-export async function requestRoom<T>(body:unknown,signal?:AbortSignal):Promise<T> {
+export async function requestRoom<T>(body:unknown,signal?:AbortSignal,resource:'rooms'|'board'='rooms'):Promise<T> {
   if(signal?.aborted) throw new DOMException('Request cancelled','AbortError');
   let payload:string|undefined;
   try {payload=JSON.stringify(body);} catch {throw new RoomApiError('INVALID_REQUEST',400,'요청 내용을 확인해 주세요.');}
@@ -83,7 +83,7 @@ export async function requestRoom<T>(body:unknown,signal?:AbortSignal):Promise<T
   const cancel=()=>controller.abort();signal?.addEventListener('abort',cancel,{once:true});
   const timeout=setTimeout(()=>{timedOut=true;controller.abort();},REQUEST_TIMEOUT);
   try {
-    const endpoint=roomEndpoint();
+    const endpoint=roomEndpoint().replace(/\/rooms$/, '/'+resource);
     const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:payload,signal:controller.signal,cache:'no-store',credentials:endpoint.startsWith('/')?'same-origin':'omit',redirect:'error'});
     let data:unknown;
     try {data=await response.json();} catch {

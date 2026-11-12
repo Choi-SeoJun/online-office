@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createMultiController } from './multi-controller.ts';
 import { createMultiLayout, isMultiWalkable } from './multi-layout.ts';
 import type { RoomPlayer, RoomSnapshot } from './multi-types.ts';
+import { MULTI_LOUNGE_SEATS, ROOF_BENCH_SEATS } from './rest-seats.ts';
 
 const visual = { floor:'office' as const,seat:null,deskMode:null,roofRest:null,roofWallSide:null,candyInMouth:false,activity:null,weapon:'punch' as const,elapsed:0,lastHit:null,carryingCoffee:false };
 const member = (capacity: number, seatIndex: number): RoomPlayer => ({...visual,id:'local',name:'김사원',seatIndex,lastSeen:0,...createMultiLayout(capacity).spawn,angle:0,pose:'idle',moving:false});
@@ -51,6 +52,46 @@ const roomSnapshot = (host: ReturnType<typeof createMultiController>, guest?: Re
   boss:{actor:{...host.engine.state.boss},phase:host.engine.state.bossPhase,lastHit:null,updatedAt:now},
 });
 
+test('occupied chairs are avoided and generic rest selects a different free chair', () => {
+  const host = createMultiController({ ...member(4, 0), id: 'host' }, 4);
+  const guest = createMultiController({ ...member(4, 1), id: 'guest' }, 4);
+  arrive(host, 'lounge'); host.engine.dispatch({ type: 'interact' });
+  guest.applySnapshot(roomSnapshot(host, guest));
+  guest.engine.dispatch({ type: 'select', target: 'lounge', point: MULTI_LOUNGE_SEATS[0].seat });
+  advance(guest, 1);
+  assert.equal(guest.engine.state.seat, null); assert.match(guest.engine.state.message, /이미 동료/);
+  arrive(guest, 'lounge'); guest.engine.dispatch({ type: 'interact' });
+  assert.equal(guest.engine.state.restSeatId, 'lounge-east');
+  assert.ok(Math.hypot(host.player.x - guest.player.x, host.player.z - guest.player.z) > .7);
+});
+
+test('a rejected optimistic seat rolls back beside the chair without cancelling later actions', () => {
+  const initial = { ...member(4, 1), id: 'guest' };
+  const host = createMultiController({ ...member(4, 0), id: 'host' }, 4), guest = createMultiController(initial, 4);
+  for (const controller of [host, guest]) { arrive(controller, 'lounge'); controller.engine.dispatch({ type: 'interact' }); }
+  const accepted = roomSnapshot(host); accepted.players.push(initial);
+  guest.applySnapshot(accepted);
+  assert.equal(guest.engine.state.seat, null); assert.equal(guest.engine.state.restSeatId, null);
+  assert.deepEqual({ x: guest.player.x, z: guest.player.z }, MULTI_LOUNGE_SEATS[0].approach);
+  assert.ok(Math.hypot(host.player.x - guest.player.x, host.player.z - guest.player.z) >= .79);
+  arrive(guest, 'lounge'); guest.engine.dispatch({ type: 'interact' });
+  assert.equal(guest.engine.state.restSeatId, 'lounge-east');
+  assert.equal(guest.rejectRestSeat('lounge-south'), false);
+  assert.equal(guest.engine.state.seat, 'lounge');
+  assert.equal(guest.rejectRestSeat('lounge-east'), true);
+  assert.deepEqual({ x: guest.player.x, z: guest.player.z }, MULTI_LOUNGE_SEATS[1].approach);
+});
+
+test('restored noncentral lounge and roof seats preserve their own location and exit', () => {
+  for (const seat of [MULTI_LOUNGE_SEATS[3], ROOF_BENCH_SEATS[2]]) {
+    const c = createMultiController({ ...member(4, 0), ...seat.seat, floor: seat.floor, restSeatId: seat.id,
+      seat: seat.floor === 'office' ? 'lounge' : 'roof-bench', roofRest: seat.floor === 'rooftop' ? 'bench' : null, pose: 'sit' }, 4);
+    assert.equal(c.serializePlayer().restSeatId, seat.id);
+    assert.deepEqual({ x: c.player.x, z: c.player.z }, seat.seat);
+    c.stand(); assert.deepEqual({ x: c.player.x, z: c.player.z }, seat.approach);
+  }
+});
+
 test('multiplayer uses the full pantry, desk activities and all three boss tools',()=>{
   const c=createMultiController(member(16,15),16),e=c.engine;
   arrive(c,'coffee');e.dispatch({type:'interact'});advance(c,3.3);assert.equal(e.state.inventory.coffee,3);
@@ -59,7 +100,7 @@ test('multiplayer uses the full pantry, desk activities and all three boss tools
   e.dispatch({type:'eat',snack:'choco'});advance(c,1.6);assert.equal(e.state.inventory.choco,0);
   arrive(c,'desk');e.dispatch({type:'interact'});
   for(const mode of ['shopping','game','sleep','work'] as const){e.dispatch({type:'desk',mode});assert.equal(e.state.deskMode,mode);}
-  e.dispatch({type:'spin'});assert.equal(e.state.player.pose,'spin');advance(c,1.2);assert.equal(e.state.player.pose,'type');
+  e.dispatch({type:'spin'});assert.equal(e.state.player.pose,'spin');advance(c,2.1);assert.equal(e.state.player.pose,'type');
   arrive(c,'boss');
   for(const weapon of ['punch','hammer','fan'] as const){e.dispatch({type:'weapon',weapon});e.dispatch({type:'attack'});assert.equal(e.state.lastHit?.weapon,weapon);assert.equal(e.state.player.pose,'hit');advance(c,1);}
   const wire=c.serializePlayer();assert.equal('inventory' in wire,false);assert.equal('settings' in wire,false);assert.equal(wire.carryingCoffee,true);

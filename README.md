@@ -82,6 +82,9 @@ npm run build
 ```sh
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_flat_ezekiel_stane.sql
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_breezy_prowler.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0002_shocking_maelstrom.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0003_office_feedback.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0004_office_board.sql
 ```
 
 Sites 환경에서는 제공되는 설치·미리보기·빌드·소스 동기화·배포 도우미의 순서를 따릅니다. 잠금 파일 기반 설치 래퍼는 `npm run install:ci`입니다. 환경별 세부 절차와 호스팅·인증·선택적 데이터베이스 안내는 [스타터 참고 문서](docs/starter-reference.md)에 보존했습니다.
@@ -114,6 +117,10 @@ npm run preview:pages
 | `docs/superpowers/` | 승인된 설계와 구현 계획 |
 
 ## 저장과 첫 버전 범위
+
+**게시판**에서 정보 글(2,000자), 포스트잇(280자), 직접 그린 낙서를 최대 50개까지 붙일 수 있습니다. 솔로 게시판은 현재 브라우저에 개인용으로 저장됩니다. 멀티 게시판은 같은 방의 참여자끼리 공유하며, 기존 방의 24시간 수명 동안 유지됩니다. 본인 게시물은 작성자가, 방의 게시물은 현재 방장이 떼어낼 수 있습니다. 멀티 게시판에는 초대 코드만으로 접근할 수 없으며 유효한 참여 세션이 필요합니다. 개인 할 일이나 관리자 건의함과 별도로 보관합니다.
+
+탕비실에는 네 개의 휴식 의자, 옥상 벤치에는 세 자리가 있습니다. 같은 자리는 한 명만 사용할 수 있도록 서버에서 확인합니다. 의자 돌리기는 사람과 의자가 함께 회전하고, **몰래 춤추기**는 8초 동안 미러볼과 조명 아래에서 춤을 춥니다. 이동하거나 취소하면 멈춥니다. 업무 중 타이핑과 한숨 동작은 동료에게도 보이며, 움직임 줄이기 설정을 따릅니다.
 
 개인 할 일은 최대 200개, 항목당 200자로 저장하며 추가·수정·완료·삭제와 필터를 제공합니다. 출퇴근 시계는 기기의 현재 시각을 사용하며 퇴근이 출근보다 이르면 다음 날 퇴근으로 계산합니다. 저장 실패 시 화면에 알리고 현재 탭 메모리에 보존합니다. 새로고침하면 저장하지 못한 내용이 사라질 수 있습니다. 기존 업무 시트 저장값은 그대로 남겨두며 게임 초기화도 개인 할 일·출퇴근 시간·기존 시트 데이터를 지우지 않습니다.
 

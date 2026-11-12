@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { Actor, AvatarStyle, GameState, Snack, Weapon } from './types.ts';
 import { DESKS, ROOF_REST, WEAPONS, WEAPON_IMPACT } from './layout.ts';
+import { chairSpinAngle, workExpression } from './expression.ts';
+import { animateDanceEffects, createDanceEffects, type DanceEffects } from './dance-effects.ts';
 
 const mats = new Map<string, THREE.MeshStandardMaterial>();
 const geos = new Map<string, THREE.BufferGeometry>();
@@ -45,7 +47,8 @@ function updateSpriteLabel(sprite: THREE.Sprite, text: string, color: string) {
 }
 export function spriteLabel(parent: THREE.Object3D, text: string, color = '#243e35', w = 1.2) {
   // Labels are UI: scenic fog and filmic exposure must not wash out their ink.
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: true, depthWrite: false, toneMapped: false, fog: false }));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false, fog: false }));
+  sprite.renderOrder = 1000; sprite.userData.pointerPassthrough = true;
   sprite.userData.labelWidth = w; updateSpriteLabel(sprite, text, color); parent.add(sprite); return sprite;
 }
 export function plant(parent: THREE.Object3D, x: number, z: number, size = 1) {
@@ -94,7 +97,7 @@ export function desk(parent: THREE.Object3D, x: number, z: number, index: number
   return { group: g, chair: ch, screen };
 }
 
-type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; isBoss: boolean; lastName: string };
+type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; dance: DanceEffects; isBoss: boolean; lastName: string };
 export function createActor(parent: THREE.Object3D, role: number, name: string, avatar: AvatarStyle = 'short'): Rig {
   const root = new THREE.Group(); parent.add(root); const body = new THREE.Group(); root.add(body);
   const boss = role === 1; const shirt = ['#4e8a7e', '#2f4355', '#c48d6b', '#7e8da5', '#bbab78'][role] ?? '#9fa8b4'; const skin = ['#f0c5a2', '#e7ba94', '#eec09c', '#e5b692', '#f0cbad'][role] ?? '#edc3a0';
@@ -196,7 +199,8 @@ export function createActor(parent: THREE.Object3D, role: number, name: string, 
   const effect = new THREE.Group(); effect.position.y = 1.90; root.add(effect); const stars: THREE.Mesh[] = [];
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
-  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, isBoss: boss, lastName: name };
+  const dance = createDanceEffects(root);
+  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, dance, isBoss: boss, lastName: name };
 }
 
 // Aim the wrist at the prop's grip and its actual rim/bite edge at the lips.
@@ -230,6 +234,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     r.lastAvatar = avatar;
   }
   const reduced = state.settings.reducedMotion; const player = a.id === state.player.id; const walk = a.moving || a.pose === 'walk';
+  animateDanceEffects(r.dance, a.pose === 'dance' && state.floor === 'office' && !state.transition && !walk, time, reduced);
   const roofRest = player && state.floor === 'rooftop' && !walk ? state.roofRest : null;
   // A long tail rests to one side of the shoulder when the back meets a wall.
   r.ponytail.rotation.y = roofRest === 'wall' ? 1.5 : 0;
@@ -262,14 +267,36 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     r.legs[1].rotation.x = -.33; r.calves[1].rotation.x = 1.95;
   }
   if (walk) { r.leftArm.rotation.x = -wave * .32; r.rightArm.rotation.x = wave * .32; }
-  if (a.pose === 'type') { r.leftArm.rotation.x = -1.0 + Math.sin(time * 13) * .08; r.rightArm.rotation.x = -1.0 + Math.cos(time * 13) * .08; r.head.rotation.x = .13; }
+  if (a.pose === 'type') {
+    const work = workExpression(time), sigh = player && state.deskMode !== 'work' ? 0 : work.sigh;
+    const taps = reduced || sigh > .05 ? 0 : 1;
+    r.leftArm.rotation.x = -1.08 + Math.sin(time * 15) * .13 * taps + sigh * .32;
+    r.rightArm.rotation.x = -1.08 + Math.cos(time * 17) * .13 * taps + sigh * .32;
+    r.leftArm.rotation.y = -.10; r.rightArm.rotation.y = .10;
+    r.body.rotation.x = .035 + sigh * .14;
+    r.body.position.y -= sigh * (reduced ? .015 : .055);
+    r.head.rotation.x = .13 + sigh * .25;
+    r.head.rotation.y = reduced ? 0 : Math.sin(time * .7) * .035 * (1 - sigh);
+  }
   if (a.pose === 'sleep') { r.head.rotation.x = .36 + Math.sin(time * 1.5) * .05; r.body.rotation.x = .15; r.leftArm.rotation.x = -.7; r.rightArm.rotation.x = -.7; }
   if (a.pose === 'lean') {
     r.body.rotation.x = -.16; r.body.position.z = .14; r.head.rotation.x = -.1;
     r.leftArm.rotation.set(-2.45, -.15, .45); r.rightArm.rotation.set(-2.45, .15, -.45);
   }
   if (a.pose === 'watch' || a.pose === 'scold') { r.rightArm.rotation.x = -.8; r.rightArm.rotation.z = -.8; }
-  if (a.pose === 'spin' && !reduced) r.body.rotation.y = time * 6;
+  if (a.pose === 'spin') r.body.rotation.y = chairSpinAngle(state);
+  if (a.pose === 'dance') {
+    const beat = reduced ? 0 : Math.sin(time * Math.PI * 3), sway = reduced ? 0 : Math.sin(time * Math.PI * 1.5);
+    r.body.position.y = reduced ? 0 : .035 + Math.abs(beat) * .07;
+    r.body.position.x = sway * .12; r.body.rotation.z = sway * .10;
+    r.body.rotation.y = sway * .20;
+    r.head.rotation.z = -sway * .10; r.head.rotation.x = -.07;
+    r.leftArm.rotation.set(-1.25 - beat * .60, -.20, .75 + sway * .25);
+    r.rightArm.rotation.set(-1.25 + beat * .60, .20, -.75 + sway * .25);
+    r.legs[0].rotation.x = .12 + beat * .24; r.legs[1].rotation.x = .12 - beat * .24;
+    r.calves[0].rotation.x = .18 + Math.max(0, beat) * .30;
+    r.calves[1].rotation.x = .18 + Math.max(0, -beat) * .30;
+  }
   const carryingCoffee = player && !state.candyInMouth && state.inventory.coffee > 0 && ['idle', 'walk', 'sit', 'lean'].includes(a.pose);
   r.mug.visible = carryingCoffee || a.pose === 'drink';
   if (carryingCoffee) { r.rightArm.rotation.set(-.85, 0, -.07); }

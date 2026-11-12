@@ -3,6 +3,7 @@ import type { RoomBossUpdate, RoomPlayer, RoomPlayerUpdate, RoomSnapshot } from 
 import { createMultiLayout, isMultiWalkable } from './multi-layout.ts';
 import { createGameEngine, type OfficeEnvironment } from './engine.ts';
 import { ROOF_REST, ROOF_WALLS } from './layout.ts';
+import { restSeatAt, restSeatById } from './rest-seats.ts';
 
 /** The same simulation drives both play modes; rooms only add shared presence. */
 export function createMultiController(initial: RoomPlayer, capacity: number, saved?: PersistedState) {
@@ -20,13 +21,14 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       bounds: layout.bounds, obstacles: layout.obstacles, start: layout.spawn,
       targets: { ...layout.targets, desk: { ...layout.targets.desk, point: desk.seat } },
       deskAngle: desk.angle, loungeAngle: Math.PI,
+      loungeSeats: layout.loungeSeats,
       coffeeFacing: layout.furniture.coffee, snacksFacing: layout.furniture.snacks,
       patrol: [first, { x: -2.6, z: layout.bounds.maxZ - .9 }, layout.boss, { x: layout.bounds.maxX - .65, z: -3.15 }],
     };
   };
   const engine = createGameEngine(saved, {
     getOffice: office, coworkers: false, bossAuthority: () => hostAuthority, continueBossOnRoof: true,
-    getPeers: () => latestSnapshot?.players.filter(p => p.id !== initial.id).map(actor => ({ actor, floor: actor.floor, seat: actor.seat, deskMode: actor.deskMode })) ?? [],
+    getPeers: () => latestSnapshot?.players.filter(p => p.id !== initial.id).map(actor => ({ actor, floor: actor.floor, seat: actor.seat, restSeatId: actor.restSeatId, deskMode: actor.deskMode })) ?? [],
   });
   const state = engine.state;
   Object.assign(state.player, { id: initial.id, name: initial.name, avatar: initial.avatar ?? saved?.avatar ?? 'short', x: initial.x, z: initial.z, angle: initial.angle, pose: 'idle', moving: false });
@@ -35,9 +37,11 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
     state.seat = 'desk'; state.deskMode = initial.deskMode ?? 'work';
     Object.assign(state.player, layout.desks[seatIndex].seat, { angle: layout.desks[seatIndex].angle, pose: state.deskMode === 'sleep' ? 'sleep' : 'type' });
   } else if (initial.seat === 'lounge' && state.floor === 'office') {
-    state.seat = 'lounge'; Object.assign(state.player, layout.lounge, { angle: Math.PI, pose: initial.pose === 'lean' ? 'lean' : 'sit' });
+    const seat = restSeatById(initial.restSeatId, layout.loungeSeats) ?? restSeatAt(initial, 'office', layout.loungeSeats) ?? layout.loungeSeats[0];
+    state.seat = 'lounge'; state.restSeatId = seat.id; Object.assign(state.player, seat.seat, { angle: seat.angle, pose: initial.pose === 'lean' ? 'lean' : 'sit' });
   } else if (initial.seat === 'roof-bench' && state.floor === 'rooftop') {
-    state.seat = 'roof-bench'; state.roofRest = 'bench'; Object.assign(state.player, ROOF_REST.bench.seat, { angle: ROOF_REST.bench.angle, pose: 'sit' });
+    const seat = restSeatById(initial.restSeatId, layout.loungeSeats) ?? restSeatAt(initial, 'rooftop', layout.loungeSeats);
+    state.seat = 'roof-bench'; state.restSeatId = seat?.id ?? 'roof-middle'; state.roofRest = 'bench'; Object.assign(state.player, seat?.seat ?? ROOF_REST.bench.seat, { angle: seat?.angle ?? ROOF_REST.bench.angle, pose: 'sit' });
   } else if (initial.roofRest === 'wall' && initial.roofWallSide && state.floor === 'rooftop') {
     state.roofRest = 'wall'; state.roofWallSide = initial.roofWallSide; state.roofLeanPoint = { x: initial.x, z: initial.z };
     state.player.pose = 'wallLean'; state.player.angle = ROOF_WALLS[initial.roofWallSide].angle;
@@ -57,13 +61,14 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
   };
   const serializePlayer = (): RoomPlayerUpdate => ({
     x: player.x, z: player.z, angle: player.angle, pose: player.pose, moving: player.moving,
-    floor: state.floor, seat: state.seat, deskMode: state.deskMode, roofRest: state.roofRest, roofWallSide: state.roofWallSide,
+    floor: state.floor, seat: state.seat, restSeatId: state.restSeatId ?? null, deskMode: state.deskMode, roofRest: state.roofRest, roofWallSide: state.roofWallSide,
     candyInMouth: state.candyInMouth, activity: state.activity ? { ...state.activity } : null, weapon: state.weapon,
     elapsed: state.elapsed, lastHit: state.lastHit ? { ...state.lastHit } : null, carryingCoffee: state.inventory.coffee > 0,
   });
   const dispatch = (command: Command) => { autoInteract = null; engine.dispatch(command); };
   return {
     engine, player, get layout() { return layout; }, setLayout, serializePlayer,
+    rejectRestSeat: (expectedId?: string | null) => engine.rejectRestSeat(expectedId),
     serializeBoss(): RoomBossUpdate | undefined {
       return hostAuthority ? { actor: { ...state.boss }, phase: state.bossPhase } : undefined;
     },
@@ -74,6 +79,9 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       const wasHost = hostAuthority;
       hostAuthority = snapshot.room.hostId === initial.id; latestSnapshot = snapshot;
       setLayout(snapshot.room.capacity, self.seatIndex);
+      if (state.restSeatId && snapshot.players.some(peer => peer.id !== initial.id && peer.floor === state.floor
+        && (peer.seat === 'lounge' || peer.seat === 'roof-bench')
+        && (peer.restSeatId === state.restSeatId || Math.hypot(peer.x - player.x, peer.z - player.z) < .5))) engine.rejectRestSeat(state.restSeatId);
       player.lastSeen = self.lastSeen;
       const shared = snapshot.boss;
       if (!shared) return;
