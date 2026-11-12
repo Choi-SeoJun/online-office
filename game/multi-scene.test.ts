@@ -4,9 +4,9 @@ import * as THREE from 'three';
 import { createGameEngine } from './engine.ts';
 import { createMultiLayout } from './multi-layout.ts';
 import { createMultiArchitecture } from './multi-scene.ts';
-import { animateActor, createActor } from './models.ts';
+import { animateActor, createActor, createBossDesk } from './models.ts';
 import { remoteAnimationState } from './multi-animation.ts';
-import { MULTI_OFFICE_PLAN } from './office-plan.ts';
+import { MULTI_OFFICE_PLAN, SOLO_OFFICE_PLAN } from './office-plan.ts';
 import type { RoomPlayer } from './multi-types.ts';
 
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
@@ -115,4 +115,23 @@ test('the rear snack shelves open toward the player approach', () => {
   const approach = new THREE.Vector3(plan.targets.snacks.x - plan.furniture.snacks.x, 0, plan.targets.snacks.z - plan.furniture.snacks.z).normalize();
   assert.ok(front.dot(approach) > .99, 'snacks remain visible and reachable from the front of the cabinet');
   architecture.release();
+});
+
+test('the boss workstation faces the printer and its turned footprint stays inside both offices', () => {
+  for (const plan of [SOLO_OFFICE_PLAN, MULTI_OFFICE_PLAN]) {
+    const fixture = plan.furniture.bossDesk;
+    const model = createBossDesk(new THREE.Group(), fixture);
+    model.group.updateMatrixWorld(true);
+    const seat = model.chair.getWorldPosition(new THREE.Vector3());
+    const facing = new THREE.Vector3(0, 0, -1).applyQuaternion(model.chair.getWorldQuaternion(new THREE.Quaternion()));
+    assert.ok(seat.x < fixture.x, 'chair sits west of the desk');
+    assert.ok(facing.x > .99, 'the seated boss looks east toward the printer');
+    const printer = plan.furniture.copier;
+    assert.ok(facing.dot(new THREE.Vector3(printer.x - seat.x, 0, printer.z - seat.z).normalize()) > .95);
+    const bounds = new THREE.Box3().setFromObject(model.desk);
+    assert.ok(Math.abs(bounds.min.x - (fixture.x - fixture.w / 2)) < .03);
+    assert.ok(Math.abs(bounds.max.z - (fixture.z + fixture.d / 2)) < .03);
+    assert.ok(bounds.min.z >= (plan === SOLO_OFFICE_PLAN ? -5.6 : -7.2) - .001);
+    assert.ok(plan.targets.boss.x < seat.x, 'approach is behind the turned chair');
+  }
 });

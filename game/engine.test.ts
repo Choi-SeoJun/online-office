@@ -54,7 +54,7 @@ test('attacking interrupts approach and keeps both actors still and facing for t
  advance(e,WEAPONS.hammer.interval);assert.equal(e.state.lastHit?.id,1);
 });
 test('boss approach remains reachable beside desks and at room edges without crossing furniture',()=>{
- const points=[{x:-6,z:-3.55},{x:3.5,z:3.25},{x:-3.8,z:4},{x:3.5,z:.3},{x:-8.2,z:-3.4},{x:8.2,z:4.7}];
+ const points=[TARGETS.boss.point,{x:3.5,z:3.25},{x:-3.8,z:4},{x:3.5,z:.3},{x:-8.2,z:-3.4},{x:8.2,z:4.7}];
  const open=(p:{x:number;z:number})=>p.x>=BOUNDS.minX+.22&&p.x<=BOUNDS.maxX-.22&&p.z>=BOUNDS.minZ+.22&&p.z<=BOUNDS.maxZ-.22&&!OBSTACLES.some(o=>Math.abs(p.x-o.x)<o.w/2+.22&&Math.abs(p.z-o.z)<o.d/2+.22);
  for(const point of points){
   const e=enter();Object.assign(e.state.boss,point);

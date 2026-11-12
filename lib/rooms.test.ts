@@ -125,7 +125,7 @@ test('persisted obstructed actors recover without changing valid coworkers or me
   assert.deepEqual({ x: own.x, z: own.z }, { x: -2.6, z: 2.7 });
   assert.equal(own.pose, 'idle'); assert.equal(own.moving, false); assert.equal(own.activity, null); assert.equal(own.carryingCoffee, true);
   assert.deepEqual(state.players.find(p => p.id === guest.session.playerId), guestBefore);
-  assert.ok(Math.abs(state.boss.actor.x + 3.9) < 1e-10); assert.ok(Math.abs(state.boss.actor.z + 4.65) < 1e-10);
+  assert.deepEqual({ x: state.boss.actor.x, z: state.boss.actor.z }, createMultiLayout(4).boss);
   assert.equal(state.boss.actor.moving, false); assert.equal(state.boss.phase, 'routine');
   assert.equal(state.messages[0].text, '배치가 달라도 대화는 그대로');
   assert.equal(f.sql.prepare('SELECT x FROM office_members WHERE id = ?').get(host.session.playerId)!.x, -2.6);
@@ -228,7 +228,7 @@ test('boss is host-owned but every nearby office member can trigger one shared r
   const authoritative=(updated.body as {snapshot:RoomSnapshot}).snapshot.boss;
   assert.equal(authoritative.actor.id,'boss');assert.equal(authoritative.actor.name,'박부장');assert.equal(authoritative.actor.x,actor.x);
   const self=guest.snapshot.players.find(p=>p.id===guest.session.playerId)!;
-  const attack={action:'attack',...guest.session,weapon:'hammer',player:{...self,x:actor.x+1.4,z:actor.z}};
+  const attack={action:'attack',...guest.session,weapon:'hammer',player:{...self,x:actor.x,z:actor.z+1.4}};
   const hit=await f.send(attack);assert.equal(hit.status,200);
   const reaction=(hit.body as {snapshot:RoomSnapshot}).snapshot.boss;
   assert.equal(reaction.lastHit?.playerId,guest.session.playerId);assert.equal(reaction.lastHit?.weapon,'hammer');assert.equal(reaction.phase,'hit');
@@ -262,15 +262,15 @@ test('shared boss survives host travel and transfers authority when that host le
 test('simultaneous attacks enforce one sender cooldown and preserve accepted boss hits against host packets',async()=>{
   const f=fixture(),host=await f.create();
   const own=host.snapshot.players[0],boss=host.snapshot.boss;
-  const player={...own,x:boss.actor.x+1.4,z:boss.actor.z};
+  const player={...own,x:boss.actor.x,z:boss.actor.z+1.4};
   const hits=await Promise.all([1,2].map(()=>f.send({action:'attack',...host.session,weapon:'hammer',player})));
   assert.deepEqual(hits.map(hit=>hit.status).sort(),[200,429]);
   const accepted=(hits.find(hit=>hit.status===200)!.body as {snapshot:RoomSnapshot}).snapshot.boss;
   f.advance(300);
-  const oldHostPacket=await f.send({action:'sync',...host.session,boss:{actor:{...boss.actor,x:boss.actor.x+.6},phase:'routine'}});
+  const oldHostPacket=await f.send({action:'sync',...host.session,boss:{actor:{...boss.actor,z:boss.actor.z+.6},phase:'routine'}});
   assert.equal(oldHostPacket.status,200);
   const after=(oldHostPacket.body as {snapshot:RoomSnapshot}).snapshot.boss;
-  assert.equal(after.actor.x,accepted.actor.x);assert.equal(after.lastHit?.id,accepted.lastHit?.id);assert.equal(after.phase,'hit');
+  assert.equal(after.actor.x,accepted.actor.x);assert.equal(after.actor.z,accepted.actor.z);assert.equal(after.lastHit?.id,accepted.lastHit?.id);assert.equal(after.phase,'hit');
 });
 
 test('parity migration preserves existing rooms, sessions, chat, and notification records',()=>{

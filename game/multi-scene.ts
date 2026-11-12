@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, mug, plant, plaque, spriteLabel } from './models.ts';
+import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, mug, plant, plaque, spriteLabel } from './models.ts';
 import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelectionForHit } from './scene.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { ROOF_BOUNDS, isRoofTarget, roofWallForTarget } from './layout.ts';
@@ -114,8 +114,7 @@ export function createMultiArchitecture(layout: MultiLayout) {
   box(copier, .52, .10, .27, '#64746c', .30, 1.24, .52); box(copier, .29, .012, .15, '#a4d2c1', .25, 1.305, .54);
   for (let i = 0; i < 3; i++) { box(copier, 1.13, .025, .018, '#b4c0b3', 0, .30 + i * .25, .585); box(copier, .23, .045, .023, '#8d9c90', 0, .39 + i * .25, .60); }
   const copierLabel = spriteLabel(copier, '복사기', '#617368', .95); copierLabel.position.set(0, 1.95, 0);
-  const chief = new THREE.Group(); chief.name = 'shared-boss-desk'; chief.userData.target = 'boss'; chief.position.set(layout.furniture.bossDesk.x, 0, layout.furniture.bossDesk.z); group.add(chief);
-  const bossDesk = desk(chief, 0, 0, 0, true); bossDesk.group.scale.x = .85;
+  const { group: chief } = createBossDesk(group, furniture.bossDesk); chief.name = 'shared-boss-desk';
   const chiefLabel = spriteLabel(chief, '부장님 자리', '#51372d', 1.10); chiefLabel.position.set(0, 2.10, 0);
   plant(group, b.maxX - .6, b.maxZ - .6, .8);
   plant(group, b.minX + .65, b.minZ + .65, .8);

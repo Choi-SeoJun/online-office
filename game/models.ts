@@ -70,6 +70,15 @@ export function chair(parent: THREE.Object3D, x: number, z: number, color = '#52
   box(g, .08, .42, .09, '#4a5356', -.35, .70, .13); box(g, .08, .42, .09, '#4a5356', .35, .70, .13);
   box(g, .11, .07, .40, '#3b4647', -.35, .90, .02); box(g, .11, .07, .40, '#3b4647', .35, .90, .02); return g;
 }
+export function createBossDesk(parent: THREE.Object3D, fixture: { x: number; z: number; w: number; d: number; rotation?: number }) {
+  const group = new THREE.Group(); group.position.set(fixture.x, 0, fixture.z);
+  group.rotation.y = fixture.rotation ?? 0; group.userData.target = 'boss'; parent.add(group);
+  const model = desk(group, 0, 0, 0, true);
+  // Fixture dimensions describe the world footprint, while the model is built along local X.
+  model.group.scale.x = (Math.abs(Math.sin(group.rotation.y)) > .5 ? fixture.d : fixture.w) / 3;
+  return { group, desk: model.group, chair: model.chair, screen: model.screen };
+}
+
 export function desk(parent: THREE.Object3D, x: number, z: number, index: number, boss = false) {
   const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
   const width = boss ? 3 : 2.55;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { clearRoomSession, parseRoomCode, readRoomSession, requestRoom, RoomApiError, roomInviteUrl, saveRoomSession } from './multi-client.ts';
+import { OFFICE_LAYOUT_VERSION } from './office-version.ts';
 
 const session={code:'ABCD2345',token:'a'.repeat(64),playerId:'b8a2fb2d-16e9-4ef5-aec0-ec568be5e967'};
 const memory=()=>{const data=new Map<string,string>();return {getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>{data.set(key,value);},removeItem:(key:string)=>{data.delete(key);},data};};
@@ -67,7 +68,7 @@ test('room requests stamp the current layout while board requests retain their o
   const original = { action: 'sync', ...session, layoutVersion: -1 };
   await requestRoom(original);
   await requestRoom({ action: 'list', ...session }, undefined, 'board');
-  assert.equal(sent[0].layoutVersion, 2);
+  assert.equal(sent[0].layoutVersion, OFFICE_LAYOUT_VERSION);
   assert.equal(original.layoutVersion, -1);
   assert.equal('layoutVersion' in sent[1], false);
 });

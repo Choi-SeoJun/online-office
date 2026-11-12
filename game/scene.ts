@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } from './layout.ts';
 import type { Floor, OfficeScene, Point, SceneCallbacks, TargetId } from './types.ts';
-import { animateActor, box, chair, createActor, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere, spriteLabel } from './models.ts';
+import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere, spriteLabel } from './models.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotation, clampCameraPitch, setCameraOffset, smoothCameraPitch, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
@@ -122,7 +122,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const desks = DESKS.map((d, i) => desk(room, d.x, d.z, i));
   desks[5].group.userData.target = 'desk'; desks[5].chair.userData.target = 'desk';
   desks[5].chair.userData.dynamic = true;
-  desk(room, furniture.bossDesk.x, furniture.bossDesk.z, 0, true).group.userData.target = 'boss';
+  createBossDesk(room, furniture.bossDesk);
   const rearDeskZ = Math.min(...DESKS.map(item => item.z));
   for (const item of DESKS) {
     const rearRow = item.z === rearDeskZ;

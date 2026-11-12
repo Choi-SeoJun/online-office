@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { handleRoomRequest } from './room-http.ts';
 import type { RoomDatabase } from './rooms.ts';
 import type { RoomError, RoomSession, RoomSnapshot } from '../game/multi-types.ts';
+import { OFFICE_LAYOUT_VERSION } from '../game/office-version.ts';
 
 const pagesOrigin = 'https://choi-seojun.github.io';
 const apiOrigin = 'https://office.example';
@@ -126,7 +127,7 @@ function database(t: TestContext) {
   return { db, sql };
 }
 
-const createBody = JSON.stringify({ action: 'create', name: '김사원', roomName: '공유 회사', capacity: 4, layoutVersion: 2 });
+const createBody = JSON.stringify({ action: 'create', name: '김사원', roomName: '공유 회사', capacity: 4, layoutVersion: OFFICE_LAYOUT_VERSION });
 function jsonRequest(body: string | null = createBody, headers: Record<string, string> = {}) {
   return new Request(`${apiOrigin}/api/rooms`, { method: 'POST', headers: {
     'content-type': 'application/json', origin: pagesOrigin, 'cf-connecting-ip': '192.0.2.7', ...headers,
@@ -148,7 +149,7 @@ test('Pages room creation and same-origin room creation share the real room serv
 
 test('invalid bodies and content types remain readable to the approved origin', async t => {
   const { db } = database(t);
-  for (const body of [null, '', '{broken', 'null', '[]', '{"action":"unknown","layoutVersion":2}']) {
+  for (const body of [null, '', '{broken', 'null', '[]', JSON.stringify({ action: 'unknown', layoutVersion: OFFICE_LAYOUT_VERSION })]) {
     const response = await handleRoomRequest(jsonRequest(body), db);
     assert.equal(response.status, 400);
     assert.equal((await response.json() as RoomError).code, 'INVALID_REQUEST');
@@ -183,7 +184,7 @@ test('a permitted origin still needs a valid room session', async t => {
   const created = await handleRoomRequest(jsonRequest(), db);
   const { session } = await created.json() as { session: RoomSession; snapshot: RoomSnapshot };
   const token = (session.token[0] === '0' ? '1' : '0') + session.token.slice(1);
-  const response = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, token, layoutVersion: 2 })), db);
+  const response = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, token, layoutVersion: OFFICE_LAYOUT_VERSION })), db);
   assert.equal(response.status, 401);
   assert.equal((await response.json() as RoomError).code, 'SESSION_EXPIRED');
   assertCors(response, pagesOrigin);
@@ -220,10 +221,10 @@ test('missing, older and future layout clients must refresh without changing roo
   const created = await handleRoomRequest(jsonRequest(), db);
   assert.equal(created.status, 201);
   const { session } = await created.json() as { session: RoomSession };
-  const chat = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'chat', ...session, text: '기존 대화', layoutVersion: 2 })), db);
+  const chat = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'chat', ...session, text: '기존 대화', layoutVersion: OFFICE_LAYOUT_VERSION })), db);
   assert.equal(chat.status, 200);
   const before = sql.prepare('SELECT * FROM office_members').get();
-  for (const layoutVersion of [undefined, 1, 3, '2']) {
+  for (const layoutVersion of [undefined, OFFICE_LAYOUT_VERSION - 1, OFFICE_LAYOUT_VERSION + 1, String(OFFICE_LAYOUT_VERSION)]) {
     for (const action of ['sync', 'create', 'join']) {
       const response = await handleRoomRequest(jsonRequest(JSON.stringify({ ...JSON.parse(createBody), ...session, action, layoutVersion })), db);
       assert.equal(response.status, 409, `${action} version ${layoutVersion}`);
@@ -236,6 +237,6 @@ test('missing, older and future layout clients must refresh without changing roo
   assert.deepEqual(sql.prepare('SELECT * FROM office_members').get(), before);
   assert.equal(sql.prepare('SELECT count(*) AS n FROM office_rooms').get()!.n, 1);
   assert.equal(sql.prepare('SELECT text FROM office_messages').get()!.text, '기존 대화');
-  const restored = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, layoutVersion: 2 })), db);
+  const restored = await handleRoomRequest(jsonRequest(JSON.stringify({ action: 'sync', ...session, layoutVersion: OFFICE_LAYOUT_VERSION })), db);
   assert.equal(restored.status, 200);
 });
