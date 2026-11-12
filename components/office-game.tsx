@@ -10,6 +10,7 @@ import { TodoBoard } from './todo-board';
 import { WorkClock } from './work-clock';
 import { AvatarPicker } from './avatar-picker';
 import { CameraControls } from './camera-controls';
+import { FeedbackDialog } from './feedback-dialog';
 import { OfficePlayControls } from './office-play-controls';
 import './office-rooftop.css';
 import { isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layout';
@@ -31,7 +32,16 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   const [avatar, setAvatar] = useState<AvatarStyle>(state.player.avatar ?? 'short');
   const [confirmReset, setConfirmReset] = useState(false), [hints, setHints] = useState(true);
   const panelRef = useRef(panel); panelRef.current = panel;
-  const send = useCallback((command: Command) => { if (command.type === 'enter' || (command.type === 'settings' && command.value.sound)) audio.current?.start(); engine.dispatch(command); }, [engine]);
+  const feedbackOpen = useRef(false);
+  const syncPause = useCallback(() => {
+    engine.dispatch({ type: 'pause', value: document.hidden || feedbackOpen.current || panelRef.current === 'settings' || panelRef.current === 'help' });
+    audio.current?.sync(engine.state);
+  }, [engine]);
+  const handleFeedbackOpen = (open: boolean) => {
+    feedbackOpen.current = open;
+    syncPause();
+  };
+  const send = useCallback((command: Command) => { if (feedbackOpen.current) return; if (command.type === 'enter' || (command.type === 'settings' && command.value.sound)) audio.current?.start(); engine.dispatch(command); }, [engine]);
   useEffect(() => { const sound = createOfficeAudio(); audio.current = sound; return () => { sound.dispose(); audio.current = null; }; }, []);
   useEffect(() => {
     let cancelled = false; setReady(false); setError('');
@@ -40,20 +50,21 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       if (cancelled || !host.current) return;
       try { scene.current = createOfficeScene(host.current, {
         getState: () => engine.state, onFrame: dt => { engine.step(dt); audio.current?.sync(engine.state); },
-        onGround: point => { if (engine.state.entered && !panelRef.current) { setHints(false); engine.dispatch({ type: 'move', point }); } },
-        onTarget: (target, point) => { if (engine.state.entered && !panelRef.current) { setHints(false); engine.dispatch({ type: 'select', target, point }); } },
-        onReady: () => { if (!cancelled) { engine.dispatch({ type: 'pause', value: document.hidden || panelRef.current === 'settings' || panelRef.current === 'help' }); setReady(true); } }, onError: message => fail(message || '이 브라우저에서 3D 화면을 열지 못했어요.'),
+        onGround: point => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current) { setHints(false); engine.dispatch({ type: 'move', point }); } },
+        onTarget: (target, point) => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current) { setHints(false); engine.dispatch({ type: 'select', target, point }); } },
+        onReady: () => { if (!cancelled) { syncPause(); setReady(true); } }, onError: message => fail(message || '이 브라우저에서 3D 화면을 열지 못했어요.'),
       }); } catch { fail('3D 화면을 열지 못했어요. 브라우저의 하드웨어 가속을 확인하거나 다른 브라우저로 접속해 주세요.'); }
     }).catch(() => fail('사무실을 불러오지 못했어요. 연결을 확인하고 다시 시도해 주세요.'));
     return () => { cancelled = true; scene.current?.dispose(); scene.current = null; };
-  }, [engine, retry]);
+  }, [engine, retry, syncPause]);
   useEffect(() => { writeSavedState(state); }, [state.name, state.player.avatar, state.weapon, state.settings.sound, state.settings.volume, state.settings.reducedMotion, state.settings.quality, state.inventory.cookie, state.inventory.choco, state.inventory.cracker]);
   useEffect(() => {
     const keys = new Set<string>();
     const axis = () => { const input = { x: Number(keys.has('d') || keys.has('arrowright')) - Number(keys.has('a') || keys.has('arrowleft')), z: Number(keys.has('s') || keys.has('arrowdown')) - Number(keys.has('w') || keys.has('arrowup')) }; engine.dispatch({ type: 'axis', ...(scene.current?.screenToWorld(input) ?? input) }); };
     const clear = () => { keys.clear(); axis(); };
-    const visibility = () => { clear(); engine.dispatch({ type: 'pause', value: document.hidden || panelRef.current === 'settings' || panelRef.current === 'help' }); audio.current?.sync(engine.state); };
+    const visibility = () => { clear(); syncPause(); };
     const keydown = (event: KeyboardEvent) => {
+      if (feedbackOpen.current || event.defaultPrevented) { clear(); return; }
       const element = event.target as HTMLElement | null;
       if (panelRef.current === 'settings' || panelRef.current === 'help') {
         if (event.key === 'Escape') { event.preventDefault(); setPanel(null); return; }
@@ -79,14 +90,15 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
     const focus = (event: FocusEvent) => { if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [role="dialog"]')) clear(); };
     window.addEventListener('keydown', keydown); window.addEventListener('keyup', keyup); window.addEventListener('blur', clear); document.addEventListener('visibilitychange', visibility); document.addEventListener('focusin', focus);
     return () => { clear(); window.removeEventListener('keydown', keydown); window.removeEventListener('keyup', keyup); window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('focusin', focus); };
-  }, [engine]);
-  useEffect(() => { engine.dispatch({ type: 'axis', x: 0, z: 0 }); engine.dispatch({ type: 'pause', value: document.hidden || panel === 'settings' || panel === 'help' }); audio.current?.sync(engine.state); }, [engine, panel]);
+  }, [engine, syncPause]);
+  useEffect(() => { engine.dispatch({ type: 'axis', x: 0, z: 0 }); syncPause(); }, [engine, panel, syncPause]);
   const select = (target: TargetId) => { setHints(false); setPanel(null); send({ type: 'select', target }); };
 
   return <main className={`office-app ${state.entered ? 'is-playing' : 'is-welcome'} ${roof ? 'is-rooftop' : ''} ${state.transition ? 'is-travelling' : ''}`}>
     <div ref={host} className="scene-host" aria-label={roof ? '도시가 보이는 3D 옥상. 벤치에 앉거나 벽에 기대 사탕을 물고 쉴 수 있습니다.' : '상사와 동료가 있는 3D 사무실. 장소 버튼으로 이동하고 행동을 선택할 수 있습니다.'} />
     <div className="scene-vignette" />
     <header className="app-header"><div className="brand"><span className="brand-mark"><Building2 size={22} strokeWidth={1.6} /></span><div><h1>온라인 회사<span className="brand-dot">.</span></h1><p>오늘도 적당히</p></div></div><div className="header-tools">{state.entered && <WorkClock/>}
+      <FeedbackDialog context={{ mode: 'solo', floor: roof ? 'roof' : 'office' }} onOpenChange={handleFeedbackOpen} />
       <button className="icon-button" aria-label={state.settings.sound ? '소리 끄기' : '소리 켜기'} onClick={() => send({ type: 'settings', value: { sound: !state.settings.sound } })}>{state.settings.sound ? <Volume2 size={20} /> : <VolumeX size={20} />}</button>
       <button className="icon-button" aria-label="이용 방법" onClick={() => setPanel('help')}><HelpCircle size={20} /></button><button className="icon-button" aria-label="설정" onClick={() => setPanel('settings')}><Settings2 size={20} /></button>
     </div></header>

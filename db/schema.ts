@@ -32,3 +32,27 @@ export const officeNotifications = sqliteTable('office_notifications', {
   senderId: text('sender_id').notNull(), senderName: text('sender_name').notNull(),
   createdAt: integer('created_at').notNull(), readAt: integer('read_at'),
 }, t => [uniqueIndex('office_notification_request').on(t.requestId), index('office_notifications_recipient').on(t.roomCode, t.recipientId, t.id)]);
+
+export const officeFeedback = sqliteTable('office_feedback', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  requestId: text('request_id').notNull(),
+  category: text('category', { enum: ['bug', 'idea', 'other'] }).notNull(),
+  message: text('message').notNull(),
+  mode: text('mode', { enum: ['solo', 'multi'] }).notNull(),
+  floor: text('floor', { enum: ['office', 'roof'] }).notNull(),
+  status: text('status', { enum: ['new', 'reviewed'] }).notNull().default('new'),
+  createdAt: integer('created_at').notNull(),
+  reviewedAt: integer('reviewed_at'),
+}, t => [
+  uniqueIndex('office_feedback_request').on(t.requestId),
+  index('office_feedback_status').on(t.status, t.id),
+]);
+
+export const officeFeedbackRate = sqliteTable('office_feedback_rate', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  rateKey: text('rate_key').notNull(),
+  acceptedAt: integer('accepted_at').notNull(),
+}, t => [
+  index('office_feedback_rate_key').on(t.rateKey, t.acceptedAt),
+  index('office_feedback_rate_expiry').on(t.acceptedAt),
+]);

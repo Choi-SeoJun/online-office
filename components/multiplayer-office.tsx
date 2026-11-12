@@ -13,6 +13,7 @@ import { WorkClock } from './work-clock';
 import { AvatarPicker, AvatarPortrait } from './avatar-picker';
 import { NotificationCenter } from './notification-center';
 import { MultiplayerRoom } from './multiplayer-room';
+import { FeedbackDialog } from './feedback-dialog';
 import './multiplayer-office.css';
 import './multiplayer-parity.css';
 
@@ -54,7 +55,7 @@ export default function MultiplayerOffice({onSolo}:{onSolo:()=>void}) {
   const exit=()=>{setJoined(null);history.replaceState(null,'','?mode=multi');setError('');};
   if(joined)return <MultiplayerRoom key={joined.session.token} initial={joined} onExit={exit}/>;
   return <main className="multi-lobby">
-    <header className="multi-brand"><span className="brand-mark"><Building2 size={23}/></span><div><strong>온라인 회사.</strong><small>오늘도, 같이 적당히.</small></div></header>
+    <header className="multi-brand"><span className="brand-mark"><Building2 size={23}/></span><div><strong>온라인 회사.</strong><small>오늘도, 같이 적당히.</small></div><FeedbackDialog context={{ mode: 'multi', floor: 'office' }} /></header>
     <div className="multi-lobby-art" aria-hidden="true"><div className="office-grid">{Array.from({length:16},(_,i)=><i key={i} className={i%4<2?'desk-top':'desk-bottom'}><b/><em/></i>)}</div><span>같은 공간, 각자의 딴짓.</span></div>
     <section className="multi-lobby-card">
       <div className="mode-switch" aria-label="플레이 방식"><button disabled={busy||restoring} onClick={onSolo}>혼자 쉬기</button><button aria-pressed="true">동료들과</button></div>

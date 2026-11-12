@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publicAssetPath } from './hosting.ts';
+import { feedbackAdminUrl, feedbackEndpoint, publicAssetPath } from './hosting.ts';
 import { requestRoom, roomInviteUrl } from './multi-client.ts';
 
 test('asset paths honor the deployment prefix and preserve the Sites root default', () => {
@@ -23,4 +23,17 @@ test('Pages sends room actions to its fixed backend without browser cookies or r
     assert.deepEqual(await requestRoom({action:'sync',code:'ABCD2345',token:'private-session'}),{ok:true});
     assert.equal(roomInviteUrl('ABCD2345','https://choi-seojun.github.io/online-office/?mode=multi#temporary'),'https://choi-seojun.github.io/online-office/?room=ABCD2345');
   } finally {globalThis.fetch=oldFetch;Reflect.deleteProperty(globalThis,'__OFFICE_ROOM_ENDPOINT__');}
+});
+
+test('feedback URLs default to Sites paths and use the configured Sites origin on Pages', () => {
+  assert.equal(feedbackEndpoint(), '/api/feedback');
+  assert.equal(feedbackAdminUrl(), '/admin/feedback');
+  const site = 'https://office-break-01a1bf07.mobilechrysanthemum1.chatgpt.site';
+  Object.defineProperty(globalThis, '__OFFICE_FEEDBACK_ORIGIN__', { value: site, configurable: true });
+  try {
+    assert.equal(feedbackEndpoint(), site + '/api/feedback');
+    assert.equal(feedbackAdminUrl(), site + '/admin/feedback');
+  } finally {
+    Reflect.deleteProperty(globalThis, '__OFFICE_FEEDBACK_ORIGIN__');
+  }
 });

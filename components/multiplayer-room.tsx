@@ -9,6 +9,7 @@ import { readSavedState, writeSavedState } from '@/game/storage';
 import { createOfficeAudio } from '@/game/audio';
 import { OfficePlayControls, type PlayPanel } from './office-play-controls';
 import { CameraControls } from './camera-controls';
+import { FeedbackDialog } from './feedback-dialog';
 import { WorkClock } from './work-clock';
 import { AvatarPortrait } from './avatar-picker';
 import { NotificationCenter } from './notification-center';
@@ -43,7 +44,19 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   const [connection,setConnection]=useState<'live'|'connecting'>('connecting'),[fatal,setFatal]=useState(''),[notice,setNotice]=useState('');
   const [chatOpen,setChatOpen]=useState(false),[membersOpen,setMembersOpen]=useState(false),[inviteOpen,setInviteOpen]=useState(false),[monitorOpen,setMonitorOpen]=useState(true);
   const [panel,setPanel]=useState<PlayPanel>(null),modalRef=useRef(false);
-  modalRef.current=membersOpen||inviteOpen||panel==='settings';
+  const feedbackOpen = useRef(false);
+  modalRef.current=membersOpen||inviteOpen||panel==='settings'||feedbackOpen.current;
+  const syncPause = useCallback(() => {
+    keys.current.clear();
+    controller.setAxis({x:0,z:0});
+    engine.dispatch({type:'pause',value:document.hidden||feedbackOpen.current});
+    audio.current?.sync(engine.state);
+  }, [controller,engine]);
+  const handleFeedbackOpen = (open: boolean) => {
+    feedbackOpen.current = open;
+    modalRef.current = open||membersOpen||inviteOpen||panel==='settings';
+    syncPause();
+  };
   const [chat,setChat]=useState(''),[sending,setSending]=useState(false),[leaving,setLeaving]=useState(false),[resizing,setResizing]=useState(false),[newCapacity,setNewCapacity]=useState(snapshot.room.capacity);
   const [selectedCoworker,setSelectedCoworker]=useState<string|null>(null),[poking,setPoking]=useState(false),[pokeCooldown,setPokeCooldown]=useState(false);
   const pokeLock=useRef(false),pokeTimer=useRef<ReturnType<typeof setTimeout>|null>(null),attackLock=useRef(false),leaveRef=useRef<()=>void>(()=>{});
@@ -60,6 +73,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     const response=await requestRoom<{snapshot:RoomSnapshot}>({action,code:session.code,token:session.token,...extra});apply(response.snapshot);return response.snapshot;
   },[session,apply]);
   const send=useCallback((command:Command)=>{
+    if(feedbackOpen.current)return;
     audio.current?.start();
     if(command.type==='exit'||(command.type==='interact'&&engine.state.target==='exit'&&engine.state.ready)){leaveRef.current();return;}
     if(command.type==='attack'&&attackLock.current)return;
@@ -119,8 +133,9 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   },[session.playerId,controller,engine,send,retry]);
   useEffect(()=>{
     const clear=()=>{keys.current.clear();controller.setAxis({x:0,z:0});};
-    const visibility=()=>{clear();engine.dispatch({type:'pause',value:document.hidden});audio.current?.sync(engine.state);};
+    const visibility=syncPause;
     const down=(event:KeyboardEvent)=>{
+      if(feedbackOpen.current||event.defaultPrevented)return;
       if((event.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"],.chat-resize-handle')||event.ctrlKey||event.metaKey||event.altKey)return;
       const key=event.key.toLowerCase();
       if(key==='escape'){clear();setChatOpen(false);setMembersOpen(false);setInviteOpen(false);setPanel(null);setMonitorOpen(false);send({type:'cancel'});return;}
@@ -134,7 +149,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     const focused=(event:FocusEvent)=>{if((event.target as HTMLElement)?.closest('input,textarea,select,[role="dialog"],.chat-resize-handle'))clear();};
     window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',clear);document.addEventListener('visibilitychange',visibility);document.addEventListener('focusin',focused);
     return()=>{clear();window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',clear);document.removeEventListener('visibilitychange',visibility);document.removeEventListener('focusin',focused);};
-  },[controller,engine,send]);
+  },[controller,engine,send,syncPause]);
   useEffect(()=>{if(chatOpen){setSeenMessage(latestMessage);chatEnd.current?.scrollIntoView({block:'nearest'});}},[latestMessage,chatOpen]);
   useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),5000);return()=>clearTimeout(timer);},[notice]);
   const poke=async(targetId:string)=>{
@@ -155,7 +170,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   const invite=typeof location==='undefined'?'':roomInviteUrl(session.code,location.href);
   return <main className={`multi-room office-app is-playing ${chatOpen?'chat-is-open':''} ${roof?'is-rooftop':''} ${state.transition?'is-travelling':''}`}>
     <div ref={host} className="scene-host" aria-label={roof?'동료들과 쉬는 3D 옥상':'동료들과 함께 있는 3D 사무실'}/>
-    <header className="room-header"><div className="room-title"><Building2 size={24}/><div><h1>{snapshot.room.name}</h1><span><i className={connection==='live'?'live-dot':'connecting-dot'}/>{connection==='live'?'함께 근무 중':'다시 연결하는 중'}</span></div></div><div className="room-header-actions"><WorkClock/><NotificationCenter items={snapshot.notifications??[]} onRead={throughId=>request('readNotifications',{throughId})}/><button className="icon-button" aria-label={state.settings.sound?'소리 끄기':'소리 켜기'} onClick={()=>send({type:'settings',value:{sound:!state.settings.sound}})}>{state.settings.sound?<Volume2 size={19}/>:<VolumeX size={19}/>}</button><button className="icon-button" aria-label="설정" onClick={()=>setPanel('settings')}><Settings2 size={19}/></button><button className="room-members-button" aria-label={`동료 ${snapshot.players.length}명, 정원 ${snapshot.room.capacity}명`} onClick={()=>{setMembersOpen(true);setNewCapacity(snapshot.room.capacity);}}><Users size={17}/>{snapshot.players.length}<span>/{snapshot.room.capacity}</span></button><button className="room-invite-button" aria-label="동료 초대" onClick={()=>setInviteOpen(true)}><Link size={16}/><span>동료 초대</span></button></div></header>
+    <header className="room-header"><div className="room-title"><Building2 size={24}/><div><h1>{snapshot.room.name}</h1><span><i className={connection==='live'?'live-dot':'connecting-dot'}/>{connection==='live'?'함께 근무 중':'다시 연결하는 중'}</span></div></div><div className="room-header-actions"><WorkClock/><FeedbackDialog context={{ mode: 'multi', floor: roof ? 'roof' : 'office' }} onOpenChange={handleFeedbackOpen} /><NotificationCenter items={snapshot.notifications??[]} onRead={throughId=>request('readNotifications',{throughId})}/><button className="icon-button" aria-label={state.settings.sound?'소리 끄기':'소리 켜기'} onClick={()=>send({type:'settings',value:{sound:!state.settings.sound}})}>{state.settings.sound?<Volume2 size={19}/>:<VolumeX size={19}/>}</button><button className="icon-button" aria-label="설정" onClick={()=>setPanel('settings')}><Settings2 size={19}/></button><button className="room-members-button" aria-label={`동료 ${snapshot.players.length}명, 정원 ${snapshot.room.capacity}명`} onClick={()=>{setMembersOpen(true);setNewCapacity(snapshot.room.capacity);}}><Users size={17}/>{snapshot.players.length}<span>/{snapshot.room.capacity}</span></button><button className="room-invite-button" aria-label="동료 초대" onClick={()=>setInviteOpen(true)}><Link size={16}/><span>동료 초대</span></button></div></header>
     <div className="room-self"><span className="status-dot"/><strong>{state.name}</strong><span>{roof?'옥상 · 잠깐, 숨 고르기':`${controller.player.seatIndex+1}번 자리 · 오늘도 적당히`}</span></div>
     {!ready&&!sceneError&&<div className="loading-status"><LoaderCircle className="loading-icon" size={18}/>회사를 준비하고 있어요</div>}
     {notice&&<div className="room-notice" role="status">{notice}</div>}

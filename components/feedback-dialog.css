@@ -1,0 +1,170 @@
+button.feedback-trigger {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.multi-brand {
+  right: 38px;
+}
+
+.multi-brand > .feedback-trigger {
+  margin-left: auto;
+}
+
+.feedback-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: #263d346b;
+  backdrop-filter: blur(4px);
+}
+
+.feedback-dialog {
+  position: fixed;
+  z-index: 501;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100% - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(16px, 4vw, 26px);
+  border: 1px solid #fff;
+  border-radius: 22px;
+  background: #fffdf5;
+  color: #314e43;
+  box-shadow: 0 24px 80px #213b2b40;
+}
+
+.feedback-dialog header,
+.feedback-dialog footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.feedback-dialog h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 750;
+}
+
+.feedback-dialog p {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.feedback-dialog fieldset {
+  display: grid;
+  gap: 12px;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.feedback-dialog label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.feedback-dialog select,
+.feedback-dialog textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #b5c5b4;
+  border-radius: 10px;
+  background: #f6f8f0;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.feedback-dialog textarea {
+  resize: vertical;
+}
+
+.feedback-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #eaf0e5;
+  color: inherit;
+}
+
+.feedback-dialog small {
+  display: block;
+  margin-top: 5px;
+  text-align: right;
+}
+
+.feedback-dialog .feedback-error {
+  color: #963f33;
+}
+
+.feedback-dialog .feedback-status:empty {
+  margin: 0;
+}
+
+.feedback-dialog footer {
+  margin-top: 15px;
+}
+
+.feedback-dialog footer a {
+  color: #416b58;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.feedback-dialog footer button {
+  min-height: 42px;
+  font-size: 13px;
+}
+
+.feedback-dialog :focus-visible,
+.feedback-trigger:focus-visible {
+  outline: 2px solid #446f56;
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .multi-brand {
+    right: 22px;
+  }
+
+  .header-tools > button.feedback-trigger,
+  .room-header-actions > button.feedback-trigger {
+    width: 33px;
+    padding: 0;
+  }
+
+  :is(.header-tools, .room-header-actions) > .feedback-trigger span {
+    display: none;
+  }
+
+  .room-title > div {
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .room-title span {
+    white-space: nowrap;
+  }
+}

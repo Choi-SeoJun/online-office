@@ -11,3 +11,17 @@ export function publicAssetPath(path: string) {
 export function roomEndpoint() {
   return typeof __OFFICE_ROOM_ENDPOINT__ === 'undefined' ? '/api/rooms' : __OFFICE_ROOM_ENDPOINT__;
 }
+
+declare const __OFFICE_FEEDBACK_ORIGIN__: string | undefined;
+
+function feedbackOrigin() {
+  return typeof __OFFICE_FEEDBACK_ORIGIN__ === 'undefined' ? '' : __OFFICE_FEEDBACK_ORIGIN__;
+}
+
+export function feedbackEndpoint() {
+  return feedbackOrigin() + '/api/feedback';
+}
+
+export function feedbackAdminUrl() {
+  return feedbackOrigin() + '/admin/feedback';
+}

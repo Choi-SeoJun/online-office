@@ -13,6 +13,7 @@ export default defineConfig({
   css: { postcss: root },
   define: {
     __OFFICE_ASSET_BASE__: JSON.stringify('/online-office/'),
+    __OFFICE_FEEDBACK_ORIGIN__: JSON.stringify('https://office-break-01a1bf07.mobilechrysanthemum1.chatgpt.site'),
     __OFFICE_ROOM_ENDPOINT__: JSON.stringify('https://office-break-01a1bf07.mobilechrysanthemum1.chatgpt.site/api/rooms'),
   },
   build: {
