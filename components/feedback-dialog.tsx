@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactElement } from 'react';
 import { Dialog } from 'radix-ui';
 import { MessageSquarePlus, X } from 'lucide-react';
 import { createFeedbackSender, feedbackMessageLimit } from '@/game/feedback-client';
@@ -8,9 +8,10 @@ import type { FeedbackCategory, FeedbackContext } from '@/game/feedback-types';
 import { feedbackAdminUrl } from '@/game/hosting';
 import './feedback-dialog.css';
 
-export function FeedbackDialog({ context, onOpenChange }: {
+export function FeedbackDialog({ context, onOpenChange, trigger }: {
   context: FeedbackContext;
   onOpenChange?: (open: boolean) => void;
+  trigger?: ReactElement;
 }) {
   const [send] = useState(createFeedbackSender);
   const [category, setCategory] = useState<FeedbackCategory>('bug');
@@ -43,9 +44,9 @@ export function FeedbackDialog({ context, onOpenChange }: {
     onOpenChange?.(open);
   }}>
     <Dialog.Trigger asChild>
-      <button type="button" className="icon-button feedback-trigger" aria-label="건의함" title="건의함">
+      {trigger ?? <button type="button" className="icon-button feedback-trigger" aria-label="건의함" title="건의함">
         <MessageSquarePlus size={18} aria-hidden="true" /><span>건의함</span>
-      </button>
+      </button>}
     </Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="feedback-overlay" />

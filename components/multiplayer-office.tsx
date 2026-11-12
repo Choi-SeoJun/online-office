@@ -14,6 +14,7 @@ import { AvatarPicker, AvatarPortrait } from './avatar-picker';
 import { NotificationCenter } from './notification-center';
 import { MultiplayerRoom } from './multiplayer-room';
 import { FeedbackDialog } from './feedback-dialog';
+import { UpdateNews } from './update-news';
 import './multiplayer-office.css';
 import './multiplayer-parity.css';
 
@@ -69,6 +70,7 @@ export default function MultiplayerOffice({onSolo}:{onSolo:()=>void}) {
         <button className="primary-button multi-enter" disabled={busy||restoring}>{busy||restoring?<><LoaderCircle className="loading-icon" size={18}/>{restoring?'이전 자리 확인 중':'문 여는 중'}</>:<>{tab==='create'?'우리 회사 만들기':'동료들에게 합류하기'}<ArrowRight size={18}/></>}</button>
       </form>
       <p className="multi-lobby-note"><Users size={14}/>최대 16명 · 가입 없이 코드로 초대</p><p className="multi-expiry-note">방과 대화는 만든 뒤 24시간 동안 이용할 수 있어요.</p>
+      <UpdateNews context={{mode:'multi',floor:'office'}} placement="card" />
     </section>
   </main>;
 }

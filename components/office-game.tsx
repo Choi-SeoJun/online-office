@@ -12,6 +12,7 @@ import { AvatarPicker } from './avatar-picker';
 import { CameraControls } from './camera-controls';
 import { FeedbackDialog } from './feedback-dialog';
 import { OfficeBulletinBoard } from './office-bulletin-board';
+import { UpdateNews } from './update-news';
 import { OfficePlayControls } from './office-play-controls';
 import './office-rooftop.css';
 import { isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layout';
@@ -35,8 +36,9 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   const panelRef = useRef(panel); panelRef.current = panel;
   const feedbackOpen = useRef(false);
   const boardOpen = useRef(false);
+  const newsOpen = useRef(false);
   const syncPause = useCallback(() => {
-    engine.dispatch({ type: 'pause', value: document.hidden || feedbackOpen.current || boardOpen.current || panelRef.current === 'settings' || panelRef.current === 'help' });
+    engine.dispatch({ type: 'pause', value: document.hidden || feedbackOpen.current || boardOpen.current || newsOpen.current || panelRef.current === 'settings' || panelRef.current === 'help' });
     audio.current?.sync(engine.state);
   }, [engine]);
   const handleFeedbackOpen = (open: boolean) => {
@@ -44,7 +46,8 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
     syncPause();
   };
   const handleBoardOpen = (open: boolean) => { boardOpen.current = open; syncPause(); };
-  const send = useCallback((command: Command) => { if (feedbackOpen.current || boardOpen.current) return; if (command.type === 'enter' || (command.type === 'settings' && command.value.sound)) audio.current?.start(); engine.dispatch(command); }, [engine]);
+  const handleNewsOpen = (open: boolean) => { newsOpen.current = open; syncPause(); };
+  const send = useCallback((command: Command) => { if (feedbackOpen.current || boardOpen.current || newsOpen.current) return; if (command.type === 'enter' || (command.type === 'settings' && command.value.sound)) audio.current?.start(); engine.dispatch(command); }, [engine]);
   useEffect(() => { const sound = createOfficeAudio(); audio.current = sound; return () => { sound.dispose(); audio.current = null; }; }, []);
   useEffect(() => {
     let cancelled = false; setReady(false); setError('');
@@ -53,8 +56,8 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       if (cancelled || !host.current) return;
       try { scene.current = createOfficeScene(host.current, {
         getState: () => engine.state, onFrame: dt => { engine.step(dt); audio.current?.sync(engine.state); },
-        onGround: point => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current && !boardOpen.current) { setHints(false); engine.dispatch({ type: 'move', point }); } },
-        onTarget: (target, point) => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current && !boardOpen.current) { setHints(false); engine.dispatch({ type: 'select', target, point }); } },
+        onGround: point => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current && !boardOpen.current && !newsOpen.current) { setHints(false); engine.dispatch({ type: 'move', point }); } },
+        onTarget: (target, point) => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current && !boardOpen.current && !newsOpen.current) { setHints(false); engine.dispatch({ type: 'select', target, point }); } },
         onReady: () => { if (!cancelled) { syncPause(); setReady(true); } }, onError: message => fail(message || '이 브라우저에서 3D 화면을 열지 못했어요.'),
       }); } catch { fail('3D 화면을 열지 못했어요. 브라우저의 하드웨어 가속을 확인하거나 다른 브라우저로 접속해 주세요.'); }
     }).catch(() => fail('사무실을 불러오지 못했어요. 연결을 확인하고 다시 시도해 주세요.'));
@@ -67,7 +70,7 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
     const clear = () => { keys.clear(); axis(); };
     const visibility = () => { clear(); syncPause(); };
     const keydown = (event: KeyboardEvent) => {
-      if (feedbackOpen.current || boardOpen.current || event.defaultPrevented) { clear(); return; }
+      if (feedbackOpen.current || boardOpen.current || newsOpen.current || event.defaultPrevented) { clear(); return; }
       const element = event.target as HTMLElement | null;
       if (panelRef.current === 'settings' || panelRef.current === 'help') {
         if (event.key === 'Escape') { event.preventDefault(); setPanel(null); return; }
@@ -106,12 +109,12 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       <button className="icon-button" aria-label="이용 방법" onClick={() => setPanel('help')}><HelpCircle size={20} /></button><button className="icon-button" aria-label="설정" onClick={() => setPanel('settings')}><Settings2 size={20} /></button>
     </div></header>
     {!ready && !error && <div className="loading-status"><LoaderCircle className="loading-icon" size={18} />사무실을 준비하고 있어요</div>}
-    {!state.entered && !error && <section className="welcome-card">{onMultiplayer && <div className="mode-switch" aria-label="플레이 방식"><button aria-pressed="true">혼자 쉬기</button><button onClick={onMultiplayer}>동료들과</button></div>}<div className="eyebrow"><span />혼자만의 작은 회사</div><h2>출근은 했고,<br />일은 <em>모르겠고.</em></h2><p className="welcome-description">일하는 척 딴짓하고, 커피 한 잔 쉬어 가요.<br />이 회사에서는 조금 마음대로 해도 괜찮아요.</p><div className="entry-name"><label htmlFor="employee-name">오늘의 이름</label><input id="employee-name" value={name} maxLength={10} onChange={e => setName(e.target.value)} placeholder="김사원" autoComplete="off" /><span>사원</span></div><AvatarPicker value={avatar} onChange={value=>{setAvatar(value);writeAvatarChoice(value);}}/><button className="primary-button enter-button" disabled={!ready} onClick={() => send({ type: 'enter', name: name.trim() || '김사원', avatar })}>{ready ? <>출근하기<ArrowRight size={19} /></> : <>문 여는 중<LoaderCircle className="loading-icon" size={18} /></>}</button><div className="entry-footnote"><Leaf size={13} />가입도, 할당량도, 야근도 없어요.</div></section>}
+    {!state.entered && !error && <section className="welcome-card">{onMultiplayer && <div className="mode-switch" aria-label="플레이 방식"><button aria-pressed="true">혼자 쉬기</button><button onClick={onMultiplayer}>동료들과</button></div>}<div className="eyebrow"><span />혼자만의 작은 회사</div><h2>출근은 했고,<br />일은 <em>모르겠고.</em></h2><p className="welcome-description">일하는 척 딴짓하고, 커피 한 잔 쉬어 가요.<br />이 회사에서는 조금 마음대로 해도 괜찮아요.</p><div className="entry-name"><label htmlFor="employee-name">오늘의 이름</label><input id="employee-name" value={name} maxLength={10} onChange={e => setName(e.target.value)} placeholder="김사원" autoComplete="off" /><span>사원</span></div><AvatarPicker value={avatar} onChange={value=>{setAvatar(value);writeAvatarChoice(value);}}/><button className="primary-button enter-button" disabled={!ready} onClick={() => send({ type: 'enter', name: name.trim() || '김사원', avatar })}>{ready ? <>출근하기<ArrowRight size={19} /></> : <>문 여는 중<LoaderCircle className="loading-icon" size={18} /></>}</button><div className="entry-footnote"><Leaf size={13} />가입도, 할당량도, 야근도 없어요.</div><UpdateNews context={{mode:'solo',floor:'office'}} placement="card" onOpenChange={handleNewsOpen}/></section>}
     {state.entered && !error && <>
       <div className="employee-card"><span className="status-dot" /><strong>{state.name}</strong><span>{roof ? '잠깐, 숨 고르기' : '자유시간'}</span></div>
       <CameraControls disabled={!!state.transition} onZoom={delta=>scene.current?.zoom(delta)} />
       {hints && <div className="first-hint"><MousePointer2 size={17} /><span>눌러서 걷기 · 상하좌우 드래그로 시점 조절</span><button aria-label="안내 닫기" onClick={() => setHints(false)}><X size={15} /></button></div>}
-      <OfficePlayControls state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>send({type:"exit"})} onType={key=>audio.current?.typeKey(key)} boardAction={<OfficeBulletinBoard name={state.name} onOpenChange={handleBoardOpen}/>} />
+      <OfficePlayControls state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>send({type:"exit"})} onType={key=>audio.current?.typeKey(key)} newsAction={<UpdateNews context={{mode:'solo',floor:roof?'roof':'office'}} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={state.name} onOpenChange={handleBoardOpen}/>} />
     </>}
     {(panel === 'settings' || panel === 'help') && <div className="modal-backdrop" onClick={() => setPanel(null)}><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={e => e.stopPropagation()}><div className="panel-title"><h2 id="dialog-title">{panel === 'settings' ? '내 취향대로' : '이 회사에서 노는 법'}</h2><button className="icon-button" aria-label="닫기" autoFocus onClick={() => setPanel(null)}><X size={20} /></button></div>{panel === 'settings' ? <>
       <label className="setting-row"><span><Volume2 size={18} />공간 소리</span><input type="checkbox" checked={state.settings.sound} onChange={e => send({ type: 'settings', value: { sound: e.target.checked } })} /></label>
