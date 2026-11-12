@@ -1,8 +1,16 @@
 export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] };
 
-// One entry per Asia/Seoul calendar date. Append same-day releases here rather
-// than creating a separate notice for each build. Keep only published changes.
+// Keys are announcement dates: each batch releases at 04:00 Asia/Seoul.
+// Changes from the previous 04:00 (inclusive) to this 04:00 (exclusive)
+// belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
+  '2026-11-13': {
+    added: [
+      '아직 읽지 않은 업데이트 소식은 접속하면 한 번 자동으로 열려요. 읽은 소식도 업데이트 버튼에서 다시 볼 수 있어요.',
+      '업데이트 소식은 매일 오전 4시(한국 시간)에 모아서 공개해요. 전날 오전 4시부터 오늘 오전 4시 전까지의 변경을 하나의 공지에 담아요.',
+    ],
+    fixed: [],
+  },
   '2026-11-12': {
     added: [
       '건의함을 열었어요. 로그인 없이 불편한 점이나 아이디어를 남길 수 있고, 보낸 내용은 관리자만 확인해요.',
@@ -24,24 +32,81 @@ export function updateDays(source: Readonly<Record<string, DailyUpdate>> = DAILY
   return Object.entries(source).sort(([a], [b]) => b.localeCompare(a)).map(([date, content]) => ({ date, ...content }));
 }
 
+export function updateReleaseTime(day: string): number {
+  return Date.parse(`${day}T04:00:00+09:00`);
+}
+
+export function announcementDateForChange(changedAt: number): string {
+  const hour = 60 * 60 * 1000;
+  // Shift the Seoul 04:00 boundary to UTC midnight, then select the next day.
+  return new Date(changedAt + (9 - 4 + 24) * hour).toISOString().slice(0, 10);
+}
+
+export function publishedUpdateDays(now: number, source: Readonly<Record<string, DailyUpdate>> = DAILY_UPDATES) {
+  return updateDays(source).filter(({ date }) => updateReleaseTime(date) <= now);
+}
+
+export function nextUpdateReleaseTime(now: number, source: Readonly<Record<string, DailyUpdate>> = DAILY_UPDATES): number | undefined {
+  return Object.keys(source).map(updateReleaseTime).filter(release => release > now).sort((a, b) => a - b)[0];
+}
+
 export function formatUpdateDate(date: string) {
   const [year, month, day] = date.split('-').map(Number);
   return `${year}년 ${month}월 ${day}일`;
 }
 
 const READ_KEY = 'office-updates-read-day-v1';
+export type ReadStorage = Partial<Pick<Storage, 'getItem' | 'setItem'>>;
+
+export function createUpdateReadTracker(getStorage: () => ReadStorage | undefined) {
+  let readDay: string | undefined;
+
+  function remember(day: string | null | undefined) {
+    if (day && /^\d{4}-\d{2}-\d{2}$/.test(day) && (!readDay || day > readDay)) readDay = day;
+  }
+
+  function readStorage() {
+    let storage: ReadStorage | undefined;
+    try { storage = getStorage(); } catch { return undefined; }
+    try { remember(storage?.getItem?.(READ_KEY)); } catch { /* Keep this visit's read state. */ }
+    return storage;
+  }
+
+  return {
+    hasUnread(day: string): boolean {
+      readStorage();
+      return !readDay || readDay < day;
+    },
+    markRead(day: string): boolean {
+      const storage = readStorage();
+      remember(day);
+      try {
+        if (!storage?.setItem || !readDay) return false;
+        storage.setItem(READ_KEY, readDay);
+        return true;
+      } catch { return false; }
+    },
+  };
+}
+
+// Shared across component remounts and game-mode changes during this visit.
+const browserReadTracker = createUpdateReadTracker(() => globalThis.localStorage);
+const storageReadTrackers = new WeakMap<ReadStorage, ReturnType<typeof createUpdateReadTracker>>();
+
+function trackerFor(storage?: ReadStorage) {
+  if (!storage) return browserReadTracker;
+  let tracker = storageReadTrackers.get(storage);
+  if (!tracker) {
+    tracker = createUpdateReadTracker(() => storage);
+    storageReadTrackers.set(storage, tracker);
+  }
+  return tracker;
+}
+
 export function hasUnreadUpdates(latestDay: string, storage?: Pick<Storage, 'getItem'>) {
-  try {
-    const read = (storage ?? globalThis.localStorage)?.getItem(READ_KEY);
-    return !read || !/^\d{4}-\d{2}-\d{2}$/.test(read) || read < latestDay;
-  } catch { return true; }
+  return trackerFor(storage).hasUnread(latestDay);
 }
 
 export function markUpdatesRead(day: string, storage?: Pick<Storage, 'setItem'>) {
-  try {
-    const target = storage ?? globalThis.localStorage;
-    if (!target) return false;
-    target.setItem(READ_KEY, day);
-    return true;
-  } catch { return false; }
+  return trackerFor(storage).markRead(day);
 }
