@@ -244,7 +244,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     if (weather) {
       const environment = callbacks.getEnvironment?.();
       weather.update(environment, onRoof, s.settings, dt);
-      if (!onRoof && environment) officeWeather?.update(environment);
+      if (!onRoof && environment) officeWeather?.update(environment, s.settings, dt);
     } else {
       const background = onRoof ? roofColor : officeColor;
       (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);

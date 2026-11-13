@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ROOF_BOUNDS } from './layout.ts';
 import type { EnvironmentFrame, Precipitation } from './environment-types.ts';
 import type { Settings } from './types.ts';
+import { paintWindowPrecipitation } from './window-weather.ts';
 
 const MAX_PARTICLES = 144;
 const neutralFrame: EnvironmentFrame = {
@@ -97,12 +98,20 @@ function paintSky(context: CanvasRenderingContext2D, frame: EnvironmentFrame, ci
 }
 
 export function createOfficeWeather() {
-  const sky = canvasTexture(256, 160);
-  paintSky(sky.context, neutralFrame, true);
+  const sky = canvasTexture(512, 320);
+  sky.texture.generateMipmaps = false;
+  sky.texture.minFilter = THREE.LinearFilter;
+  // Cache the city backdrop on the CPU; only the composed pane uses a GPU map.
+  const backdrop = document.createElement('canvas');
+  backdrop.width = 512; backdrop.height = 320;
+  const backdropContext = backdrop.getContext('2d')!;
+  paintSky(backdropContext, neutralFrame, true);
+  sky.context.drawImage(backdrop, 0, 0);
   const patches: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>[] = [];
   const sunlight = new THREE.Color('#fff0bc'), sunsetLight = new THREE.Color('#ffb779');
   let last = -Infinity;
   let lastWeather = '';
+  let lastControls = '', clock = 0, pending = 0;
   return {
     addWindow(parent: THREE.Group, x: number, y: number, z: number, width: number, height: number) {
       const surface = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({
@@ -125,13 +134,25 @@ export function createOfficeWeather() {
       parent.add(patch);
       patches.push(patch);
     },
-    update(frame: EnvironmentFrame) {
+    update(frame: EnvironmentFrame, settings: Pick<Settings, 'quality' | 'reducedMotion'> = { quality: 'auto', reducedMotion: false }, dt = 0) {
       const weather = `${frame.cloud}/${frame.precipitation}/${frame.season}`;
-      if (Math.abs(frame.now - last) >= 10_000 || lastWeather !== weather) {
-        paintSky(sky.context, frame, true);
-        sky.texture.needsUpdate = true;
+      const controls = `${settings.quality}/${settings.reducedMotion}`;
+      const skyChanged = Math.abs(frame.now - last) >= 10_000 || lastWeather !== weather;
+      const animating = frame.precipitation !== 'none' && !settings.reducedMotion;
+      if (animating) {
+        const elapsed = Number.isFinite(dt) ? Math.min(.05, Math.max(0, dt)) : 0;
+        clock += elapsed; pending += elapsed;
+      }
+      if (skyChanged) {
+        paintSky(backdropContext, frame, true);
         last = frame.now;
         lastWeather = weather;
+      }
+      if (skyChanged || controls !== lastControls || (animating && pending >= 1 / (settings.quality === 'low' ? 12 : 24))) {
+        sky.context.drawImage(backdrop, 0, 0);
+        paintWindowPrecipitation(sky.context, frame, clock, settings.quality);
+        sky.texture.needsUpdate = true;
+        pending = 0; lastControls = controls;
       }
       for (const patch of patches) {
         patch.material.color.copy(sunlight).lerp(sunsetLight, frame.sunset);

@@ -253,7 +253,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     if (weather) {
       const environment = callbacks.getEnvironment?.();
       weather.update(environment, onRoof, settings, dt);
-      if (!onRoof && environment) architecture.officeWeather?.update(environment);
+      if (!onRoof && environment) architecture.officeWeather?.update(environment, settings, dt);
     } else {
       (world.background as THREE.Color).copy(onRoof ? roofColor : officeColor); ambient.color.set(onRoof ? '#fff0d5' : '#fff8e7');
     }

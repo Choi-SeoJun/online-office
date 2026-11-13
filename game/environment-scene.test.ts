@@ -26,6 +26,7 @@ function stubCanvas() {
             canvas: this,
             createLinearGradient: () => gradient, createRadialGradient: () => gradient,
             fillRect() {}, beginPath() {}, moveTo() {}, arc() {}, ellipse() {}, fill() {},
+            drawImage() {}, lineTo() {}, stroke() {}, save() {}, restore() {},
           };
         },
       };
@@ -94,4 +95,50 @@ test('roof effects stay outside, switch precipitation and release their GPU reso
   weather.dispose();
   assert.deepEqual(disposed, ['sky', 'snow']);
   assert.equal(roof.children.length, 0);
+});
+
+test('window precipitation animates without replacing its shared texture, and dry weather stops uploads', () => {
+  stubCanvas();
+  const group = new THREE.Group(), weather = createOfficeWeather();
+  weather.addWindow(group, 0, 2, -5.875, 2.52, 1.5);
+  weather.addWindow(group, 3, 2, -5.875, 2.52, 1.5);
+  const pane = group.children[0] as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  const other = group.children[2] as typeof pane;
+  const texture = pane.material.map!;
+  assert.equal(other.material.map, texture);
+  const settings = { quality: 'auto' as const, reducedMotion: false };
+  const rainy = { ...night, precipitation: 'rain' as const };
+  weather.update(rainy, settings, .05);
+  let version = texture.version;
+  weather.update(rainy, settings, .05);
+  assert.ok(texture.version > version, 'rain behind the pane and beads must advance');
+  weather.update(night, settings, .05);
+  version = texture.version;
+  weather.update(night, settings, .05);
+  assert.ok(texture.version > version, 'snow beyond the pane must advance');
+  weather.update({ ...night, precipitation: 'none' }, settings, .05);
+  version = texture.version;
+  weather.update({ ...night, precipitation: 'none' }, settings, .05);
+  assert.equal(texture.version, version, 'clear weather does not continuously upload a canvas');
+  assert.equal(pane.material.map, texture);
+});
+
+test('window weather freezes for reduced motion and throttles low quality while reacting immediately to changes', () => {
+  stubCanvas();
+  const group = new THREE.Group(), weather = createOfficeWeather();
+  weather.addWindow(group, 0, 2, -5.875, 2.52, 1.5);
+  const texture = (group.children[0] as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>).material.map!;
+  const settings = { quality: 'low' as const, reducedMotion: false };
+  weather.update(night, settings, 0);
+  let version = texture.version;
+  weather.update(night, settings, .016);
+  assert.equal(texture.version, version, 'low quality is not refreshed every frame');
+  for (let i = 0; i < 10; i++) weather.update(night, settings, .016);
+  assert.ok(texture.version > version);
+  weather.update(night, { ...settings, reducedMotion: true }, .05);
+  version = texture.version;
+  for (let i = 0; i < 15; i++) weather.update(night, { ...settings, reducedMotion: true }, .05);
+  assert.equal(texture.version, version, 'reduced motion retains a still weather image');
+  weather.update({ ...night, precipitation: 'rain' }, { ...settings, reducedMotion: true }, 0);
+  assert.ok(texture.version > version, 'weather changes do not wait for an animation tick');
 });
