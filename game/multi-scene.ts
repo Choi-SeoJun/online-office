@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createAdaptiveQuality } from './render-quality.ts';
+import { createQualityApplicator } from './render-quality-renderer.ts';
 import { createMonitorScreen } from './monitor-screen.ts';
 import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, mug, plant, plaque } from './models.ts';
 import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelectionForHit } from './scene.ts';
@@ -173,7 +175,9 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const wallBoard = createWallBoard(architecture.group, initial.layout.bounds);
   const roof = createRooftop(world, !!callbacks.getEnvironment), roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
   const weather = callbacks.getEnvironment ? createEnvironmentScene(world, roof, ambient, sun, officeColor, roofColor) : undefined;
-  let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, userOrbit = 0, desiredOrbit = 0, pitch = CAMERA_BASE_PITCH, desiredPitch = CAMERA_BASE_PITCH, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastQuality = '', lastFloor = initial.game.floor;
+  let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, userOrbit = 0, desiredOrbit = 0, pitch = CAMERA_BASE_PITCH, desiredPitch = CAMERA_BASE_PITCH, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastFloor = initial.game.floor;
+  const qualityControl = createAdaptiveQuality(), applyQuality = createQualityApplicator(renderer, sun);
+  const effectSettings = { ...initial.game.settings };
   const b = initial.layout.bounds, focus = new THREE.Vector3((b.minX + b.maxX) / 2, .65, (b.minZ + b.maxZ) / 2), desiredFocus = focus.clone();
   const rotatedOffset = new THREE.Vector3(), projection = new THREE.Vector3();
   const playerRing = new THREE.Mesh(new THREE.RingGeometry(.34, .40, 32), new THREE.MeshBasicMaterial({ color: '#477e6e', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })); playerRing.rotation.x = -Math.PI / 2; world.add(playerRing);
@@ -189,7 +193,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     setCameraOffset(rotatedOffset, orbit, pitch, 50); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus);
     architecture.cutaways(rotatedOffset); roofCutaways(rotatedOffset);
   };
-  const resize = () => { if (dead) return; width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
+  const resize = () => { if (dead) return; qualityControl.reset(); width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
   const observer = new ResizeObserver(resize); observer.observe(host); resize();
   const zoom = (delta: number) => { if (callbacks.getState().game.transition) return; zoomLevel = THREE.MathUtils.clamp(zoomLevel * Math.pow(.9, delta), .55, 1.5); updateCamera(); };
   const rotate = (delta: number) => { if (!callbacks.getState().game.transition) desiredOrbit = normalizeCameraAngle(desiredOrbit + delta * CAMERA_TURN_STEP); };
@@ -239,26 +243,28 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     }
   };
   const pointerCancel = () => { down = null; renderer.domElement.style.cursor = ''; };
+  const visibility = () => { lastTime = 0; qualityControl.reset(); pointerCancel(); };
   const wheel = (event: WheelEvent) => { event.preventDefault(); zoom(-THREE.MathUtils.clamp(event.deltaY, -300, 300) / 150); };
   const contextLoss = (event: Event) => { event.preventDefault(); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 방을 다시 열어 주세요.'); };
-  renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointermove', pointerMove); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('lostpointercapture', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss); document.addEventListener('visibilitychange', pointerCancel);
+  renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointermove', pointerMove); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('lostpointercapture', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss); document.addEventListener('visibilitychange', visibility);
   const render = (now: number) => {
     if (dead) return; frame = requestAnimationFrame(render);
+    if (document.hidden) { lastTime = 0; return; }
     const dt = lastTime ? Math.min(.06, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
-    if (document.hidden) return;
     callbacks.onFrame(dt); const state = callbacks.getState(), game = state.game, settings = game.settings, onRoof = game.floor === 'rooftop'; elapsed += dt;
-    if (capacity !== state.layout.capacity) { wallBoard.root.removeFromParent(); architecture.release(); architecture = createMultiArchitecture(state.layout, !!callbacks.getEnvironment); architecture.group.add(wallBoard.root); wallBoard.setBounds(state.layout.bounds); world.add(architecture.group); capacity = state.layout.capacity; }
+    if (capacity !== state.layout.capacity) { qualityControl.reset(); wallBoard.root.removeFromParent(); architecture.release(); architecture = createMultiArchitecture(state.layout, !!callbacks.getEnvironment); architecture.group.add(wallBoard.root); wallBoard.setBounds(state.layout.bounds); world.add(architecture.group); capacity = state.layout.capacity; }
     wallBoard.update(callbacks.getBoardEntries?.());
     architecture.group.visible = !onRoof; roof.visible = onRoof;
+    const quality = qualityControl.sample(now, settings.quality, !game.transition && lastFloor === game.floor);
+    applyQuality(quality, window.devicePixelRatio);
+    effectSettings.quality = quality.effects; effectSettings.reducedMotion = settings.reducedMotion;
     if (weather) {
       const environment = callbacks.getEnvironment?.();
-      weather.update(environment, onRoof, settings, dt);
-      if (!onRoof && environment) architecture.officeWeather?.update(environment, settings, dt);
+      weather.update(environment, onRoof, effectSettings, dt);
+      if (!onRoof && environment) architecture.officeWeather?.update(environment, effectSettings, dt);
     } else {
       (world.background as THREE.Color).copy(onRoof ? roofColor : officeColor); ambient.color.set(onRoof ? '#fff0d5' : '#fff8e7');
     }
-    const quality = `${settings.quality}/${devicePixelRatio}`;
-    if (quality !== lastQuality) { renderer.setPixelRatio(Math.min(devicePixelRatio || 1, settings.quality === 'low' ? 1 : settings.quality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = settings.quality !== 'low'; resize(); lastQuality = quality; }
     userOrbit = smoothCameraAngle(userOrbit, desiredOrbit, dt, settings.reducedMotion);
     orbit = userOrbit + transitionOrbit(game.transition, settings.reducedMotion); pitch = smoothCameraPitch(pitch, desiredPitch, dt, settings.reducedMotion);
     const b = onRoof ? ROOF_BOUNDS : state.layout.bounds;
@@ -326,7 +332,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   return { zoom, rotate, tilt, resetView, screenToWorld: point => screenAxisToWorld(point, orbit), dispose() {
     dead = true; cancelAnimationFrame(frame); observer.disconnect();
     weather?.dispose(); wallBoard.dispose();
-    renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', pointerCancel);
+    renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', visibility);
     architecture.release(); retired.forEach(object => world.add(object)); rigs.forEach(({ rig }) => { if (!rig.root.parent) world.add(rig.root); });
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
     world.traverse(object => { if (object instanceof THREE.InstancedMesh) object.dispose(); if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); for (const material of Array.isArray(object.material) ? object.material : [object.material]) { materials.add(material); const texture = (material as THREE.MeshStandardMaterial).map; if (texture) textures.add(texture); } } });

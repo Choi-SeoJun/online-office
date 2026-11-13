@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { createAdaptiveQuality } from './render-quality.ts';
+import { createQualityApplicator } from './render-quality-renderer.ts';
 import { createMonitorScreen } from './monitor-screen.ts';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } from './layout.ts';
@@ -194,7 +196,9 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const selection = new THREE.Mesh(new THREE.RingGeometry(.50, .56, 48), new THREE.MeshBasicMaterial({ color: '#dca45e', transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false })); selection.rotation.x = -Math.PI / 2; selection.position.y = .065; scene.add(selection);
   const destination = new THREE.Mesh(new THREE.RingGeometry(.13, .19, 24), new THREE.MeshBasicMaterial({ color: '#4d9184', transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false })); destination.rotation.x = -Math.PI / 2; destination.position.y = .07; scene.add(destination);
   const playerRing = new THREE.Mesh(new THREE.RingGeometry(.31, .37, 32), new THREE.MeshBasicMaterial({ color: '#467d70', transparent: true, opacity: .55, side: THREE.DoubleSide, depthWrite: false })); playerRing.rotation.x = -Math.PI / 2; playerRing.position.y = .06; scene.add(playerRing);
-  let width = 1, height = 1, zoomLevel = 1, lastQuality = '', dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden, orbit = 0, userOrbit = 0, targetOrbit = 0, pitch = CAMERA_BASE_PITCH, targetPitch = CAMERA_BASE_PITCH;
+  let width = 1, height = 1, zoomLevel = 1, dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden, orbit = 0, userOrbit = 0, targetOrbit = 0, pitch = CAMERA_BASE_PITCH, targetPitch = CAMERA_BASE_PITCH;
+  const qualityControl = createAdaptiveQuality(), applyQuality = createQualityApplicator(renderer, sunlight);
+  const effectSettings = { ...state.settings };
   let lastFloor = state.floor;
   const officeColor = new THREE.Color('#e6e5dc'), roofColor = new THREE.Color('#e6d6bf');
   const weather = callbacks.getEnvironment ? createEnvironmentScene(scene, roof, ambient, sunlight, officeColor, roofColor, fill) : undefined;
@@ -204,7 +208,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     const span = (mobile ? 15.2 : Math.max(15.6, 23.2 / aspect)) * zoomLevel;
     camera.left = -span * aspect / 2; camera.right = span * aspect / 2; camera.top = span / 2; camera.bottom = -span / 2; camera.updateProjectionMatrix(); setCameraOffset(rotatedOffset, orbit, pitch, 32); camera.position.copy(focus).add(rotatedOffset); camera.lookAt(focus); officeCutaways(rotatedOffset); roofCutaways(rotatedOffset);
   };
-  const resize = () => { if (dead) return; width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
+  const resize = () => { if (dead) return; qualityControl.reset(); width = Math.max(1, host.clientWidth); height = Math.max(1, host.clientHeight); renderer.setSize(width, height, false); updateCamera(); };
   const observer = new ResizeObserver(resize); observer.observe(host); resize();
   const adjustZoom = (factor: number) => { if (callbacks.getState().transition) return; zoomLevel = THREE.MathUtils.clamp(zoomLevel * factor, .64, 1.45); updateCamera(); };
   const zoom = (delta: number) => { adjustZoom(Math.pow(.9, delta)); };
@@ -232,7 +236,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   };
   const pointerCancel = () => { down = null; renderer.domElement.style.cursor=''; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
   const contextLoss = (e: Event) => { e.preventDefault(); graphicsLost = true; cancelAnimationFrame(frame); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 다시 열어보기를 누르면 이어서 놀 수 있어요.'); };
-  const visibility = () => { visible = !document.hidden; lastTime = 0; down = null; };
+  const visibility = () => { visible = !document.hidden; lastTime = 0; qualityControl.reset(); down = null; };
   renderer.domElement.addEventListener('pointerdown', pointerDown); renderer.domElement.addEventListener('pointermove', pointerMove); renderer.domElement.addEventListener('pointerup', pointerUp); renderer.domElement.addEventListener('pointercancel', pointerCancel); renderer.domElement.addEventListener('lostpointercapture', pointerCancel); renderer.domElement.addEventListener('wheel', wheel, { passive: false }); renderer.domElement.addEventListener('webglcontextlost', contextLoss); document.addEventListener('visibilitychange', visibility);
   const render = (now: number) => {
     if (dead || graphicsLost) return; frame = requestAnimationFrame(render); if (!visible) return;
@@ -241,17 +245,19 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     ownMonitor.set(callbacks.getWallpaper?.() ?? null);
     wallBoard.update(callbacks.getBoardEntries?.());
     const onRoof = s.floor === 'rooftop'; room.visible = !onRoof; roof.visible = onRoof;
+    const quality = qualityControl.sample(now, s.settings.quality, !s.transition && lastFloor === s.floor);
+    applyQuality(quality, window.devicePixelRatio);
+    effectSettings.quality = quality.effects; effectSettings.reducedMotion = s.settings.reducedMotion;
     if (weather) {
       const environment = callbacks.getEnvironment?.();
-      weather.update(environment, onRoof, s.settings, dt);
-      if (!onRoof && environment) officeWeather?.update(environment, s.settings, dt);
+      weather.update(environment, onRoof, effectSettings, dt);
+      if (!onRoof && environment) officeWeather?.update(environment, effectSettings, dt);
     } else {
       const background = onRoof ? roofColor : officeColor;
       (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);
       ambient.color.set(onRoof ? '#fff0d5' : '#f5f5e7');
     }
     userOrbit = smoothCameraAngle(userOrbit, targetOrbit, dt, s.settings.reducedMotion); orbit = userOrbit + transitionOrbit(s.transition, s.settings.reducedMotion); pitch = smoothCameraPitch(pitch, targetPitch, dt, s.settings.reducedMotion);
-    if (lastQuality !== s.settings.quality) { lastQuality = s.settings.quality; renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lastQuality === 'low' ? 1 : lastQuality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = lastQuality !== 'low'; sunlight.shadow.mapSize.set(lastQuality === 'high' ? 2048 : 1024, lastQuality === 'high' ? 2048 : 1024); renderer.shadowMap.needsUpdate = true; resize(); }
     const mobile = width / height < .9;
     desired.set(mobile ? s.player.x * .72 : s.player.x * (onRoof ? .15 : .09), onRoof ? .65 : .5, mobile ? s.player.z * .65 : onRoof ? -.55 + s.player.z * .17 : s.player.z * .05);
     // The midpoint is covered by the UI fade, so reset tracking there rather
