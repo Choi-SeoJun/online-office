@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { prepareSeasonalPlant } from './environment-scene.ts';
 import { box, cylinder, paintedWallText, plant, plaque, sphere } from './models.ts';
 import { ROOF_BENCH_SEATS } from './rest-seats.ts';
 import { ROOF_BIN, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
@@ -19,7 +20,7 @@ export function animateRooftop(roof: THREE.Group, elapsed: number, reducedMotion
 }
 
 /** Furniture shares navigation footprints and leaves every perimeter strip clear. */
-export function createRooftop(parent: THREE.Object3D) {
+export function createRooftop(parent: THREE.Object3D, enableWeather = false) {
   const roof = new THREE.Group(); roof.name = 'rooftop'; parent.add(roof);
   box(roof, 18.4, .50, 12.4, '#a1a49b', 0, -.33, 0, .12);
   box(roof, 18.1, .10, 12.1, '#d1cbb9', 0, -.045, 0, .02).userData.ground = true;
@@ -98,6 +99,7 @@ export function createRooftop(parent: THREE.Object3D) {
     box(planter, .83, .45, 1.03, '#bb9b76', 0, .24, 0, .045);
     box(planter, .76, .035, .96, '#554b35', 0, .48, 0, .015);
     const greenery = plant(planter, 0, 0, .90); greenery.position.y = .25;
+    if (enableWeather) prepareSeasonalPlant(greenery);
   }
   // Small buildings below the roof line make this feel like a roof, not a room.
   const skyline = new THREE.Group(); skyline.name = 'distant-city'; roof.add(skyline);

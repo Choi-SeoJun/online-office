@@ -19,6 +19,8 @@ import type { BoardEntry } from '@/game/board-types';
 import { isNearWallBoard } from '@/game/wall-board-layout';
 import { UpdateNews } from './update-news';
 import { WorkClock } from './work-clock';
+import { WeatherControl } from './weather-control';
+import { useLocalWeather } from '@/hooks/use-local-weather';
 import { AvatarPortrait } from './avatar-picker';
 import { employeeLabel } from '@/game/ranks';
 import { NotificationCenter } from './notification-center';
@@ -58,28 +60,32 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   const boardEntries = useRef<BoardEntry[]>([]);
   const [boardRequest, setBoardRequest] = useState(0);
   const receiveBoard = useCallback((entries: BoardEntry[]) => { boardEntries.current = entries; }, []);
-  const newsOpen = useRef(false), wallpaperOpen = useRef(false);
+  const newsOpen = useRef(false), wallpaperOpen = useRef(false), weatherOpen = useRef(false);
+  const weather = useLocalWeather();
+  const environmentRef = useRef(weather.frame); environmentRef.current = weather.frame;
   const wallpapers = useMonitorWallpapers(session, snapshot.players);
   const ownWallpaperId = snapshot.players.find(player => player.id === session.playerId)?.wallpaperId ?? null;
   const personalWallpaper = usePersonalWallpaperInRoom(session, ownWallpaperId, wallpapers.get(controller.player.seatIndex) ?? null, () => syncNow.current());
   if (personalWallpaper.image) wallpapers.set(controller.player.seatIndex, personalWallpaper.image); else wallpapers.delete(controller.player.seatIndex);
   const wallpapersRef = useRef(wallpapers); wallpapersRef.current = wallpapers;
   useEffect(() => { if (personalWallpaper.status === 'retrying') setNotice('배경화면은 저장했어요. 연결되면 동료들에게도 자동으로 적용돼요.'); }, [personalWallpaper.status]);
-  modalRef.current=membersOpen||inviteOpen||panel==='settings'||feedbackOpen.current||boardOpen.current||wallpaperOpen.current||newsOpen.current;
+  const personalDialogOpen = useCallback(() => feedbackOpen.current || boardOpen.current || wallpaperOpen.current || newsOpen.current || weatherOpen.current, []);
+  const syncModal = () => { modalRef.current = membersOpen || inviteOpen || panel === 'settings' || personalDialogOpen(); };
+  syncModal();
   const syncPause = useCallback(() => {
     keys.current.clear();
     controller.setAxis({x:0,z:0});
-    engine.dispatch({type:'pause',value:document.hidden||feedbackOpen.current||boardOpen.current||wallpaperOpen.current||newsOpen.current});
+    engine.dispatch({type:'pause',value:document.hidden||personalDialogOpen()});
     audio.current?.sync(engine.state);
-  }, [controller,engine]);
+  }, [controller,engine,personalDialogOpen]);
   const handleFeedbackOpen = (open: boolean) => {
     feedbackOpen.current = open;
-    modalRef.current = open||boardOpen.current||wallpaperOpen.current||newsOpen.current||membersOpen||inviteOpen||panel==='settings';
+    syncModal();
     syncPause();
   };
   const handleBoardOpen = (open: boolean) => {
     boardOpen.current = open;
-    modalRef.current = open||feedbackOpen.current||wallpaperOpen.current||newsOpen.current||membersOpen||inviteOpen||panel==='settings';
+    syncModal();
     syncPause();
   };
   const openWallBoard = useCallback(() => {
@@ -88,10 +94,11 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     setBoardRequest(value => value + 1); syncPause();
   }, [engine, syncPause]);
   const [chat,setChat]=useState(''),[sending,setSending]=useState(false),[leaving,setLeaving]=useState(false),[resizing,setResizing]=useState(false),[newCapacity,setNewCapacity]=useState(snapshot.room.capacity);
-  const handleWallpaperOpen = (open: boolean) => { wallpaperOpen.current = open; modalRef.current = open||feedbackOpen.current||boardOpen.current||newsOpen.current||membersOpen||inviteOpen||panel==='settings'; syncPause(); };
+  const handleWallpaperOpen = (open: boolean) => { wallpaperOpen.current = open; syncModal(); syncPause(); };
+  const handleWeatherOpen = (open: boolean) => { weatherOpen.current = open; syncModal(); syncPause(); };
   const handleNewsOpen = (open: boolean) => {
     newsOpen.current = open;
-    modalRef.current = open||feedbackOpen.current||boardOpen.current||membersOpen||inviteOpen||panel==='settings';
+    syncModal();
     syncPause();
   };
   const [selectedCoworker,setSelectedCoworker]=useState<string|null>(null),[poking,setPoking]=useState(false),[pokeCooldown,setPokeCooldown]=useState(false);
@@ -109,7 +116,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     const response=await requestRoom<{snapshot:RoomSnapshot}>({action,code:session.code,token:session.token,...extra});apply(response.snapshot);return response.snapshot;
   },[session,apply]);
   const send=useCallback((command:Command)=>{
-    if(feedbackOpen.current||boardOpen.current||wallpaperOpen.current||newsOpen.current)return;
+    if(personalDialogOpen())return;
     audio.current?.start();
     if(command.type==='exit'||(command.type==='interact'&&engine.state.target==='exit'&&engine.state.ready)){leaveRef.current();return;}
     if(command.type==='attack'&&attackLock.current)return;
@@ -121,7 +128,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
       attackLock.current=true;
       void request('attack',{weapon:engine.state.weapon,player:controller.serializePlayer()}).catch(error=>setNotice(messageOf(error))).finally(()=>{attackLock.current=false;});
     }
-  },[engine,controller,request]);
+  },[engine,controller,request,personalDialogOpen]);
   useEffect(()=>{
     disposed.current=false;const sound=createOfficeAudio();audio.current=sound;
     return()=>{disposed.current=true;if(pokeTimer.current)clearTimeout(pokeTimer.current);sound.dispose();audio.current=null;};
@@ -162,6 +169,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
       if(cancelled||!host.current)return;
       scene.current=createMultiScene(host.current,{
         getWallpapers:()=>wallpapersRef.current,
+        getEnvironment:()=>environmentRef.current,
         getBoardEntries:()=>boardEntries.current,onBoard:openWallBoard,
         getState:()=>{const s=snapshotRef.current;return{layout:controller.layout,game:engine.state,seatIndex:controller.player.seatIndex,players:s.players.filter(p=>p.id!==session.playerId),serverNow:Date.now()-serverOffset.current,speeches:s.messages.filter(m=>s.serverTime-m.createdAt<9000).map(m=>({id:m.playerId,text:m.text,until:m.createdAt+9000+serverOffset.current}))};},
         onFrame:dt=>{
@@ -182,7 +190,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     const clear=()=>{keys.current.clear();controller.setAxis({x:0,z:0});};
     const visibility=syncPause;
     const down=(event:KeyboardEvent)=>{
-      if(feedbackOpen.current||boardOpen.current||wallpaperOpen.current||newsOpen.current||event.defaultPrevented)return;
+      if(personalDialogOpen()||event.defaultPrevented)return;
       if((event.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"],.chat-resize-handle')||event.ctrlKey||event.metaKey||event.altKey)return;
       const key=event.key.toLowerCase();
       if(key==='escape'){clear();setChatOpen(false);setMembersOpen(false);setInviteOpen(false);setPanel(null);setMonitorOpen(false);send({type:'cancel'});return;}
@@ -196,7 +204,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     const focused=(event:FocusEvent)=>{if((event.target as HTMLElement)?.closest('input,textarea,select,[role="dialog"],.chat-resize-handle'))clear();};
     window.addEventListener('keydown',down);window.addEventListener('keyup',up);window.addEventListener('blur',clear);document.addEventListener('visibilitychange',visibility);document.addEventListener('focusin',focused);
     return()=>{clear();window.removeEventListener('keydown',down);window.removeEventListener('keyup',up);window.removeEventListener('blur',clear);document.removeEventListener('visibilitychange',visibility);document.removeEventListener('focusin',focused);};
-  },[controller,engine,send,syncPause,openWallBoard]);
+  },[controller,engine,send,syncPause,openWallBoard,personalDialogOpen]);
   useEffect(()=>{if(chatOpen){setSeenMessage(latestMessage);chatEnd.current?.scrollIntoView({block:'nearest'});}},[latestMessage,chatOpen]);
   useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(''),5000);return()=>clearTimeout(timer);},[notice]);
   const poke=async(targetId:string)=>{
@@ -206,7 +214,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   };
   const copy=async(value:string,label:string)=>{try{await navigator.clipboard.writeText(value);setCopied(label);setTimeout(()=>setCopied(''),2000);}catch{setNotice('복사할 내용을 길게 누르거나 선택해 복사해 주세요.');setInviteOpen(true);}};
   const sendChat=async(event:React.FormEvent)=>{
-    event.preventDefault();if(!chat.trim()||sending)return;setSending(true);
+    event.preventDefault();if(weatherOpen.current||!chat.trim()||sending)return;setSending(true);
     try{await request('chat',{text:chat.trim()});setChat('');inputRef.current?.focus();}catch(error){setNotice(messageOf(error));}finally{setSending(false);}
   };
   const leave=async()=>{if(leaving)return;setLeaving(true);try{await requestRoom({action:'leave',code:session.code,token:session.token});clearRoomSession(session.code);onExit();}catch(error){if(isExpired(error)){clearRoomSession(session.code);onExit();}else{setNotice(messageOf(error));setLeaving(false);}}};
@@ -216,15 +224,15 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   const nearBoard=!roof&&!state.transition&&!state.seat&&isNearWallBoard(state.player,controller.layout.bounds);
   const coworker=snapshot.players.find(p=>p.id===selectedCoworker&&p.id!==session.playerId&&p.floor===state.floor);
   const invite=typeof location==='undefined'?'':roomInviteUrl(session.code,location.href);
-  return <main className={`multi-room office-app is-playing ${chatOpen?'chat-is-open':''} ${roof?'is-rooftop':''} ${state.transition?'is-travelling':''}`}>
+  return <main className={`multi-room office-app is-playing ${weather.frame.daylight < .35 ? 'is-weather-night' : ''} ${chatOpen?'chat-is-open':''} ${roof?'is-rooftop':''} ${state.transition?'is-travelling':''}`}>
     {nearBoard&&!modalRef.current&&!chatOpen&&!fatal&&!sceneError&&<button className="nearby-board" onClick={openWallBoard}>벽 게시판 보기<kbd>E</kbd></button>}
     <div ref={host} className="scene-host" aria-label={roof?'동료들과 쉬는 3D 옥상':'동료들과 함께 있는 3D 사무실'}/>
-    <header className="room-header"><div className="room-title"><Building2 size={24}/><div><h1>{snapshot.room.name}</h1><span><i className={connection==='live'?'live-dot':'connecting-dot'}/>{connection==='live'?'함께 근무 중':'다시 연결하는 중'}</span></div></div><div className="room-header-actions"><WorkClock/><FeedbackDialog context={{ mode: 'multi', floor: roof ? 'roof' : 'office' }} onOpenChange={handleFeedbackOpen} /><NotificationCenter items={snapshot.notifications??[]} onRead={throughId=>request('readNotifications',{throughId})}/><button className="icon-button" aria-label={state.settings.sound?'소리 끄기':'소리 켜기'} onClick={()=>send({type:'settings',value:{sound:!state.settings.sound}})}>{state.settings.sound?<Volume2 size={19}/>:<VolumeX size={19}/>}</button><button className="icon-button" aria-label="설정" onClick={()=>setPanel('settings')}><Settings2 size={19}/></button><button className="room-members-button" aria-label={`동료 ${snapshot.players.length}명, 정원 ${snapshot.room.capacity}명`} onClick={()=>{setMembersOpen(true);setNewCapacity(snapshot.room.capacity);}}><Users size={17}/>{snapshot.players.length}<span>/{snapshot.room.capacity}</span></button><button className="room-invite-button" aria-label="동료 초대" onClick={()=>setInviteOpen(true)}><Link size={16}/><span>동료 초대</span></button></div></header>
+    <header className="room-header"><div className="room-title"><Building2 size={24}/><div><h1>{snapshot.room.name}</h1><span><i className={connection==='live'?'live-dot':'connecting-dot'}/>{connection==='live'?'함께 근무 중':'다시 연결하는 중'}</span></div></div><div className="room-header-actions"><WorkClock/><WeatherControl weather={weather} onOpenChange={handleWeatherOpen}/><FeedbackDialog context={{ mode: 'multi', floor: roof ? 'roof' : 'office' }} onOpenChange={handleFeedbackOpen} /><NotificationCenter items={snapshot.notifications??[]} onRead={throughId=>request('readNotifications',{throughId})}/><button className="icon-button" aria-label={state.settings.sound?'소리 끄기':'소리 켜기'} onClick={()=>send({type:'settings',value:{sound:!state.settings.sound}})}>{state.settings.sound?<Volume2 size={19}/>:<VolumeX size={19}/>}</button><button className="icon-button" aria-label="설정" onClick={()=>setPanel('settings')}><Settings2 size={19}/></button><button className="room-members-button" aria-label={`동료 ${snapshot.players.length}명, 정원 ${snapshot.room.capacity}명`} onClick={()=>{setMembersOpen(true);setNewCapacity(snapshot.room.capacity);}}><Users size={17}/>{snapshot.players.length}<span>/{snapshot.room.capacity}</span></button><button className="room-invite-button" aria-label="동료 초대" onClick={()=>setInviteOpen(true)}><Link size={16}/><span>동료 초대</span></button></div></header>
     <div className="room-self"><span className="status-dot"/><strong>{employeeLabel(state.name,state.rank)}</strong><span>{roof?'옥상 · 잠깐, 숨 고르기':`${controller.player.seatIndex+1}번 자리 · 오늘도 적당히`}</span></div>
     {!ready&&!sceneError&&<div className="loading-status"><LoaderCircle className="loading-icon" size={18}/>회사를 준비하고 있어요</div>}
     {notice&&<div className="room-notice" role="status">{notice}</div>}
     <CameraControls disabled={!!state.transition} onZoom={delta=>scene.current?.zoom(delta)}/>
-    <OfficePlayControls wallpaperAction={<MonitorWallpaper image={personalWallpaper.image} session={session} syncStatus={personalWallpaper.status} onOpenChange={handleWallpaperOpen}/>} state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>{if(!leaving)void leave();}} onType={key=>audio.current?.typeKey(key)} showMonitor={monitorOpen&&!chatOpen} newsAction={<UpdateNews context={{mode:'multi',floor:roof?'roof':'office'}} autoOpenReady={ready && !wallpaperOpen.current && !sceneError && !fatal && !leaving && !membersOpen && !inviteOpen && !panel && !state.transition} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={employeeLabel(state.name,state.rank)} session={session} hostId={snapshot.room.hostId} openRequest={boardRequest} onEntriesChange={receiveBoard} onOpenChange={handleBoardOpen}/>} onMonitorClose={()=>setMonitorOpen(false)} extraActions={<button className="room-chat-toggle" aria-label="동료들과 대화" aria-expanded={chatOpen} onClick={()=>{setPanel(null);setChatOpen(v=>!v);}}><MessageCircle size={20}/><span>대화</span>{!chatOpen&&latestMessage>seenMessage&&<i/>}</button>}/>
+    <OfficePlayControls wallpaperAction={<MonitorWallpaper image={personalWallpaper.image} session={session} syncStatus={personalWallpaper.status} onOpenChange={handleWallpaperOpen}/>} state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>{if(!leaving)void leave();}} onType={key=>audio.current?.typeKey(key)} showMonitor={monitorOpen&&!chatOpen} newsAction={<UpdateNews context={{mode:'multi',floor:roof?'roof':'office'}} autoOpenReady={ready && !wallpaperOpen.current && !weatherOpen.current && !sceneError && !fatal && !leaving && !membersOpen && !inviteOpen && !panel && !state.transition} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={employeeLabel(state.name,state.rank)} session={session} hostId={snapshot.room.hostId} openRequest={boardRequest} onEntriesChange={receiveBoard} onOpenChange={handleBoardOpen}/>} onMonitorClose={()=>setMonitorOpen(false)} extraActions={<button className="room-chat-toggle" aria-label="동료들과 대화" aria-expanded={chatOpen} onClick={()=>{setPanel(null);setChatOpen(v=>!v);}}><MessageCircle size={20}/><span>대화</span>{!chatOpen&&latestMessage>seenMessage&&<i/>}</button>}/>
     {coworker&&!membersOpen&&!chatOpen&&!(state.seat==='desk'&&monitorOpen)&&<section className="coworker-poke-card" aria-label="선택한 동료"><AvatarPortrait avatar={coworker.avatar??'short'}/><div><strong>{employeeLabel(coworker.name,coworker.rank)}</strong><span>{coworker.seatIndex+1}번 자리 · 잠깐 불러볼까요?</span></div><button className="poke-button" disabled={poking||pokeCooldown} onClick={()=>void poke(coworker.id)}><Hand size={16}/>{poking?'보내는 중':pokeCooldown?'잠깐만요':'콕!'}</button><button className="poke-close" aria-label="동료 선택 닫기" onClick={()=>setSelectedCoworker(null)}><X size={16}/></button></section>}
     {chatOpen&&<ResizableChat><header><div><MessageCircle size={18}/><strong>우리 회사 수다</strong><span>{snapshot.players.length}명</span></div><button aria-label="대화창 닫기" onClick={()=>setChatOpen(false)}><X size={18}/></button></header><div className="chat-messages" role="log" aria-live="polite" aria-relevant="additions">{!snapshot.messages.length&&<div className="chat-empty"><Coffee size={27}/><strong>잠깐, 이야기할까요?</strong><span>첫 인사를 건네 보세요.<br/>대화는 캐릭터 위에도 나타나요.</span></div>}{snapshot.messages.map(m=><article key={m.id} className={m.playerId===session.playerId?'chat-message mine':'chat-message'}><div><strong>{m.name}</strong><time>{new Date(m.createdAt).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</time></div><p>{m.text}</p></article>)}<div ref={chatEnd}/></div><form onSubmit={sendChat}><textarea ref={inputRef} value={chat} maxLength={200} onChange={e=>setChat(e.target.value)} placeholder="동료들에게 한마디…" aria-label="대화 내용" rows={2} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();e.currentTarget.form?.requestSubmit();}}}/><div><small>{chat.length}/200 · Enter 전송</small><button type="submit" aria-label="대화 보내기" disabled={!chat.trim()||sending}>{sending?<LoaderCircle className="loading-icon" size={17}/>:<Send size={17}/>}</button></div></form></ResizableChat>}
     {panel==='settings'&&<div className="multi-modal-backdrop" onClick={()=>setPanel(null)}><section className="multi-modal" role="dialog" aria-modal="true" aria-label="내 취향대로" onClick={e=>e.stopPropagation()}><header><h2>내 취향대로</h2><button aria-label="설정 닫기" onClick={()=>setPanel(null)}><X size={20}/></button></header><CompanySettings profile={{name:state.name,rank:state.rank,avatar:state.player.avatar??'short'}} company={{roomName:snapshot.room.name,bossRank:state.bossRank,capacity:snapshot.room.capacity}} multiplayer canEditCompany={isHost} onProfile={value=>request('profile',value)} onCompany={value=>request('roomSettings',value)}/><label className="setting-row"><span><Volume2 size={18}/>공간 소리</span><input type="checkbox" checked={state.settings.sound} onChange={e=>send({type:'settings',value:{sound:e.target.checked}})}/></label><label className="setting-row"><span>소리 크기</span><input aria-label="소리 크기" type="range" min="0" max="1" step=".05" value={state.settings.volume} onChange={e=>send({type:'settings',value:{volume:+e.target.value}})}/></label><label className="setting-row"><span><Leaf size={18}/>움직임 줄이기</span><input type="checkbox" checked={state.settings.reducedMotion} onChange={e=>send({type:'settings',value:{reducedMotion:e.target.checked}})}/></label><label className="setting-row"><span>화면 품질</span><select value={state.settings.quality} onChange={e=>send({type:'settings',value:{quality:e.target.value as 'auto'|'low'|'high'}})}><option value="auto">자동</option><option value="low">가볍게</option><option value="high">선명하게</option></select></label><p>할 일과 출퇴근 시간, 주머니 속 간식은 이 브라우저에만 보관돼요. 동료에게는 움직임과 대화, 같은 방 게시판과 모니터 배경화면이 보여요.</p></section></div>}

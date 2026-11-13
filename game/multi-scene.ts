@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { createMonitorScreen } from './monitor-screen.ts';
 import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, mug, plant, plaque } from './models.ts';
 import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelectionForHit } from './scene.ts';
+import { createEnvironmentScene, createOfficeWeather } from './environment-scene.ts';
+import type { EnvironmentFrame } from './environment-types.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { ROOF_BOUNDS, isRoofTarget, roofWallForTarget } from './layout.ts';
 import { remoteAnimationState } from './multi-animation.ts';
@@ -25,6 +27,7 @@ export type MultiSceneState = {
 };
 export type MultiSceneCallbacks = {
   getState(): MultiSceneState;
+  getEnvironment?(): EnvironmentFrame;
   onFrame(dt: number): void;
   onGround(point: Point): void;
   onSeat(index: number): void;
@@ -37,7 +40,8 @@ export type MultiSceneCallbacks = {
   onError(message: string): void;
 };
 
-export function createMultiArchitecture(layout: MultiLayout) {
+export function createMultiArchitecture(layout: MultiLayout, enableWeather = false) {
+  const officeWeather = enableWeather ? createOfficeWeather() : undefined;
   const group = new THREE.Group(); group.name = 'shared-office';
   const { partition, furniture } = layout;
   const b = layout.bounds, w = b.maxX - b.minX, d = b.maxZ - b.minZ, cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
@@ -62,7 +66,10 @@ export function createMultiArchitecture(layout: MultiLayout) {
     const cap = box(group, wall.w + .02, .08, wall.d + .06, '#f8f5e8', wall.x, 2.94, wall.z); cap.userData.cutawaySide = wall.side;
   }
   for (let x = b.minX + 2; x < b.maxX - 1; x += 3.1) {
-    const window = box(group, 2.3, 1.32, .035, '#a8c5cc', x, 1.95, b.minZ + .018, .01); window.userData.cutawaySide = 'north';
+    if (officeWeather) officeWeather.addWindow(group, x, 1.95, b.minZ + .03, 2.3, 1.32);
+    else {
+      const window = box(group, 2.3, 1.32, .035, '#a8c5cc', x, 1.95, b.minZ + .018, .01); window.userData.cutawaySide = 'north';
+    }
     const sill = box(group, 2.4, .08, .18, '#f5f4e8', x, 1.28, b.minZ + .07); sill.userData.cutawaySide = 'north';
     const divider = box(group, .05, 1.35, .05, '#f5f4e8', x, 1.95, b.minZ + .05); divider.userData.cutawaySide = 'north';
   }
@@ -134,13 +141,13 @@ export function createMultiArchitecture(layout: MultiLayout) {
         for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
           const texture = (material as THREE.MeshStandardMaterial).map;
           if (texture) { textures.add(texture); disposed.add(material); }
-          if (object.userData.cutawaySide) disposed.add(material);
+          if (object.userData.cutawaySide || object.userData.uniqueMaterial) disposed.add(material);
         }
       }
     });
     textures.forEach(texture => texture.dispose()); disposed.forEach(material => material.dispose()); group.removeFromParent();
   };
-  return { group, cutaways, release, chairs, monitors };
+  return { group, cutaways, release, chairs, monitors, officeWeather };
 }
 
 export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbacks): OfficeScene {
@@ -162,9 +169,10 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const actorGroup = new THREE.Group(); world.add(actorGroup);
   const rigs = new Map<string, { rig: ReturnType<typeof createActor>; shown: Actor; floor: GameState['floor'] }>();
   const retired: THREE.Object3D[] = [], bubbles = new Map<string, HTMLDivElement>();
-  const initial = callbacks.getState(); let architecture = createMultiArchitecture(initial.layout); world.add(architecture.group);
+  const initial = callbacks.getState(); let architecture = createMultiArchitecture(initial.layout, !!callbacks.getEnvironment); world.add(architecture.group);
   const wallBoard = createWallBoard(architecture.group, initial.layout.bounds);
-  const roof = createRooftop(world), roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
+  const roof = createRooftop(world, !!callbacks.getEnvironment), roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
+  const weather = callbacks.getEnvironment ? createEnvironmentScene(world, roof, ambient, sun, officeColor, roofColor) : undefined;
   let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, userOrbit = 0, desiredOrbit = 0, pitch = CAMERA_BASE_PITCH, desiredPitch = CAMERA_BASE_PITCH, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastQuality = '', lastFloor = initial.game.floor;
   const b = initial.layout.bounds, focus = new THREE.Vector3((b.minX + b.maxX) / 2, .65, (b.minZ + b.maxZ) / 2), desiredFocus = focus.clone();
   const rotatedOffset = new THREE.Vector3(), projection = new THREE.Vector3();
@@ -239,10 +247,16 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     const dt = lastTime ? Math.min(.06, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
     if (document.hidden) return;
     callbacks.onFrame(dt); const state = callbacks.getState(), game = state.game, settings = game.settings, onRoof = game.floor === 'rooftop'; elapsed += dt;
-    if (capacity !== state.layout.capacity) { wallBoard.root.removeFromParent(); architecture.release(); architecture = createMultiArchitecture(state.layout); architecture.group.add(wallBoard.root); wallBoard.setBounds(state.layout.bounds); world.add(architecture.group); capacity = state.layout.capacity; }
+    if (capacity !== state.layout.capacity) { wallBoard.root.removeFromParent(); architecture.release(); architecture = createMultiArchitecture(state.layout, !!callbacks.getEnvironment); architecture.group.add(wallBoard.root); wallBoard.setBounds(state.layout.bounds); world.add(architecture.group); capacity = state.layout.capacity; }
     wallBoard.update(callbacks.getBoardEntries?.());
     architecture.group.visible = !onRoof; roof.visible = onRoof;
-    (world.background as THREE.Color).copy(onRoof ? roofColor : officeColor); ambient.color.set(onRoof ? '#fff0d5' : '#fff8e7');
+    if (weather) {
+      const environment = callbacks.getEnvironment?.();
+      weather.update(environment, onRoof, settings, dt);
+      if (!onRoof && environment) architecture.officeWeather?.update(environment);
+    } else {
+      (world.background as THREE.Color).copy(onRoof ? roofColor : officeColor); ambient.color.set(onRoof ? '#fff0d5' : '#fff8e7');
+    }
     const quality = `${settings.quality}/${devicePixelRatio}`;
     if (quality !== lastQuality) { renderer.setPixelRatio(Math.min(devicePixelRatio || 1, settings.quality === 'low' ? 1 : settings.quality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = settings.quality !== 'low'; resize(); lastQuality = quality; }
     userOrbit = smoothCameraAngle(userOrbit, desiredOrbit, dt, settings.reducedMotion);
@@ -311,7 +325,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   try { render(performance.now()); callbacks.onReady(); } catch (error) { callbacks.onError(error instanceof Error ? error.message : '회사를 불러오지 못했어요.'); }
   return { zoom, rotate, tilt, resetView, screenToWorld: point => screenAxisToWorld(point, orbit), dispose() {
     dead = true; cancelAnimationFrame(frame); observer.disconnect();
-    wallBoard.dispose();
+    weather?.dispose(); wallBoard.dispose();
     renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', pointerCancel);
     architecture.release(); retired.forEach(object => world.add(object)); rigs.forEach(({ rig }) => { if (!rig.root.parent) world.add(rig.root); });
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();

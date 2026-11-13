@@ -1,0 +1,204 @@
+.weather-trigger {
+  flex-shrink: 0;
+}
+
+/* These labels sit directly over the scene, unlike the light action cards. */
+.is-weather-night :is(.brand h1, .brand p, .brand-dot, .room-title h1, .room-title > div > span, .room-self, .room-self strong, .room-self > span, .employee-card, .employee-card strong, .bottom-meta, .bottom-meta button, .office-caption) {
+  color: #fffbed;
+  text-shadow: 0 1px 4px #152735, 0 1px 12px #152735;
+}
+
+.is-weather-night .rooftop-note {
+  padding: 15px 18px;
+  border-radius: 16px;
+  background: #203447d9;
+  backdrop-filter: blur(5px);
+}
+
+.is-weather-night .rooftop-note :is(span, strong, p) {
+  color: #f8f2dc;
+}
+
+.weather-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: #263d346b;
+  backdrop-filter: blur(4px);
+}
+
+.weather-dialog {
+  position: fixed;
+  z-index: 501;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(410px, calc(100% - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(16px, 4vw, 25px);
+  border: 1px solid white;
+  border-radius: 22px;
+  background: #fffdf5;
+  color: #314e43;
+  box-shadow: 0 24px 80px #213b2b40;
+}
+
+.weather-dialog header,
+.weather-dialog footer,
+.weather-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.weather-dialog h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.weather-dialog header .icon-button {
+  width: 34px;
+  height: 34px;
+}
+
+.weather-time {
+  margin: 5px 0 16px;
+  font-size: 13px;
+}
+
+.weather-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 13px;
+  background: #edf2e5;
+}
+
+.weather-summary > svg {
+  flex: none;
+  color: #658466;
+}
+
+.weather-summary strong,
+.weather-summary span {
+  display: block;
+}
+
+.weather-summary span {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.weather-sun {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.weather-sun > div,
+.weather-sun dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.weather-sun dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-note {
+  margin: 8px 0;
+  color: #526a58;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.weather-settings {
+  align-items: end;
+  margin-top: 18px;
+}
+
+.weather-settings label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.weather-settings select,
+.weather-action {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid #d6e0d2;
+  border-radius: 9px;
+  background: #f5f7ee;
+  color: inherit;
+}
+
+.weather-settings select {
+  width: 100%;
+  font-size: 16px;
+}
+
+.weather-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 12px;
+}
+
+.weather-dialog footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e8d9;
+}
+
+.weather-dialog a {
+  color: #456b56;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.weather-error {
+  margin: 8px 0;
+  color: #8a4535;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.weather-dialog :focus-visible,
+.weather-trigger:focus-visible {
+  outline: 2px solid #446f56;
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .app-header:has(.weather-trigger) .brand,
+  .app-header:has(.weather-trigger) .brand > div {
+    min-width: 0;
+  }
+
+  .app-header:has(.weather-trigger) .brand h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-header:has(.weather-trigger) .brand-mark,
+  .app-header:has(.weather-trigger) .header-tools {
+    flex-shrink: 0;
+  }
+
+  .room-header:has(.weather-trigger) .room-title > div {
+    width: 100%;
+  }
+}

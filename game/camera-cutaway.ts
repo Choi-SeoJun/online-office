@@ -24,7 +24,7 @@ export function prepareCameraCutaways(group: THREE.Group, detectOfficeWalls = fa
     // remain owned by the model cache and are disposed with the complete scene.
     if (object.userData.cutawaySide && original.transparent) original.dispose();
     object.userData.dynamic = true;
-    surfaces.push({mesh:object,side,material:mat,castShadow:true,receiveShadow:true});
+    surfaces.push({mesh:object,side,material:mat,castShadow:!object.userData.weatherWindow,receiveShadow:!object.userData.weatherWindow});
   });
   return (offset: Point) => {
     for (const {mesh,side,material,castShadow,receiveShadow} of surfaces) {

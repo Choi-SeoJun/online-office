@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } from './layout.ts';
 import type { Floor, OfficeScene, Point, SceneCallbacks, TargetId } from './types.ts';
 import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere } from './models.ts';
+import { createEnvironmentScene, createOfficeWeather } from './environment-scene.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotation, clampCameraPitch, setCameraOffset, smoothCameraPitch, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
@@ -96,12 +97,16 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   box(room, .16, 3.35, 12.15, '#d9dfd1', -9.08, 1.65, 0);
   box(room, 18.2, .17, .10, '#a7b5a6', 0, .15, -5.95); box(room, .10, .17, 12, '#a7b5a6', -8.96, .15);
   box(room, 18.2, .10, .23, '#f8f2df', 0, 3.31, -6.08); box(room, .23, .10, 12.1, '#f8f2df', -9.08, 3.31);
-  // Windows: clear daylight, blue glass, wood sills and distant skyline silhouettes.
+  const officeWeather = callbacks.getEnvironment ? createOfficeWeather() : undefined;
+  // The window views sit behind the mullions and above the wooden sills.
   for (const x of [-3.1, .65, 6.35]) {
     box(room, 2.75, 1.73, .07, '#f6f1df', x, 2.18, -5.94);
-    box(room, 2.52, 1.50, .04, '#a9c9cf', x, 2.18, -5.89, .005);
-    box(room, 2.53, .55, .015, '#c6ddd8', x, 1.74, -5.86, .002);
-    for (let i = 0; i < 8; i++) box(room, .18 + (i % 3) * .06, .17 + (i % 4) * .09, .013, i % 2 ? '#91b0b4' : '#a0bbbd', x - 1.04 + i * .30, 1.68 + (i % 4) * .045, -5.84, 0);
+    if (officeWeather) officeWeather.addWindow(room, x, 2.18, -5.875, 2.52, 1.50);
+    else {
+      box(room, 2.52, 1.50, .04, '#a9c9cf', x, 2.18, -5.89, .005);
+      box(room, 2.53, .55, .015, '#c6ddd8', x, 1.74, -5.86, .002);
+      for (let i = 0; i < 8; i++) box(room, .18 + (i % 3) * .06, .17 + (i % 4) * .09, .013, i % 2 ? '#91b0b4' : '#a0bbbd', x - 1.04 + i * .30, 1.68 + (i % 4) * .045, -5.84, 0);
+    }
     box(room, .055, 1.53, .07, '#f9f7e8', x, 2.18, -5.81); box(room, 2.75, .09, .25, '#d9c29a', x, 1.31, -5.83);
     for (let i = 0; i < 4; i++) box(room, 2.71, .022, .05, '#d9dfcf', x, 2.78 + i * .055, -5.76, 0);
   }
@@ -173,12 +178,12 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const succ = plant(desks[5].group, 1.01, .30, .22); succ.position.y = 1.14;
   plaque(desks[5].group, '내 자리', .43, .14, .71, 1.25, .53, '#5c8372');
   // Subtle sunlight rectangles on the carpet.
-  for (let i = 0; i < 3; i++) { const ray = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 3.6), new THREE.MeshBasicMaterial({ color: '#fff0bb', transparent: true, opacity: .10, depthWrite: false })); ray.rotation.x = -Math.PI / 2; ray.rotation.z = -.2; ray.position.set(-2.8 + i * 3.7, .049, -3.3); room.add(ray); }
+  if (!officeWeather) for (let i = 0; i < 3; i++) { const ray = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 3.6), new THREE.MeshBasicMaterial({ color: '#fff0bb', transparent: true, opacity: .10, depthWrite: false })); ray.rotation.x = -Math.PI / 2; ray.rotation.z = -.2; ray.position.set(-2.8 + i * 3.7, .049, -3.3); room.add(ray); }
   // Batch the immutable architecture and props by material and interaction tag.
   // This keeps the richly furnished room to a small number of GPU draw calls.
   const officeCutaways = prepareCameraCutaways(room, true); batchArchitecture(room);
   const wallBoard = createWallBoard(room, BOUNDS, -9);
-  const roof = createRooftop(scene); const roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
+  const roof = createRooftop(scene, !!callbacks.getEnvironment); const roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
   const state = callbacks.getState();
   const actors = new Map<string, ReturnType<typeof createActor>>();
   const playerGroup = new THREE.Group(); scene.add(playerGroup);
@@ -192,6 +197,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   let width = 1, height = 1, zoomLevel = 1, lastQuality = '', dead = false, graphicsLost = false, frame = 0, lastTime = 0, visible = !document.hidden, orbit = 0, userOrbit = 0, targetOrbit = 0, pitch = CAMERA_BASE_PITCH, targetPitch = CAMERA_BASE_PITCH;
   let lastFloor = state.floor;
   const officeColor = new THREE.Color('#e6e5dc'), roofColor = new THREE.Color('#e6d6bf');
+  const weather = callbacks.getEnvironment ? createEnvironmentScene(scene, roof, ambient, sunlight, officeColor, roofColor, fill) : undefined;
   const focus = new THREE.Vector3(0, .5, 0); const desired = new THREE.Vector3(); const rotatedOffset = new THREE.Vector3();
   const updateCamera = () => {
     const aspect = width / height; const mobile = aspect < .9;
@@ -235,9 +241,15 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     ownMonitor.set(callbacks.getWallpaper?.() ?? null);
     wallBoard.update(callbacks.getBoardEntries?.());
     const onRoof = s.floor === 'rooftop'; room.visible = !onRoof; roof.visible = onRoof;
-    const background = onRoof ? roofColor : officeColor;
-    (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);
-    ambient.color.set(onRoof ? '#fff0d5' : '#f5f5e7');
+    if (weather) {
+      const environment = callbacks.getEnvironment?.();
+      weather.update(environment, onRoof, s.settings, dt);
+      if (!onRoof && environment) officeWeather?.update(environment);
+    } else {
+      const background = onRoof ? roofColor : officeColor;
+      (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);
+      ambient.color.set(onRoof ? '#fff0d5' : '#f5f5e7');
+    }
     userOrbit = smoothCameraAngle(userOrbit, targetOrbit, dt, s.settings.reducedMotion); orbit = userOrbit + transitionOrbit(s.transition, s.settings.reducedMotion); pitch = smoothCameraPitch(pitch, targetPitch, dt, s.settings.reducedMotion);
     if (lastQuality !== s.settings.quality) { lastQuality = s.settings.quality; renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lastQuality === 'low' ? 1 : lastQuality === 'high' ? 2 : 1.5)); renderer.shadowMap.enabled = lastQuality !== 'low'; sunlight.shadow.mapSize.set(lastQuality === 'high' ? 2048 : 1024, lastQuality === 'high' ? 2048 : 1024); renderer.shadowMap.needsUpdate = true; resize(); }
     const mobile = width / height < .9;
@@ -259,7 +271,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     zoom, rotate, tilt, resetView, screenToWorld:axis=>screenAxisToWorld(axis,orbit),
     dispose() {
       dead = true; cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener('visibilitychange', visibility);
-      wallBoard.dispose(); ownMonitor.dispose();
+      weather?.dispose(); wallBoard.dispose(); ownMonitor.dispose();
       renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
       const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
       scene.traverse(object => { if (object instanceof THREE.InstancedMesh) object.dispose(); if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); const ms = Array.isArray(object.material) ? object.material : [object.material]; ms.forEach(m => { materials.add(m); const map = (m as THREE.MeshStandardMaterial).map; if (map) textures.add(map); }); } });

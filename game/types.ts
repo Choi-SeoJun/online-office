@@ -48,6 +48,7 @@ export interface GameEngine {
   dispose(): void;
 }
 export interface SceneCallbacks {
+  getEnvironment?(): import('./environment-types.ts').EnvironmentFrame;
   getWallpaper?: () => string | null;
   getBoardEntries?: () => BoardEntry[]; onBoard?: () => void;
   getState(): GameState; onFrame(dt: number): void; onGround(point: Point): void;
