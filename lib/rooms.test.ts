@@ -45,12 +45,12 @@ test('room admission persists personal ranks and one shared boss rank without ch
   assert.equal(created.status, 201);
   const host = created.body as { session: RoomSession; snapshot: RoomSnapshot };
   assert.equal(host.snapshot.players[0].name, '서준'); assert.equal(host.snapshot.players[0].rank, '대리');
-  assert.equal(host.snapshot.room.bossRank, '상무'); assert.equal(host.snapshot.boss.actor.name, '박상무'); assert.equal(host.snapshot.boss.actor.rank, '상무');
+  assert.equal(host.snapshot.room.bossRank, '상무'); assert.equal(host.snapshot.boss.actor.name, '상무님'); assert.equal(host.snapshot.boss.actor.rank, '상무');
   const joined = await f.send({ action: 'join', code: host.session.code, name: '김사원', rank: '과장', bossRank: '사장' });
   assert.equal(joined.status, 201);
   const guest = joined.body as { session: RoomSession; snapshot: RoomSnapshot };
   assert.equal(guest.snapshot.players.find(p => p.id === guest.session.playerId)!.rank, '과장');
-  assert.equal(guest.snapshot.room.bossRank, '상무'); assert.equal(guest.snapshot.boss.actor.name, '박상무');
+  assert.equal(guest.snapshot.room.bossRank, '상무'); assert.equal(guest.snapshot.boss.actor.name, '상무님');
   const restored = await f.send({ action: 'sync', ...host.session, player: { ...host.snapshot.players[0], name: '위조', rank: '사장' } });
   assert.equal(restored.status, 200);
   const state = (restored.body as { snapshot: RoomSnapshot }).snapshot;
@@ -67,7 +67,7 @@ test('room admission persists personal ranks and one shared boss rank without ch
 test('legacy admission defaults ranks and unsupported rank choices are rejected', async () => {
   const f = fixture(), host = await f.create();
   assert.equal(host.snapshot.players[0].rank, '사원'); assert.equal(host.snapshot.room.bossRank, '부장');
-  assert.equal(host.snapshot.boss.actor.name, '박부장');
+  assert.equal(host.snapshot.boss.actor.name, '부장님');
   for (const value of ['회장', '', null, 1]) {
     assert.equal((await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, rank: value })).status, 400);
     assert.equal((await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, bossRank: value })).status, 400);
@@ -97,11 +97,11 @@ test('shared boss identity is authoritative while host work poses remain valid',
     const response = await f.send({ action: 'sync', ...host.session, boss });
     assert.equal(response.status, 200);
     const shared = (response.body as { snapshot: RoomSnapshot }).snapshot.boss.actor;
-    assert.equal(shared.name, '박이사'); assert.equal(shared.rank, '이사'); assert.equal(shared.pose, pose);
+    assert.equal(shared.name, '이사님'); assert.equal(shared.rank, '이사'); assert.equal(shared.pose, pose);
     f.advance(300);
   }
   const stored = JSON.parse(String(f.sql.prepare('SELECT boss_state FROM office_rooms').get()!.boss_state));
-  assert.equal(stored.actor.name, '박이사'); assert.equal(stored.actor.rank, '이사');
+  assert.equal(stored.actor.name, '이사님'); assert.equal(stored.actor.rank, '이사');
 });
 
 test('concurrent lounge occupancy admits one member and rejects the other atomically', async () => {
@@ -181,7 +181,7 @@ test('persisted obstructed actors recover without changing valid coworkers or me
   const guestBefore = guest.snapshot.players.find(p => p.id === guest.session.playerId)!;
   f.sql.prepare("UPDATE office_members SET x = 5.2, z = -6.1, pose = 'brew', moving = 1, visual = ? WHERE id = ?")
     .run(JSON.stringify({ activity: { kind: 'brew', duration: 3, remaining: 2 }, carryingCoffee: true }), host.session.playerId);
-  const boss = { actor: { id: 'boss', name: '박부장', x: 5.2, z: -6.1, angle: 1, pose: 'walk', moving: true }, phase: 'watch', updatedAt: 500 };
+  const boss = { actor: { id: 'boss', name: '부장님', x: 5.2, z: -6.1, angle: 1, pose: 'walk', moving: true }, phase: 'watch', updatedAt: 500 };
   f.sql.prepare('UPDATE office_rooms SET boss_state = ? WHERE code = ?').run(JSON.stringify(boss), host.session.code);
   const response = await f.send({ action: 'chat', ...host.session, text: '배치가 달라도 대화는 그대로' });
   assert.equal(response.status, 200);
@@ -244,7 +244,7 @@ test('shared office keeps full rooftop and pantry visual state without private i
   const f=fixture(),host=await f.create();
   const own=host.snapshot.players[0];
   assert.equal(own.floor,'office');
-  assert.equal(host.snapshot.boss.actor.name,'박부장');
+  assert.equal(host.snapshot.boss.actor.name,'부장님');
   const roof={...own,...ROOF_REST.bench.seat,floor:'rooftop',pose:'sit',seat:'roof-bench',roofRest:'bench',candyInMouth:true,elapsed:12,inventory:{coffee:3,cookie:6},todos:['비밀 업무']};
   const result=await f.send({action:'sync',...host.session,player:roof});
   assert.equal(result.status,200);
@@ -291,7 +291,7 @@ test('boss is host-owned but every nearby office member can trigger one shared r
   const updated=await f.send({action:'sync',...host.session,boss:{actor:{...actor,name:'위조',id:'other'},phase:'routine'}});
   assert.equal(updated.status,200);
   const authoritative=(updated.body as {snapshot:RoomSnapshot}).snapshot.boss;
-  assert.equal(authoritative.actor.id,'boss');assert.equal(authoritative.actor.name,'박부장');assert.equal(authoritative.actor.x,actor.x);
+  assert.equal(authoritative.actor.id,'boss');assert.equal(authoritative.actor.name,'부장님');assert.equal(authoritative.actor.x,actor.x);
   const self=guest.snapshot.players.find(p=>p.id===guest.session.playerId)!;
   const attack={action:'attack',...guest.session,weapon:'hammer',player:{...self,x:actor.x,z:actor.z+1.4}};
   const hit=await f.send(attack);assert.equal(hit.status,200);
@@ -660,4 +660,76 @@ test('chat also renews membership before assigning a disconnected host role', as
   const response = await f.send({ action: 'chat', ...active.session, text: '누구 계세요?' });
   assert.equal(response.status, 200);
   assert.equal((response.body as { snapshot: RoomSnapshot }).snapshot.room.hostId, active.session.playerId);
+});
+
+test('personal profile changes preserve room membership, position and visible activity on restore', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '이전' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const before = f.sql.prepare('SELECT * FROM office_members WHERE id = ?').get(guest.session.playerId)!;
+  const response = await f.send({ action: 'profile', ...guest.session, name: '새이름', rank: '팀장', avatar: 'ponytail' });
+  assert.equal(response.status, 200);
+  const after = f.sql.prepare('SELECT * FROM office_members WHERE id = ?').get(guest.session.playerId)!;
+  for (const key of ['id', 'token_hash', 'seat_index', 'x', 'z', 'angle', 'pose', 'moving', 'floor', 'visual', 'joined_at']) assert.equal(after[key], before[key], key);
+  const restored = await f.send({ action: 'sync', ...guest.session });
+  assert.equal(restored.status, 200);
+  const self = (restored.body as { snapshot: RoomSnapshot }).snapshot.players.find(p => p.id === guest.session.playerId)!;
+  assert.equal(self.name, '새이름'); assert.equal(self.rank, '팀장'); assert.equal(self.avatar, 'ponytail');
+  for (const invalid of [{ name: '' }, { name: '가'.repeat(11) }, { rank: '왕' }, { avatar: 'unknown' }]) {
+    assert.equal((await f.send({ action: 'profile', ...guest.session, name: '새이름', rank: '팀장', avatar: 'ponytail', ...invalid })).status, 400);
+  }
+});
+
+test('only the current host may change shared settings and occupied capacity failures are atomic', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '동료' })).body as { session: RoomSession };
+  const settings = { roomName: '변경 회사', bossRank: '대표', capacity: 3 };
+  assert.equal((await f.send({ action: 'roomSettings', ...guest.session, ...settings })).status, 403);
+  const changed = await f.send({ action: 'roomSettings', ...host.session, ...settings });
+  assert.equal(changed.status, 200);
+  const snapshot = (changed.body as { snapshot: RoomSnapshot }).snapshot;
+  assert.equal(snapshot.room.name, '변경 회사'); assert.equal(snapshot.room.capacity, 3); assert.equal(snapshot.boss.actor.name, '대표님');
+  await f.send({ action: 'join', code: host.session.code, name: '셋째' });
+  assert.equal((await f.send({ action: 'roomSettings', ...host.session, roomName: '실패 회사', bossRank: '인턴', capacity: 2 })).status, 409);
+  const room = f.sql.prepare('SELECT name, boss_rank, capacity FROM office_rooms').get()!;
+  assert.deepEqual({ ...room }, { name: '변경 회사', boss_rank: '대표', capacity: 3 });
+  const restored = (await f.send({ action: 'sync', ...host.session })).body as { snapshot: RoomSnapshot };
+  assert.equal(restored.snapshot.room.name, '변경 회사'); assert.equal(restored.snapshot.room.bossRank, '대표');
+});
+
+test('a host who loses authority while a settings request awaits D1 cannot mutate shared state', async () => {
+  const f = fixture(), host = await f.create();
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '다음방장' })).body as { session: RoomSession };
+  const before = f.sql.prepare('SELECT * FROM office_rooms').get()!;
+  f.beforeNextBatch('UPDATE office_rooms SET capacity', async () => {
+    f.sql.prepare('UPDATE office_rooms SET host_id = ?').run(guest.session.playerId);
+  });
+  const result = await f.send({ action: 'roomSettings', ...host.session, roomName: '권한없음', bossRank: '대표', capacity: 6 });
+  assert.equal(result.status, 403);
+  const after = f.sql.prepare('SELECT * FROM office_rooms').get()!;
+  for (const key of ['name', 'capacity', 'boss_rank', 'boss_state']) assert.equal(after[key], before[key]);
+});
+
+test('a seat filled while shared settings await D1 prevents every shared-field change', async () => {
+  const f = fixture(), host = await f.create(4);
+  await f.send({ action: 'join', code: host.session.code, name: '둘째' });
+  f.beforeNextBatch('UPDATE office_rooms SET capacity', async () => {
+    assert.equal((await f.send({ action: 'join', code: host.session.code, name: '셋째' })).status, 201);
+  });
+  const resized = await f.send({ action: 'roomSettings', ...host.session, roomName: '실패 변경', bossRank: '대표', capacity: 2 });
+  assert.equal(resized.status, 409);
+  const room = f.sql.prepare('SELECT name, boss_rank, capacity FROM office_rooms').get()!;
+  assert.deepEqual({ ...room }, { name: '우리 회사', boss_rank: '부장', capacity: 4 });
+  assert.equal(f.sql.prepare('SELECT COUNT(*) AS count FROM office_members').get()!.count, 3);
+});
+
+test('profile changes preserve rooftop rest and carried coffee', async () => {
+  const f = fixture(), host = await f.create();
+  const roof = { ...host.snapshot.players[0], ...ROOF_BENCH_SEATS[1].seat, angle: ROOF_BENCH_SEATS[1].angle, floor: 'rooftop', pose: 'sit',
+    seat: 'roof-bench', restSeatId: ROOF_BENCH_SEATS[1].id, roofRest: 'bench', candyInMouth: true, carryingCoffee: true };
+  assert.equal((await f.send({ action: 'sync', ...host.session, player: roof })).status, 200);
+  const updated = await f.send({ action: 'profile', ...host.session, name: '나', rank: '인턴', avatar: 'ponytail' });
+  assert.equal(updated.status, 200);
+  const self = (updated.body as { snapshot: RoomSnapshot }).snapshot.players[0];
+  assert.equal(self.name, '나'); assert.equal(self.rank, '인턴');
+  for (const key of ['x', 'z', 'angle', 'pose', 'floor', 'seat', 'restSeatId', 'roofRest', 'candyInMouth', 'carryingCoffee'] as const) assert.equal(self[key], roof[key], key);
 });

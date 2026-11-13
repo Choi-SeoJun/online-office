@@ -1,11 +1,12 @@
-import { BOARD_MAX_ENTRIES, boardRecord, parseBoardDraft, validBoardId, type BoardEntry, type BoardDraft } from '../game/board-types.ts';
+import { BOARD_MAX_ENTRIES, boardRecord, parseBoardDraft, parseBoardPlacement, validBoardId, type BoardEntry, type BoardDraft } from '../game/board-types.ts';
+import { getBoardPlacement } from '../game/board-render.ts';
 import { hashRoomToken, ROOM_SEAT_LEASE_MS, type RoomDatabase } from './rooms.ts';
 
 export const BOARD_CREATE_INTERVAL_MS = 1500;
 type BoardResult = { status: number; body: { entries: BoardEntry[] } | { error: string; code: string } };
 type BoardRow = {
   id: string; kind: BoardDraft['kind']; color: BoardDraft['color']; text: string; strokes: string;
-  author_id: string; author_name: string; created_at: number;
+  author_id: string; author_name: string; created_at: number; placement: string | null;
 };
 type RoomAccess = { expires_at: number; member_id: string | null };
 const error = (status: number, code: string, message: string): BoardResult => ({ status, body: { code, error: message } });
@@ -22,11 +23,12 @@ export async function handleBoardAction(db: RoomDatabase, raw: unknown, now = Da
   const code = input.code.trim().toUpperCase();
   if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code)) return invalid();
   const { action, token } = input;
-  if (action !== 'list' && action !== 'create' && action !== 'delete') return invalid();
+  if (action !== 'list' && action !== 'create' && action !== 'delete' && action !== 'move') return invalid();
   if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return noSession();
   const draft = action === 'create' ? parseBoardDraft(input.draft) : null;
   const id = draft?.id ?? input.id;
-  if ((action === 'create' && !draft) || (action === 'delete' && !validBoardId(id))) return invalid();
+  const placement = action === 'move' ? parseBoardPlacement(input.placement) : null;
+  if ((action === 'create' && !draft) || ((action === 'delete' || action === 'move') && !validBoardId(id)) || (action === 'move' && !placement)) return invalid();
 
   const tokenHash = await hashRoomToken(token);
   const accessParams = [code, tokenHash, now - ROOM_SEAT_LEASE_MS, now] as const;
@@ -38,17 +40,28 @@ export async function handleBoardAction(db: RoomDatabase, raw: unknown, now = Da
     // D1 serializes these statements as one transaction. The cap, duplicate ID,
     // current membership and write cooldown are evaluated before each insert.
     statements.push(db.prepare(`WITH member AS (${activeMember})
-      INSERT INTO office_board_entries (room_code, id, author_id, author_name, kind, color, text, strokes, created_at)
-      SELECT ?, ?, member.id, member.name, ?, ?, ?, ?, ? FROM member
+      INSERT INTO office_board_entries (room_code, id, author_id, author_name, kind, color, text, strokes, created_at, placement)
+      SELECT ?, ?, member.id, member.name, ?, ?, ?, ?, ?, ? FROM member
       WHERE (SELECT COUNT(*) FROM office_board_entries WHERE room_code = ?) < ?
         AND NOT EXISTS (SELECT 1 FROM office_rate_limits WHERE key = 'board:' || member.id AND resets_at > ?)
       ON CONFLICT (room_code, id) DO NOTHING
-      RETURNING id`).bind(...accessParams, code, draft.id, draft.kind, draft.color, draft.text, JSON.stringify(draft.strokes), now, code, BOARD_MAX_ENTRIES, now));
+      RETURNING id`).bind(...accessParams, code, draft.id, draft.kind, draft.color, draft.text, JSON.stringify(draft.strokes), now, draft.placement ? JSON.stringify(draft.placement) : null, code, BOARD_MAX_ENTRIES, now));
     statements.push(db.prepare(`WITH member AS (${activeMember})
       INSERT INTO office_rate_limits (key, hits, resets_at)
       SELECT 'board:' || member.id, 1, ? FROM member
       WHERE EXISTS (SELECT 1 FROM office_board_entries WHERE room_code = ? AND id = ? AND author_id = member.id AND created_at = ?)
       ON CONFLICT (key) DO UPDATE SET resets_at = excluded.resets_at`).bind(...accessParams, now + BOARD_CREATE_INTERVAL_MS, code, draft.id, now));
+  }
+  if (action === 'move' && placement && validBoardId(id)) {
+    const fallback = getBoardPlacement({ id, kind: 'note' });
+    statements.push(db.prepare(`WITH member AS (${activeMember})
+      UPDATE office_board_entries SET placement = ? WHERE room_code = ? AND id = ?
+      AND EXISTS (SELECT 1 FROM member)
+      AND ABS(COALESCE(json_extract(placement, '$.width'), ?) - ?) < 0.0000000001
+      AND ABS(COALESCE(json_extract(placement, '$.height'), ?) - ?) < 0.0000000001
+      AND NOT (kind = 'doodle' AND COALESCE(json_extract(placement, '$.width'), 0) = 1
+        AND COALESCE(json_extract(placement, '$.height'), 0) = 1)
+      RETURNING id`).bind(...accessParams, JSON.stringify(placement), code, id, fallback.width, placement.width, fallback.height, placement.height));
   }
   if (action === 'delete' && validBoardId(id)) {
     statements.push(db.prepare(`WITH member AS (${activeMember})
@@ -57,7 +70,7 @@ export async function handleBoardAction(db: RoomDatabase, raw: unknown, now = Da
       RETURNING id`).bind(...accessParams, code, id));
   }
   statements.push(db.prepare(`WITH member AS (${activeMember})
-    SELECT id, author_id, author_name, kind, color, text, strokes, created_at FROM office_board_entries
+    SELECT id, author_id, author_name, kind, color, text, strokes, created_at, placement FROM office_board_entries
     WHERE room_code = ? AND EXISTS (SELECT 1 FROM member)
     ORDER BY created_at DESC, id DESC LIMIT ?`).bind(...accessParams, code, BOARD_MAX_ENTRIES));
 
@@ -73,11 +86,12 @@ export async function handleBoardAction(db: RoomDatabase, raw: unknown, now = Da
     if (rows.length >= BOARD_MAX_ENTRIES) return error(409, 'BOARD_FULL', '게시판이 가득 찼어요. 기존 게시물을 지운 뒤 다시 시도해 주세요.');
     return error(429, 'RATE_LIMITED', '잠깐 쉬었다가 다시 게시해 주세요.');
   }
+  if (action === 'move' && matching && !results[1].results.length) return invalid();
   if (action === 'delete' && matching) return error(403, 'BOARD_FORBIDDEN', '작성자나 방장만 게시물을 지울 수 있어요.');
   const entries = rows.map(row => ({
     id: row.id, authorId: row.author_id, authorName: row.author_name,
     kind: row.kind, color: row.color, text: row.text, strokes: JSON.parse(row.strokes) as BoardEntry['strokes'],
-    createdAt: row.created_at,
+    createdAt: row.created_at, ...(row.placement ? { placement: parseBoardPlacement(JSON.parse(row.placement))! } : {}),
   }));
   return { status: draft && results[1].results.length ? 201 : 200, body: { entries } };
 }

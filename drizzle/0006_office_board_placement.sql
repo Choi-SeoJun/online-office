@@ -1,0 +1,1 @@
+ALTER TABLE `office_board_entries` ADD `placement` text;

@@ -14,10 +14,13 @@ import { employeeLabel, type JobRank } from '@/game/ranks';
 import { CameraControls } from './camera-controls';
 import { FeedbackDialog } from './feedback-dialog';
 import { OfficeBulletinBoard } from './office-bulletin-board';
+import { CompanySettings } from './company-settings';
+import type { BoardEntry } from '@/game/board-types';
+import { boardApproachPoint } from '@/game/wall-board-layout';
 import { UpdateNews } from './update-news';
 import { OfficePlayControls } from './office-play-controls';
 import './office-rooftop.css';
-import { isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layout';
+import { BOUNDS, isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layout';
 import type { AvatarStyle, Command, DeskMode, GameEngine, GameState, OfficeScene, Snack, TargetId, Weapon } from '@/game/types';
 
 export default function OfficeGame({onMultiplayer}: {onMultiplayer?:()=>void}) {
@@ -39,6 +42,9 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   const panelRef = useRef(panel); panelRef.current = panel;
   const feedbackOpen = useRef(false);
   const boardOpen = useRef(false);
+  const boardEntries = useRef<BoardEntry[]>([]);
+  const [boardRequest, setBoardRequest] = useState(0);
+  const receiveBoard = useCallback((entries: BoardEntry[]) => { boardEntries.current = entries; }, []);
   const newsOpen = useRef(false);
   const syncPause = useCallback(() => {
     engine.dispatch({ type: 'pause', value: document.hidden || feedbackOpen.current || boardOpen.current || newsOpen.current || panelRef.current === 'settings' || panelRef.current === 'help' });
@@ -50,6 +56,10 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   };
   const handleBoardOpen = (open: boolean) => { boardOpen.current = open; syncPause(); };
   const handleNewsOpen = (open: boolean) => { newsOpen.current = open; syncPause(); };
+  const openWallBoard = useCallback(() => {
+    if (!engine.state.entered || engine.state.transition || engine.state.floor !== 'office' || feedbackOpen.current || newsOpen.current || boardOpen.current || panelRef.current === 'settings' || panelRef.current === 'help') return;
+    boardOpen.current = true; setPanel(null); setBoardRequest(value => value + 1); syncPause();
+  }, [engine, syncPause]);
   const send = useCallback((command: Command) => { if (feedbackOpen.current || boardOpen.current || newsOpen.current) return; if (command.type === 'enter' || (command.type === 'settings' && command.value.sound)) audio.current?.start(); engine.dispatch(command); }, [engine]);
   useEffect(() => { const sound = createOfficeAudio(); audio.current = sound; return () => { sound.dispose(); audio.current = null; }; }, []);
   useEffect(() => {
@@ -59,14 +69,15 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       if (cancelled || !host.current) return;
       try { scene.current = createOfficeScene(host.current, {
         getState: () => engine.state, onFrame: dt => { engine.step(dt); audio.current?.sync(engine.state); },
+        getBoardEntries: () => boardEntries.current, onBoard: openWallBoard,
         onGround: point => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current && !boardOpen.current && !newsOpen.current) { setHints(false); engine.dispatch({ type: 'move', point }); } },
         onTarget: (target, point) => { if (engine.state.entered && !panelRef.current && !feedbackOpen.current && !boardOpen.current && !newsOpen.current) { setHints(false); engine.dispatch({ type: 'select', target, point }); } },
         onReady: () => { if (!cancelled) { syncPause(); setReady(true); } }, onError: message => fail(message || '이 브라우저에서 3D 화면을 열지 못했어요.'),
       }); } catch { fail('3D 화면을 열지 못했어요. 브라우저의 하드웨어 가속을 확인하거나 다른 브라우저로 접속해 주세요.'); }
     }).catch(() => fail('사무실을 불러오지 못했어요. 연결을 확인하고 다시 시도해 주세요.'));
     return () => { cancelled = true; scene.current?.dispose(); scene.current = null; };
-  }, [engine, retry, syncPause]);
-  useEffect(() => { writeSavedState(state); }, [state.name, state.rank, state.bossRank, state.player.avatar, state.weapon, state.settings.sound, state.settings.volume, state.settings.reducedMotion, state.settings.quality, state.inventory.cookie, state.inventory.choco, state.inventory.cracker]);
+  }, [engine, retry, syncPause, openWallBoard]);
+  useEffect(() => { writeSavedState(state); }, [state.name, state.rank, state.bossRank, state.companyName, state.player.avatar, state.weapon, state.settings.sound, state.settings.volume, state.settings.reducedMotion, state.settings.quality, state.inventory.cookie, state.inventory.choco, state.inventory.cracker]);
   useEffect(() => {
     const keys = new Set<string>();
     const axis = () => { const input = { x: Number(keys.has('d') || keys.has('arrowright')) - Number(keys.has('a') || keys.has('arrowleft')), z: Number(keys.has('s') || keys.has('arrowdown')) - Number(keys.has('w') || keys.has('arrowup')) }; engine.dispatch({ type: 'axis', ...(scene.current?.screenToWorld(input) ?? input) }); };
@@ -93,20 +104,22 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       if (panelRef.current || engine.state.paused) return;
       if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) { event.preventDefault(); keys.add(key); axis(); setHints(false); }
       if (event.repeat) return;
-      if (key === 'e') { event.preventDefault(); engine.dispatch({ type: 'interact' }); }
+      if (key === 'e') { event.preventDefault(); const point = boardApproachPoint(BOUNDS); if (engine.state.floor === 'office' && !engine.state.seat && Math.hypot(engine.state.player.x - point.x, engine.state.player.z - point.z) <= 2) openWallBoard(); else engine.dispatch({ type: 'interact' }); }
     };
     const keyup = (event: KeyboardEvent) => { if (keys.delete(event.key.toLowerCase())) axis(); };
     const focus = (event: FocusEvent) => { if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [role="dialog"]')) clear(); };
     window.addEventListener('keydown', keydown); window.addEventListener('keyup', keyup); window.addEventListener('blur', clear); document.addEventListener('visibilitychange', visibility); document.addEventListener('focusin', focus);
     return () => { clear(); window.removeEventListener('keydown', keydown); window.removeEventListener('keyup', keyup); window.removeEventListener('blur', clear); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('focusin', focus); };
-  }, [engine, syncPause]);
+  }, [engine, syncPause, openWallBoard]);
   useEffect(() => { engine.dispatch({ type: 'axis', x: 0, z: 0 }); syncPause(); }, [engine, panel, syncPause]);
   const select = (target: TargetId) => { setHints(false); setPanel(null); send({ type: 'select', target }); };
+  const boardPoint = boardApproachPoint(BOUNDS);
+  const nearBoard = state.entered && !roof && !state.transition && !state.seat && Math.hypot(state.player.x - boardPoint.x, state.player.z - boardPoint.z) <= 2;
 
   return <main className={`office-app ${state.entered ? 'is-playing' : 'is-welcome'} ${roof ? 'is-rooftop' : ''} ${state.transition ? 'is-travelling' : ''}`}>
     <div ref={host} className="scene-host" aria-label={roof ? '도시가 보이는 3D 옥상. 벤치에 앉거나 벽에 기대 사탕을 물고 쉴 수 있습니다.' : '상사와 동료가 있는 3D 사무실. 장소 버튼으로 이동하고 행동을 선택할 수 있습니다.'} />
     <div className="scene-vignette" />
-    <header className="app-header"><div className="brand"><span className="brand-mark"><Building2 size={22} strokeWidth={1.6} /></span><div><h1>온라인 회사<span className="brand-dot">.</span></h1><p>오늘도 적당히</p></div></div><div className="header-tools">{state.entered && <WorkClock/>}
+    <header className="app-header"><div className="brand"><span className="brand-mark"><Building2 size={22} strokeWidth={1.6} /></span><div><h1>{state.entered ? state.companyName : "온라인 회사"}<span className="brand-dot">.</span></h1><p>오늘도 적당히</p></div></div><div className="header-tools">{state.entered && <WorkClock/>}
       <FeedbackDialog context={{ mode: 'solo', floor: roof ? 'roof' : 'office' }} onOpenChange={handleFeedbackOpen} />
       <button className="icon-button" aria-label={state.settings.sound ? '소리 끄기' : '소리 켜기'} onClick={() => send({ type: 'settings', value: { sound: !state.settings.sound } })}>{state.settings.sound ? <Volume2 size={20} /> : <VolumeX size={20} />}</button>
       <button className="icon-button" aria-label="이용 방법" onClick={() => setPanel('help')}><HelpCircle size={20} /></button><button className="icon-button" aria-label="설정" onClick={() => setPanel('settings')}><Settings2 size={20} /></button>
@@ -115,11 +128,13 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
     {!state.entered && !error && <section className="welcome-card rank-entry">{onMultiplayer && <div className="mode-switch" aria-label="플레이 방식"><button aria-pressed="true">혼자 쉬기</button><button onClick={onMultiplayer}>동료들과</button></div>}<div className="eyebrow"><span />혼자만의 작은 회사</div><h2>출근은 했고,<br />일은 <em>모르겠고.</em></h2><p className="welcome-description">일하는 척 딴짓하고, 커피 한 잔 쉬어 가요.<br />이 회사에서는 조금 마음대로 해도 괜찮아요.</p><div className="entry-name"><label htmlFor="employee-name">오늘의 이름</label><input id="employee-name" value={name} maxLength={10} onChange={e => setName(e.target.value)} placeholder="김사원" autoComplete="off" /></div><RankPicker label="나의 직급" value={rank} onChange={value=>{setRank(value);writeRankChoice(value,bossRank);}}/><RankPicker label="나의 상사의 직급은 무엇인가요?" value={bossRank} onChange={value=>{setBossRank(value);writeRankChoice(rank,value);}}/><AvatarPicker value={avatar} onChange={value=>{setAvatar(value);writeAvatarChoice(value);}}/><button className="primary-button enter-button" disabled={!ready} onClick={() => send({ type: 'enter', name: name.trim() || '김사원', avatar, rank, bossRank })}>{ready ? <>출근하기<ArrowRight size={19} /></> : <>문 여는 중<LoaderCircle className="loading-icon" size={18} /></>}</button><div className="entry-footnote"><Leaf size={13} />가입도, 할당량도, 야근도 없어요.</div><UpdateNews context={{mode:'solo',floor:'office'}} placement="card" autoOpenReady={ready && !panel && !state.transition} onOpenChange={handleNewsOpen}/></section>}
     {state.entered && !error && <>
       <div className="employee-card"><span className="status-dot" /><strong>{employeeLabel(state.name,state.rank)}</strong><span>{roof ? '잠깐, 숨 고르기' : '자유시간'}</span></div>
+      {nearBoard && !panel && !boardOpen.current && !feedbackOpen.current && !newsOpen.current && <button className="nearby-board" onClick={openWallBoard}><Files size={17}/>벽 게시판 보기<kbd>E</kbd></button>}
       <CameraControls disabled={!!state.transition} onZoom={delta=>scene.current?.zoom(delta)} />
       {hints && <div className="first-hint"><MousePointer2 size={17} /><span>눌러서 걷기 · 상하좌우 드래그로 시점 조절</span><button aria-label="안내 닫기" onClick={() => setHints(false)}><X size={15} /></button></div>}
-      <OfficePlayControls state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>send({type:"exit"})} onType={key=>audio.current?.typeKey(key)} newsAction={<UpdateNews context={{mode:'solo',floor:roof?'roof':'office'}} autoOpenReady={ready && !panel && !state.transition} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={employeeLabel(state.name,state.rank)} onOpenChange={handleBoardOpen}/>} />
+      <OfficePlayControls state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>send({type:"exit"})} onType={key=>audio.current?.typeKey(key)} newsAction={<UpdateNews context={{mode:'solo',floor:roof?'roof':'office'}} autoOpenReady={ready && !panel && !state.transition} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={employeeLabel(state.name,state.rank)} openRequest={boardRequest} onEntriesChange={receiveBoard} onOpenChange={handleBoardOpen}/>} />
     </>}
     {(panel === 'settings' || panel === 'help') && <div className="modal-backdrop" onClick={() => setPanel(null)}><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={e => e.stopPropagation()}><div className="panel-title"><h2 id="dialog-title">{panel === 'settings' ? '내 취향대로' : '이 회사에서 노는 법'}</h2><button className="icon-button" aria-label="닫기" autoFocus onClick={() => setPanel(null)}><X size={20} /></button></div>{panel === 'settings' ? <>
+      <CompanySettings profile={{name:state.name,rank:state.rank,avatar:state.player.avatar??'short'}} company={{roomName:state.companyName,bossRank:state.bossRank,capacity:2}} onProfile={value=>{engine.dispatch({type:'profile',value});setName(value.name);setRank(value.rank);setAvatar(value.avatar);}} onCompany={value=>{engine.dispatch({type:'profile',value:{companyName:value.roomName,bossRank:value.bossRank}});setBossRank(value.bossRank);}}/>
       <label className="setting-row"><span><Volume2 size={18} />공간 소리</span><input type="checkbox" checked={state.settings.sound} onChange={e => send({ type: 'settings', value: { sound: e.target.checked } })} /></label>
       <label className="setting-row"><span>소리 크기</span><input aria-label="소리 크기" type="range" min="0" max="1" step="0.05" value={state.settings.volume} onChange={e => send({ type: 'settings', value: { volume: +e.target.value } })} /></label>
       <label className="setting-row"><span><Leaf size={18} />움직임 줄이기</span><input type="checkbox" checked={state.settings.reducedMotion} onChange={e => send({ type: 'settings', value: { reducedMotion: e.target.checked } })} /></label>

@@ -91,6 +91,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
         && (peer.seat === 'lounge' || peer.seat === 'roof-bench')
         && (peer.restSeatId === state.restSeatId || Math.hypot(peer.x - player.x, peer.z - player.z) < .5))) engine.rejectRestSeat(state.restSeatId);
       player.lastSeen = self.lastSeen; player.rank = state.rank = normalizeRank(self.rank);
+      player.name = state.name = self.name; player.avatar = self.avatar ?? 'short';
       const shared = snapshot.boss;
       if (!shared) return;
       const newHit = shared.lastHit && shared.lastHit.id !== lastBossHit;

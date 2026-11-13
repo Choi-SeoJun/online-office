@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } from './layout.ts';
 import type { Floor, OfficeScene, Point, SceneCallbacks, TargetId } from './types.ts';
-import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere, spriteLabel } from './models.ts';
+import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, material, mug, plant, plaque, sphere } from './models.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { CAMERA_BASE_PITCH, CAMERA_TILT_STEP, CAMERA_TURN_STEP, cameraDragRotation, clampCameraPitch, setCameraOffset, smoothCameraPitch, normalizeCameraAngle, screenAxisToWorld, smoothCameraAngle } from './camera.ts';
 import { prepareCameraCutaways } from './camera-cutaway.ts';
 import { SOLO_LOUNGE_SEATS, restSeatById } from './rest-seats.ts';
 import { chairSpinAngle } from './expression.ts';
 import { SOLO_OFFICE_PLAN, type OfficePlan } from './office-plan.ts';
+import { createWallBoard, isBoardHit } from './wall-board.ts';
 
 /** Three raycasts hidden descendants; only visible, interactive ancestors may capture a click. */
 export function isPointerEligible(object: THREE.Object3D): boolean {
@@ -106,11 +107,9 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   // Low open-side balustrades retain the readable cutaway.
   box(room, .10, .46, 9.6, '#e8e4d5', 9, .24, -1.1); box(room, .17, .08, 9.8, '#b6b8a5', 9, .51, -1.1);
   box(room, 9.8, .21, .12, '#d9dccd', -4, .12, 6); box(room, 5.0, .21, .12, '#d9dccd', 6.5, .12, 6);
-  // Office identity and left-wall pinboard with printed sheets.
+  // Office identity above the boss desk; the shared board uses the open left wall.
   plaque(room, '온라인 회사', 2.15, .43, -6.15, 2.67, -5.968, '#304e4a');
   plaque(room, '작은 여유, 큰 생산성', 2.0, .24, -6.15, 2.24, -5.967, '#e9e6d7', '#6c7f70');
-  const board = box(room, .065, 1.20, 1.80, '#a77e58', -8.95, 2.15, -1.1); box(room, .03, 1.04, 1.64, '#c8aa7b', -8.9, 2.15, -1.1);
-  for (let i = 0; i < 5; i++) { const paper = box(room, .018, .34 + (i % 2) * .05, .31, ['#f4efdc', '#eadba8', '#c5d4c0'][i % 3], -8.87, 1.93 + (i % 2) * .40, -1.69 + (i % 3) * .51, .005); paper.rotation.x = .04 * (i - 2); sphere(room, .019, '#a66750', -8.845, 2.075 + (i % 2) * .40, -1.69 + (i % 3) * .51); }
   // Wall clock, its hands face the room.
   const clock = cylinder(room, .30, .30, .065, '#64766b', 3.28, 2.62, -5.92); clock.rotation.x = Math.PI / 2;
   const face = cylinder(room, .264, .264, .008, '#fff8e6', 3.28, 2.62, -5.88); face.rotation.x = Math.PI / 2;
@@ -141,14 +140,12 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   cylinder(coffee, .135, .13, .28, '#b48a61', .52, 1.23, -.10); cylinder(coffee, .14, .14, .035, '#d9c5a3', .52, 1.39, -.10);
   mug(coffee, .47, 1.10, .43, '#769a8b'); mug(coffee, .68, 1.10, .43, '#e8c38e');
   plaque(coffee, 'COFFEE BREAK', 1.11, .19, 0, .72, .78, '#d8dccd', '#557165');
-  const coffeeLabel = spriteLabel(coffee, '☕ 커피', '#43645a', .95); coffeeLabel.position.set(0, 2.02, 0);
   // Snack display: open shelves, wrapped bars, jars and cookie trays.
   const snacks = new THREE.Group(); snacks.position.set(furniture.snacks.x, 0, furniture.snacks.z); snacks.userData.target = 'snacks'; room.add(snacks);
   box(snacks, 1.7, .18, 1.5, '#b29974', 0, .14); box(snacks, .08, 1.5, 1.50, '#baa17d', -.81, .87); box(snacks, .08, 1.5, 1.5, '#baa17d', .81, .87); box(snacks, 1.63, 1.46, .07, '#e0dac1', 0, .85, -.715);
   for (const y of [.38, .90, 1.48]) box(snacks, 1.7, .075, 1.5, '#cab08a', 0, y);
   for (let row = 0; row < 2; row++) for (let i = 0; i < 5; i++) { const p = box(snacks, .20, .28, .22, ['#b36f5a', '#d7b65e', '#7c9a7f', '#e7d8b8', '#879fa6'][i], -.59 + i * .29, .56 + row * .52, .19, .018); p.rotation.z = (i % 2 ? .08 : -.08); box(snacks, .12, .075, .008, '#f6ebd0', -.59 + i * .29, .59 + row * .52, .305, .004); }
   for (let i = 0; i < 3; i++) { cylinder(snacks, .13, .13, .24, ['#d8ba85', '#ac8563', '#c9bd94'][i], -.44 + i * .44, 1.65, -.08); cylinder(snacks, .14, .14, .04, '#657c6a', -.44 + i * .44, 1.79, -.08); }
-  const snackLabel = spriteLabel(snacks, '간식 창고', '#7d634a', 1.12); snackLabel.position.set(0, 2.03, 0);
   // Lounge bistro table and upholstered bench aligned with its seat point.
   const lounge = new THREE.Group(); lounge.userData.target = 'lounge'; room.add(lounge);
   const table = furniture.lounge;
@@ -159,7 +156,6 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     const model = chair(lounge, seat.seat.x, seat.seat.z, '#587c72', seat.angle + Math.PI);
     model.name = seat.id;
   }
-  const loungeSign = spriteLabel(lounge, '잠깐, 쉬어 가요', '#537063', 1.40); loungeSign.position.set(table.x, 1.88, table.z);
   // Copier with tinted display, scan bed, paper drawers and tray stack.
   const copier = new THREE.Group(); copier.position.set(furniture.copier.x, 0, furniture.copier.z); copier.userData.target = 'copier'; room.add(copier);
   box(copier, 1.35, 1.1, 1.15, '#dedfd3', 0, .58, 0, .05); box(copier, 1.30, .13, 1.1, '#525e58', 0, 1.18, 0, .025);
@@ -167,7 +163,6 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const console = box(copier, .52, .10, .27, '#64746c', .30, 1.24, .52); console.rotation.x = .12; box(copier, .29, .012, .15, '#a4d2c1', .25, 1.305, .54);
   for (let i = 0; i < 3; i++) { box(copier, 1.13, .025, .018, '#b4c0b3', 0, .30 + i * .25, .585); box(copier, .23, .045, .023, '#8d9c90', 0, .39 + i * .25, .60); }
   box(copier, .55, .045, .75, '#6b7970', .90, .88, 0); for (let i = 0; i < 5; i++) box(copier, .43, .015, .60, '#f6f2df', .88, .92 + i * .016, 0, .003);
-  const copierLabel = spriteLabel(copier, '복사기', '#617368', .95); copierLabel.position.set(0, 1.95, 0);
   // Entry mat and polished directional sign occupy the open front edge.
   const entry = box(room, 2.20, .025, .72, '#648377', 1.8, .05, 5.45, .06); entry.userData.target = 'exit';
   const entryText = plaque(room, '출입구  →', 1.45, .24, 1.8, .072, 5.44, '#648377', '#e8efdd'); entryText.rotation.x = -Math.PI / 2; entryText.userData.target = 'exit';
@@ -180,6 +175,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   // Batch the immutable architecture and props by material and interaction tag.
   // This keeps the richly furnished room to a small number of GPU draw calls.
   const officeCutaways = prepareCameraCutaways(room, true); batchArchitecture(room);
+  const wallBoard = createWallBoard(room, BOUNDS, -9);
   const roof = createRooftop(scene); const roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
   const state = callbacks.getState();
   const actors = new Map<string, ReturnType<typeof createActor>>();
@@ -207,17 +203,24 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const rotate = (delta: number) => { if (callbacks.getState().transition || !Number.isFinite(delta)) return; targetOrbit = normalizeCameraAngle(targetOrbit + delta * CAMERA_TURN_STEP); };
   const tilt = (delta: number) => { if (callbacks.getState().transition || !Number.isFinite(delta)) return; targetPitch = clampCameraPitch(targetPitch + delta * CAMERA_TILT_STEP); };
   const resetView = () => { if (!callbacks.getState().transition) { targetOrbit = 0; targetPitch = CAMERA_BASE_PITCH; } };
-  const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down: { x: number; y: number; time: number; id: number; orbit:number; pitch:number; dragged:boolean } | null = null;
-  const pointerDown = (e: PointerEvent) => { if (e.button !== 0 || callbacks.getState().transition || down) return; down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId, orbit:targetOrbit, pitch:targetPitch, dragged:false }; renderer.domElement.setPointerCapture?.(e.pointerId); };
-  const pointerMove = (e: PointerEvent) => { if (!down || down.id !== e.pointerId || callbacks.getState().transition) return; const delta = cameraDragRotation(e.clientX-down.x,e.clientY-down.y); if (delta !== null || down.dragged) { down.dragged = true; targetOrbit = normalizeCameraAngle(down.orbit-(e.clientX-down.x)*.009); targetPitch = clampCameraPitch(down.pitch+(e.clientY-down.y)*.006); renderer.domElement.style.cursor='grabbing'; } };
+  const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down: { x: number; y: number; time: number; id: number; orbit:number; pitch:number; dragged:boolean; board:boolean } | null = null;
+  const boardAtPointer = (event: PointerEvent) => {
+    if (callbacks.getState().floor !== 'office') return false;
+    const rect = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
+    const hit = raycaster.intersectObjects([room, playerGroup], true).find(hit => isPointerEligible(hit.object));
+    return !!hit && isBoardHit(hit.object, 'office');
+  };
+  const pointerDown = (e: PointerEvent) => { if (e.button !== 0 || callbacks.getState().transition || down) return; down = { x: e.clientX, y: e.clientY, time: performance.now(), id: e.pointerId, orbit:targetOrbit, pitch:targetPitch, dragged:false, board:boardAtPointer(e) }; renderer.domElement.setPointerCapture?.(e.pointerId); };
+  const pointerMove = (e: PointerEvent) => { if (!down || down.board || down.id !== e.pointerId || callbacks.getState().transition) return; const delta = cameraDragRotation(e.clientX-down.x,e.clientY-down.y); if (delta !== null || down.dragged) { down.dragged = true; targetOrbit = normalizeCameraAngle(down.orbit-(e.clientX-down.x)*.009); targetPitch = clampCameraPitch(down.pitch+(e.clientY-down.y)*.006); renderer.domElement.style.cursor='grabbing'; } };
   const pointerUp = (e: PointerEvent) => {
     const start = down; if (start?.id !== e.pointerId) return; down = null; renderer.domElement.style.cursor=''; const current = callbacks.getState(); if (current.transition || !start || start.dragged || cameraDragRotation(e.clientX-start.x,e.clientY-start.y)!==null || performance.now() - start.time > 650) return;
+    if (start.board) { if (boardAtPointer(e)) callbacks.onBoard?.(); return; }
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
     const onRoof = current.floor === 'rooftop', bounds = onRoof ? ROOF_BOUNDS : BOUNDS;
     // Raycaster does not treat an invisible parent as an interaction boundary.
     // Restrict it to the current floor so hidden desks cannot capture roof taps.
     const hits = raycaster.intersectObjects((onRoof ? roof : room).children, true);
-    for (const hit of hits) { if (!isPointerEligible(hit.object)) continue; const selection = targetSelectionForHit(hit, current.floor); if (selection) { callbacks.onTarget(selection.target, selection.point); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
+    for (const hit of hits) { if (!isPointerEligible(hit.object)) continue; if (isBoardHit(hit.object, current.floor)) { callbacks.onBoard?.(); return; } const selection = targetSelectionForHit(hit, current.floor); if (selection) { callbacks.onTarget(selection.target, selection.point); return; } if (hit.object.userData.ground) { callbacks.onGround({ x: THREE.MathUtils.clamp(hit.point.x, bounds.minX, bounds.maxX), z: THREE.MathUtils.clamp(hit.point.z, bounds.minZ, bounds.maxZ) }); return; } }
   };
   const pointerCancel = () => { down = null; renderer.domElement.style.cursor=''; }; const wheel = (e: WheelEvent) => { e.preventDefault(); adjustZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY, -300, 300) * .0007)); };
   const contextLoss = (e: Event) => { e.preventDefault(); graphicsLost = true; cancelAnimationFrame(frame); callbacks.onError('그래픽 연결이 잠시 끊겼어요. 다시 열어보기를 누르면 이어서 놀 수 있어요.'); };
@@ -227,6 +230,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     if (dead || graphicsLost) return; frame = requestAnimationFrame(render); if (!visible) return;
     const dt = lastTime ? Math.min(.05, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
     callbacks.onFrame(dt); const s = callbacks.getState();
+    wallBoard.update(callbacks.getBoardEntries?.());
     const onRoof = s.floor === 'rooftop'; room.visible = !onRoof; roof.visible = onRoof;
     const background = onRoof ? roofColor : officeColor;
     (scene.background as THREE.Color).copy(background); (scene.fog as THREE.Fog).color.copy(background);
@@ -252,6 +256,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     zoom, rotate, tilt, resetView, screenToWorld:axis=>screenAxisToWorld(axis,orbit),
     dispose() {
       dead = true; cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener('visibilitychange', visibility);
+      wallBoard.dispose();
       renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
       const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
       scene.traverse(object => { if (object instanceof THREE.InstancedMesh) object.dispose(); if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); const ms = Array.isArray(object.material) ? object.material : [object.material]; ms.forEach(m => { materials.add(m); const map = (m as THREE.MeshStandardMaterial).map; if (map) textures.add(map); }); } });

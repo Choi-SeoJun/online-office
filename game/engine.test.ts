@@ -236,9 +236,9 @@ test('an approached working boss stands, reacts to a hit, then returns to work',
 });
 test('chosen ranks preserve raw names and shared boss rank updates without rewinding position',()=>{
  const e=createGameEngine();e.dispatch({type:'enter',name:'민수',rank:'대리',bossRank:'사장'});
- assert.equal(e.state.name,'민수');assert.equal(e.state.player.name,'민수');assert.equal(e.state.player.rank,'대리');assert.equal(e.state.boss.name,'박사장');
+ assert.equal(e.state.name,'민수');assert.equal(e.state.player.name,'민수');assert.equal(e.state.player.rank,'대리');assert.equal(e.state.boss.name,'사장님');
  const before={x:e.state.boss.x,z:e.state.boss.z};e.applyBossState({...e.state.boss,x:0,z:0,rank:'과장'},'routine',null,false);
- assert.equal(e.state.bossRank,'과장');assert.equal(e.state.boss.name,'박과장');assert.deepEqual({x:e.state.boss.x,z:e.state.boss.z},before);e.dispose();
+ assert.equal(e.state.bossRank,'과장');assert.equal(e.state.boss.name,'과장님');assert.deepEqual({x:e.state.boss.x,z:e.state.boss.z},before);e.dispose();
 });
 test('only the host advances the work cycle, including while visiting the roof',()=>{
  let authority=false;
@@ -251,5 +251,22 @@ test('only the host advances the work cycle, including while visiting the roof',
  assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.x,home.x);
  e.applyBossState({...e.state.boss,rank:'이사'},'routine',null);authority=true;
  advance(e,54);assert.equal(e.state.boss.pose,'type');advance(e,2);assert.equal(e.state.boss.moving,true);
- advance(e,35);assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.name,'박이사');e.dispose();
+ advance(e,35);assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.name,'이사님');e.dispose();
+});
+
+test('live profile changes preserve paused activity, position, inventory and session', () => {
+  const e = createGameEngine(); e.dispatch({ type: 'enter', name: '처음' });
+  e.dispatch({ type: 'move', point: { x: 0, z: 3 } }); e.step(.2);
+  e.state.inventory.cookie = 2; e.state.inventory.coffee = 1;
+  e.dispatch({ type: 'pause', value: true });
+  const before = structuredClone(e.state);
+  e.dispatch({ type: 'profile', value: { name: '새이름', rank: '팀장', avatar: 'ponytail', bossRank: '대표', companyName: '새 회사' } });
+  assert.equal(e.state.name, '새이름'); assert.equal(e.state.player.name, '새이름');
+  assert.equal(e.state.rank, '팀장'); assert.equal(e.state.player.rank, '팀장');
+  assert.equal(e.state.boss.name, '대표님'); assert.equal(e.state.bossRank, '대표');
+  assert.equal(e.state.player.avatar, 'ponytail'); assert.equal(e.state.companyName, '새 회사');
+  assert.deepEqual(e.state.inventory, before.inventory);
+  for (const key of ['x', 'z', 'angle', 'pose', 'moving'] as const) assert.equal(e.state.player[key], before.player[key]);
+  assert.deepEqual(e.state.destination, before.destination); assert.equal(e.state.entered, true); assert.equal(e.state.paused, true);
+  e.dispose();
 });

@@ -179,7 +179,7 @@ function initialState(saved?: PersistedState): GameState {
   const p = saved && readSavedState({ getItem: () => JSON.stringify(saved) });
   const rank = normalizeRank(p?.rank), bossRank = normalizeRank(p?.bossRank, '부장');
   return {
-    rank, bossRank, entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원',
+    rank, bossRank, entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원', companyName: p?.companyName ?? '우리 회사',
     floor: 'office', transition: null,
     player: { ...actor('player', p?.name ?? '김사원', START), avatar: p?.avatar ?? 'short', rank }, boss: { ...actor('boss', bossName(bossRank), TARGETS.boss.point), rank: bossRank },
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
@@ -315,6 +315,14 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     else if (command.type === 'exit') reset(toPersistedState(state));
     else if (command.type === 'settings') {
       state.settings = readSavedState({ getItem: () => JSON.stringify({ ...toPersistedState(state), settings: { ...state.settings, ...command.value } }) })!.settings;
+    } else if (command.type === 'profile') {
+      const value = command.value;
+      if (typeof value.name === 'string' && value.name.trim()) state.name = Array.from(value.name.trim().replace(/[\u0000-\u001f\u007f]/g, '')).slice(0, 10).join('') || state.name;
+      state.player.name = state.name;
+      state.rank = normalizeRank(value.rank, state.rank); state.player.rank = state.rank;
+      state.bossRank = normalizeRank(value.bossRank, state.bossRank); state.boss.rank = state.bossRank; state.boss.name = bossName(state.bossRank);
+      if (value.avatar === 'short' || value.avatar === 'ponytail') state.player.avatar = value.avatar;
+      if (typeof value.companyName === 'string' && value.companyName.trim()) state.companyName = Array.from(value.companyName.trim().replace(/[\u0000-\u001f\u007f]/g, '')).slice(0, 24).join('') || state.companyName;
     } else if (command.type === 'weapon') {
       if (command.weapon in WEAPONS) state.weapon = command.weapon;
     } else if (command.type === 'enter') {

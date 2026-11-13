@@ -69,6 +69,7 @@ export const officeBoardEntries = sqliteTable('office_board_entries', {
   color: text('color').notNull(),
   text: text('text').notNull(),
   strokes: text('strokes').notNull(),
+  placement: text('placement'),
   createdAt: integer('created_at').notNull(),
 }, t => [
   uniqueIndex('office_board_entry_id').on(t.roomCode, t.id),

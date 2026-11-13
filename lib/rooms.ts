@@ -271,7 +271,7 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
   const now = context.now ?? Date.now();
   try {
     const input = object(raw), action = input.action;
-    if (!['create', 'join', 'sync', 'attack', 'chat', 'poke', 'readNotifications', 'capacity', 'leave'].includes(String(action))) fail(400, 'INVALID_REQUEST', '요청한 행동을 확인해 주세요.');
+    if (!['create', 'join', 'sync', 'attack', 'chat', 'poke', 'readNotifications', 'profile', 'roomSettings', 'capacity', 'leave'].includes(String(action))) fail(400, 'INVALID_REQUEST', '요청한 행동을 확인해 주세요.');
     if (action === 'create') {
       const name = label(input.name, 10, '이름'), roomName = label(input.roomName, 24, '회사 이름'), capacity = capacityValue(input.capacity), avatar = avatarValue(input.avatar);
       const rank = rankValue(input.rank), bossRank = rankValue(input.bossRank, '부장');
@@ -403,28 +403,59 @@ export async function handleRoomAction(db: RoomDatabase, raw: unknown, context: 
         db.prepare(`UPDATE office_members SET last_seen = MAX(last_seen, ?), ${safeRestRenewal} WHERE id = ? AND room_code = ? AND token_hash = ?`).bind(now, ...restRenewalCutoffs(now), member.id, code, tokenHash),
         transferHost(db, code, now),
       ]);
-    } else if (action === 'capacity') {
+    } else if (action === 'profile') {
+      const name = label(input.name, 10, '이름');
+      if (input.rank === undefined || input.avatar === undefined) fail(400, 'INVALID_REQUEST', '직급과 캐릭터를 다시 골라 주세요.');
+      const rank = rankValue(input.rank), avatar = avatarValue(input.avatar);
+      const [result] = await db.batch([
+        db.prepare(`UPDATE office_members SET name = ?, rank = ?, avatar = ?, last_seen = MAX(last_seen, ?), ${safeRestRenewal}
+          WHERE id = ? AND room_code = ? AND token_hash = ?
+            AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND expires_at > ?) RETURNING id`)
+          .bind(name, rank, avatar, now, ...restRenewalCutoffs(now), member.id, code, tokenHash, code, now),
+        transferHost(db, code, now),
+      ]);
+      if (!result.results.length) fail(401, 'SESSION_EXPIRED', '참여 정보를 확인할 수 없어요. 다시 입장해 주세요.');
+    } else if (action === 'capacity' || action === 'roomSettings') {
       const capacity = capacityValue(input.capacity);
-      if (room.host_id !== member.id) fail(403, 'NOT_HOST', '정원은 방장만 바꿀 수 있어요.');
+      const roomName = action === 'roomSettings' ? label(input.roomName, 24, '회사 이름') : room.name;
+      if (action === 'roomSettings' && input.bossRank === undefined) fail(400, 'INVALID_REQUEST', '상사 직급을 다시 골라 주세요.');
+      const bossRank = action === 'roomSettings' ? rankValue(input.bossRank, '부장') : normalizeRank(room.boss_rank, '부장');
+      if (room.host_id !== member.id) fail(403, 'NOT_HOST', '회사 설정은 방장만 바꿀 수 있어요.');
       const layout = createMultiLayout(capacity), { bounds, spawn, obstacles } = layout;
       const currentBoss = sharedBoss(room, now);
-      const resetBoss = !isMultiWalkable(layout, currentBoss.actor) ? { actor: { ...currentBoss.actor, ...layout.boss, pose: 'idle', moving: false }, phase: 'routine', updatedAt: now } : null;
-      // Keep the relocation in the same atomic batch as resizing. One JSON
-      // footprint avoids exceeding D1's 100-parameter limit at 16 desks.
+      const resetBoss = !isMultiWalkable(layout, currentBoss.actor) ? { actor: { ...currentBoss.actor, ...layout.boss, name: bossName(bossRank), rank: bossRank, pose: 'idle', moving: false }, phase: 'routine', updatedAt: now } : null;
       const footprint = JSON.stringify(obstacles.map(o => [o.x, o.z, o.w / 2 + .24, o.d / 2 + .24]));
+      // Every mutation rechecks the current host inside D1. The shared fields
+      // change in one statement, so an occupied seat cannot partially rename a room.
+      const authority = `EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND host_id = ? AND expires_at > ?)`;
+      const applied = `EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND host_id = ? AND capacity = ? AND expires_at > ?)`;
       const result = await db.batch([
-        db.prepare('DELETE FROM office_members WHERE room_code = ? AND last_seen < ? AND id != ?').bind(code, now - ROOM_SEAT_LEASE_MS, member.id),
-        db.prepare('UPDATE office_rooms SET capacity = ? WHERE code = ? AND host_id = ? AND NOT EXISTS (SELECT 1 FROM office_members WHERE room_code = ? AND seat_index >= ?) RETURNING code').bind(capacity, code, member.id, code, capacity),
-        db.prepare(`UPDATE office_members SET x = ?, z = ?, pose = 'idle', moving = 0, visual = NULL WHERE room_code = ? AND floor = 'office'
+        db.prepare(`DELETE FROM office_members WHERE room_code = ? AND last_seen < ? AND id != ? AND ${authority}`)
+          .bind(code, now - ROOM_SEAT_LEASE_MS, member.id, code, member.id, now),
+        db.prepare(`UPDATE office_rooms SET capacity = ?, name = CASE WHEN ? THEN ? ELSE name END, boss_rank = CASE WHEN ? THEN ? ELSE boss_rank END
+          WHERE code = ? AND host_id = ? AND expires_at > ?
+            AND EXISTS (SELECT 1 FROM office_members WHERE id = ? AND room_code = ? AND token_hash = ?)
+            AND NOT EXISTS (SELECT 1 FROM office_members WHERE room_code = ? AND seat_index >= ?) RETURNING code`)
+          .bind(capacity, action === 'roomSettings' ? 1 : 0, roomName, action === 'roomSettings' ? 1 : 0, bossRank, code, member.id, now, member.id, code, tokenHash, code, capacity),
+        db.prepare(`UPDATE office_members SET x = ?, z = ?, pose = 'idle', moving = 0,
+          visual = CASE WHEN visual IS NULL THEN NULL ELSE ${releasedRestVisual} END
+          WHERE room_code = ? AND floor = 'office'
           AND (x < ? OR x > ? OR z < ? OR z > ? OR EXISTS (
             SELECT 1 FROM json_each(?) AS obstacle
             WHERE ABS(office_members.x - json_extract(obstacle.value, '$[0]')) < json_extract(obstacle.value, '$[2]')
               AND ABS(office_members.z - json_extract(obstacle.value, '$[1]')) < json_extract(obstacle.value, '$[3]')))
-          AND EXISTS (SELECT 1 FROM office_rooms WHERE code = ? AND capacity = ?)`).bind(spawn.x, spawn.z, code, bounds.minX + .24, bounds.maxX - .24, bounds.minZ + .24, bounds.maxZ - .24, footprint, code, capacity),
-        db.prepare(`UPDATE office_members SET last_seen = MAX(last_seen, ?), ${safeRestRenewal} WHERE id = ? AND token_hash = ?`).bind(now, ...restRenewalCutoffs(now), member.id, tokenHash),
-        ...(resetBoss ? [db.prepare('UPDATE office_rooms SET boss_state = ? WHERE code = ? AND capacity = ?').bind(JSON.stringify(resetBoss), code, capacity)] : []),
+          AND ${applied}`).bind(spawn.x, spawn.z, code, bounds.minX + .24, bounds.maxX - .24, bounds.minZ + .24, bounds.maxZ - .24, footprint, code, member.id, capacity, now),
+        db.prepare(`UPDATE office_members SET last_seen = MAX(last_seen, ?), ${safeRestRenewal} WHERE id = ? AND token_hash = ? AND ${applied}`)
+          .bind(now, ...restRenewalCutoffs(now), member.id, tokenHash, code, member.id, capacity, now),
+        ...(resetBoss ? [db.prepare(`UPDATE office_rooms SET boss_state = ? WHERE code = ? AND host_id = ? AND capacity = ? AND boss_state IS ? AND boss_hit_id = ? AND expires_at > ?`)
+          .bind(JSON.stringify(resetBoss), code, member.id, capacity, room.boss_state, room.boss_hit_id, now)] : []),
       ]);
-      if (!result[1].results.length) fail(409, 'CAPACITY_OCCUPIED', '사용 중인 자리가 있어요. 빈 자리만 줄일 수 있어요.');
+      if (!result[1].results.length) {
+        const current = await db.prepare('SELECT host_id, expires_at FROM office_rooms WHERE code = ?').bind(code).first<Pick<RoomRow, 'host_id' | 'expires_at'>>();
+        if (!current || current.expires_at <= now) fail(410, 'ROOM_EXPIRED', '이 회사의 하루가 끝났어요. 새 방을 만들어 주세요.');
+        if (current.host_id !== member.id) fail(403, 'NOT_HOST', '회사 설정은 방장만 바꿀 수 있어요.');
+        fail(409, 'CAPACITY_OCCUPIED', '사용 중인 자리가 있어요. 빈 자리만 줄일 수 있어요.');
+      }
     } else if (action === 'leave') {
       await db.batch([db.prepare('DELETE FROM office_members WHERE id = ? AND room_code = ? AND token_hash = ?').bind(member.id, code, tokenHash), transferHost(db, code, now)]);
       return { status: 200, body: { left: true } };

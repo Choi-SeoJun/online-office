@@ -29,6 +29,8 @@ export type RoomRequest =
     | { action: 'chat'; text: string }
     | { action: 'poke'; targetId: string }
     | { action: 'readNotifications'; throughId: number }
+    | { action: 'profile'; name: string; rank: JobRank; avatar: AvatarStyle }
+    | { action: 'roomSettings'; roomName: string; bossRank: JobRank; capacity: number }
     | { action: 'capacity'; capacity: number }
     | { action: 'leave' }
   ));

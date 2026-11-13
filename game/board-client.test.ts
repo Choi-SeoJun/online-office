@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createBoardEntry, deleteBoardEntry, listBoard, loadLocalBoard, saveLocalBoard } from './board-client.ts';
 import { type BoardEntry } from './board-types.ts';
 import { RoomApiError } from './multi-client.ts';
+import * as boardClient from './board-client.ts';
 
 const post: BoardEntry = {
   id: 'cfd88e93-894f-4df5-a294-c292d7e98fe7', kind: 'note', color: 'yellow', text: '회의', strokes: [],
@@ -54,4 +55,25 @@ test('board transport surfaces server errors, invalid payloads and cancellation'
   mock.mock.mockImplementation(async () => Response.json({ entries: [post] }));
   await assert.rejects(listBoard(session), error => error instanceof RoomApiError && error.code === 'INVALID_RESPONSE');
   await assert.rejects(listBoard(session, AbortSignal.abort()), { name: 'AbortError' });
+});
+
+test('moving a post sends only its bounded placement and retains the returned content', async t => {
+  const placement = { x: .4, y: .5, width: .2, height: .3 };
+  const remote = { ...post, authorId: post.id, placement };
+  const mock = t.mock.method(globalThis, 'fetch', async () => Response.json({ entries: [remote] }));
+  assert.equal(typeof boardClient.moveBoardEntry, 'function');
+  assert.deepEqual(await boardClient.moveBoardEntry(session, post.id, placement), [remote]);
+  const [call] = mock.mock.calls;
+  const body = JSON.parse(String((call.arguments as unknown as [string, RequestInit])[1].body));
+  assert.deepEqual(body, { action: 'move', id: post.id, placement, code: session.code, token: session.token });
+  await assert.rejects(boardClient.moveBoardEntry(session, post.id, { ...placement, x: .9 }), error => error instanceof RoomApiError && error.code === 'INVALID_REQUEST');
+  assert.equal(mock.mock.calls.length, 1);
+});
+
+test('personal board keeps the existing storage key and saves moved legacy posts', () => {
+  let key = '', saved = '';
+  const placement = { x: .2, y: .3, width: .2, height: .2 };
+  assert.equal(saveLocalBoard([{ ...post, placement }], { setItem: (nextKey, value) => { key = nextKey; saved = value; } }), true);
+  assert.equal(key, 'office-personal-board-v1');
+  assert.deepEqual(loadLocalBoard({ getItem: () => saved }), [{ ...post, placement }]);
 });

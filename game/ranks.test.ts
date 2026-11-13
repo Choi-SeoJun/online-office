@@ -21,7 +21,13 @@ test('employee labels respect existing titles and the legacy default name', () =
 });
 
 test('boss names use the selected title', () => {
-  assert.equal(bossName('부장'), '박부장');
-  assert.equal(bossName('이사'), '박이사');
-  assert.equal(bossName('부사장'), '박부사장');
+  assert.equal(bossName('부장'), '부장님');
+  assert.equal(bossName('이사'), '이사님');
+  assert.equal(bossName('부사장'), '부사장님');
+});
+
+test('intern, team lead and representative are supported player and boss ranks', () => {
+  for (const rank of ['인턴', '팀장', '대표'] as const) {
+    assert.equal(normalizeRank(rank), rank); assert.equal(bossName(rank), `${rank}님`);
+  }
 });

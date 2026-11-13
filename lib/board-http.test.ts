@@ -161,3 +161,36 @@ test('board HTTP uses the exact frontend origin and enforces the byte limit befo
   assert.equal((await handleBoardRequest(request('{'), db)).status, 400);
   assert.equal((await handleBoardRequest(new Request(endpoint, { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'cross-site' } }), db)).status, 403);
 });
+
+test('active members move notes without changing their content, authorship or delete authority', async () => {
+  const { sql, author, visitor, outsider, send } = await fixture();
+  const draft = note({ placement: { x: .1, y: .2, width: .2, height: .3 } });
+  assert.equal((await send({ action: 'create', ...author, draft })).status, 201);
+  const placement = { x: .5, y: .4, width: .2, height: .3 };
+  const moved = await send({ action: 'move', ...visitor, id: draft.id, placement, text: '위조', authorId: visitor.id });
+  assert.equal(moved.status, 200);
+  assert.deepEqual(moved.body, { entries: [{ ...draft, placement, authorId: author.id, authorName: '이사원', createdAt: start }] });
+  assert.equal((await send({ action: 'delete', ...visitor, id: draft.id })).status, 403);
+  assert.equal((await send({ action: 'move', code: author.code, token: outsider.token, id: draft.id, placement })).status, 401);
+  assert.equal((await send({ action: 'move', ...visitor, id: draft.id, placement }, start + ROOM_SEAT_LEASE_MS + 1)).status, 401);
+  for (const invalid of [{ ...placement, x: -.1 }, { ...placement, x: .9 }, { ...placement, height: 0 }, { ...placement, y: NaN }, { ...placement, width: Infinity }, null]) {
+    assert.equal((await send({ action: 'move', ...visitor, id: draft.id, placement: invalid })).status, 400);
+  }
+  assert.equal(sql.prepare('SELECT text FROM office_board_entries').get()!.text, draft.text);
+});
+
+test('moving a card cannot resize it or transform a saved full-board drawing', async () => {
+  const { author, visitor, send } = await fixture();
+  const legacy = note();
+  await send({ action: 'create', ...author, draft: legacy });
+  const placement = { x: .4, y: .5, width: .215, height: .265 };
+  assert.equal((await send({ action: 'move', ...visitor, id: legacy.id, placement })).status, 200);
+  assert.equal((await send({ action: 'move', ...visitor, id: legacy.id, placement: { ...placement, width: .3 } })).status, 400);
+  const drawing = note({ kind: 'doodle', text: '', strokes: [{ color: 'ink', points: [{ x: .1, y: .1 }] }], placement: { x: 0, y: 0, width: 1, height: 1 } });
+  await send({ action: 'create', ...author, draft: drawing }, start + BOARD_CREATE_INTERVAL_MS);
+  const moved = await send({ action: 'move', ...visitor, id: drawing.id, placement });
+  assert.equal(moved.status, 400);
+  const listed = await send({ action: 'list', ...visitor });
+  assert.ok('entries' in listed.body);
+  assert.deepEqual(listed.body.entries.find(entry => entry.id === drawing.id)?.placement, drawing.placement);
+});

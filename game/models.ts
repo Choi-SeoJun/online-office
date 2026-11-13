@@ -39,6 +39,24 @@ export function labelTexture(text: string, bg: string, color: string, width = 51
 export function plaque(parent: THREE.Object3D, text: string, w: number, h: number, x: number, y: number, z: number, bg = '#284c4a', fg = '#fff9e9') {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: labelTexture(text, bg, fg), transparent: true })); m.position.set(x, y, z); parent.add(m); return m;
 }
+/** Transparent ink belongs to a real wall plane, so nearby geometry still occludes it. */
+export function paintedWallText(parent: THREE.Object3D, text: string, width: number, height: number, color = '#344e43') {
+  const canvas = document.createElement('canvas'); canvas.width = 1536; canvas.height = 192;
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+  const context = canvas.getContext('2d')!;
+  let disposed = false;
+  const paint = () => {
+    if (disposed) return;
+    canvas.width = 1536; // Clear to transparency and reset the drawing state.
+    context.fillStyle = color; context.textAlign = 'center'; context.textBaseline = 'middle';
+    context.font = '700 132px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+    context.fillText(text, canvas.width / 2, canvas.height / 2, canvas.width - 48); texture.needsUpdate = true;
+  };
+  paint(); texture.addEventListener('dispose', () => { disposed = true; });
+  void document.fonts?.ready.then(paint);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, toneMapped: false }));
+  mesh.userData.pointerPassthrough = true; mesh.raycast = () => {}; parent.add(mesh); return mesh;
+}
 function updateSpriteLabel(sprite: THREE.Sprite, text: string, color: string) {
   // Keep letters large even for a ten-character name: grow the tag instead of
   // squeezing the glyphs into the old, tiny four-to-one name plate.
@@ -428,7 +446,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     r.legs.forEach((leg, index) => { leg.rotation.x = -Math.PI / 2 - r.body.rotation.x; r.calves[index].rotation.x = Math.PI / 2; });
     r.body.position.y = .65 + .095 * r.body.scale.y - .66 * Math.cos(r.body.rotation.x) * r.body.scale.y;
   }
-  const label = employeeLabel(a.name, a.rank);
+  const label = r.isBoss ? a.name : employeeLabel(a.name, a.rank);
   if (label !== r.lastName) { updateSpriteLabel(r.label, label, r.isBoss ? '#51372d' : '#243e35'); r.lastName = label; }
 }
 export function disposeModelCaches() { mats.forEach(m => m.dispose()); geos.forEach(g => g.dispose()); mats.clear(); geos.clear(); }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { box, cylinder, plant, plaque, sphere, spriteLabel } from './models.ts';
+import { box, cylinder, paintedWallText, plant, plaque, sphere } from './models.ts';
 import { ROOF_BENCH_SEATS } from './rest-seats.ts';
 import { ROOF_BIN, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
 
@@ -89,10 +89,9 @@ export function createRooftop(parent: THREE.Object3D) {
     const mark = box(bench, .69, .004, .50, '#d7b68e', seat.seat.x - ROOF_REST.bench.seat.x, ROOF_REST.bench.seatTop - .001, .02, .01);
     mark.name = seat.id;
   }
-  // Face the camera so steep views cannot flatten the lettering into the wall.
-  const sign = spriteLabel(roof, '잠깐, 숨 돌리는 곳', '#243e35', 1.45);
-  sign.position.set(ROOF_REST.bench.seat.x, 2.18, -5.68); sign.name = 'rooftop-sign';
-  sign.userData.pointerPassthrough = true; sign.raycast = () => {};
+  // Paint on the north wall's inward face; preserve the wall's perspective and depth.
+  const sign = paintedWallText(wall, '잠깐, 숨 돌리는 곳', 3.45, .43);
+  sign.position.set(ROOF_REST.bench.seat.x, 1.46, wallRest.depth / 2 + .006); sign.name = 'rooftop-sign';
   // Planters frame the space; their footprints are shared with roof navigation.
   for (const { x, z } of ROOF_PLANTERS) {
     const planter = new THREE.Group(); planter.name = 'rooftop-planter'; planter.position.set(x,0,z); roof.add(planter);

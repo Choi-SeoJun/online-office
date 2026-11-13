@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, mug, plant, plaque, spriteLabel } from './models.ts';
+import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, mug, plant, plaque } from './models.ts';
 import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelectionForHit } from './scene.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
 import { ROOF_BOUNDS, isRoofTarget, roofWallForTarget } from './layout.ts';
@@ -11,6 +11,8 @@ import type { Actor, GameState, OfficeScene, Point, RoofWallSide, TargetId } fro
 import type { MultiLayout } from './multi-layout.ts';
 import type { RoomPlayer } from './multi-types.ts';
 import { restSeatById } from './rest-seats.ts';
+import type { BoardEntry } from './board-types.ts';
+import { createWallBoard, isBoardHit } from './wall-board.ts';
 
 export type MultiSceneState = {
   layout: MultiLayout;
@@ -27,6 +29,8 @@ export type MultiSceneCallbacks = {
   onSeat(index: number): void;
   onTarget(target: TargetId, point?: Point): void;
   onActor?(id: string): void;
+  getBoardEntries?(): BoardEntry[];
+  onBoard?(): void;
   onReady(): void;
   onError(message: string): void;
 };
@@ -86,7 +90,6 @@ export function createMultiArchitecture(layout: MultiLayout) {
   box(machine, .58, .56, .44, '#3f5550', -.2, 1.37, -.13, .04);
   box(machine, .38, .19, .04, '#a7c6bd', -.2, 1.45, .1);
   mug(machine, -.2, 1.1, .18); mug(machine, .45, 1.1, .23, '#87aaa1');
-  const coffeeLabel = spriteLabel(coffee, '커피 한 잔', '#395b50', 1.08); coffeeLabel.position.set(0, 2.05, 0);
   const snacks = new THREE.Group(); snacks.name = 'shared-snacks'; snacks.userData.target = 'snacks';
   snacks.position.set(layout.furniture.snacks.x, 0, layout.furniture.snacks.z); group.add(snacks);
   box(snacks, 1.2, .18, 1.5, '#b29974', 0, .14);
@@ -98,7 +101,6 @@ export function createMultiArchitecture(layout: MultiLayout) {
     packet.rotation.z = i % 2 ? .08 : -.08; box(snacks, .12, .075, .008, '#f6ebd0', -.39 + i * .26, .59 + row * .52, .305, .004);
   }
   for (let i = 0; i < 3; i++) { cylinder(snacks, .12, .12, .24, ['#d8ba85', '#ac8563', '#c9bd94'][i], -.34 + i * .34, 1.65, -.08); cylinder(snacks, .13, .13, .04, '#657c6a', -.34 + i * .34, 1.79, -.08); }
-  const snackLabel = spriteLabel(snacks, '간식 창고', '#7d634a', 1.12); snackLabel.position.set(0, 2.03, 0);
   const lounge = new THREE.Group(); lounge.name = 'shared-lounge'; lounge.userData.target = 'lounge'; group.add(lounge);
   const table = layout.furniture.lounge;
   cylinder(lounge, .07, .09, .94, '#748a7c', table.x, .47, table.z);
@@ -107,15 +109,12 @@ export function createMultiArchitecture(layout: MultiLayout) {
   for (const seat of layout.loungeSeats) {
     const model = chair(lounge, seat.seat.x, seat.seat.z, '#6a8f81', seat.angle + Math.PI); model.name = seat.id;
   }
-  const loungeLabel = spriteLabel(lounge, '잠깐, 쉬어 가요', '#537063', 1.20); loungeLabel.position.set(table.x, 1.88, table.z);
   const copier = new THREE.Group(); copier.name = 'shared-copier'; copier.userData.target = 'copier'; copier.position.set(layout.furniture.copier.x, 0, layout.furniture.copier.z); group.add(copier);
   box(copier, 1.35, 1.1, 1.15, '#dedfd3', 0, .58, 0, .05); box(copier, 1.30, .13, 1.1, '#525e58', 0, 1.18, 0, .025);
   box(copier, 1.12, .05, .85, '#98b4aa', -.04, 1.265, -.05); box(copier, 1.17, .07, .89, '#eff0e5', -.04, 1.31, -.05);
   box(copier, .52, .10, .27, '#64746c', .30, 1.24, .52); box(copier, .29, .012, .15, '#a4d2c1', .25, 1.305, .54);
   for (let i = 0; i < 3; i++) { box(copier, 1.13, .025, .018, '#b4c0b3', 0, .30 + i * .25, .585); box(copier, .23, .045, .023, '#8d9c90', 0, .39 + i * .25, .60); }
-  const copierLabel = spriteLabel(copier, '복사기', '#617368', .95); copierLabel.position.set(0, 1.95, 0);
   const { group: chief } = createBossDesk(group, furniture.bossDesk); chief.name = 'shared-boss-desk';
-  const chiefLabel = spriteLabel(chief, '상사 자리', '#51372d', 1.10); chiefLabel.position.set(0, 2.10, 0);
   plant(group, b.maxX - .6, b.maxZ - .6, .8);
   plant(group, b.minX + .65, b.minZ + .65, .8);
   const entry = box(group, 1.8, .02, .55, '#6a9387', layout.spawn.x, .055, layout.spawn.z + .42, .08); entry.userData.target = 'exit';
@@ -159,6 +158,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const rigs = new Map<string, { rig: ReturnType<typeof createActor>; shown: Actor; floor: GameState['floor'] }>();
   const retired: THREE.Object3D[] = [], bubbles = new Map<string, HTMLDivElement>();
   const initial = callbacks.getState(); let architecture = createMultiArchitecture(initial.layout); world.add(architecture.group);
+  const wallBoard = createWallBoard(architecture.group, initial.layout.bounds);
   const roof = createRooftop(world), roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
   let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, userOrbit = 0, desiredOrbit = 0, pitch = CAMERA_BASE_PITCH, desiredPitch = CAMERA_BASE_PITCH, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastQuality = '', lastFloor = initial.game.floor;
   const b = initial.layout.bounds, focus = new THREE.Vector3((b.minX + b.maxX) / 2, .65, (b.minZ + b.maxZ) / 2), desiredFocus = focus.clone();
@@ -183,10 +183,16 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const tilt = (delta: number) => { if (!callbacks.getState().game.transition && Number.isFinite(delta)) desiredPitch = clampCameraPitch(desiredPitch + delta * CAMERA_TILT_STEP); };
   const resetView = () => { if (callbacks.getState().game.transition) return; desiredOrbit = 0; desiredPitch = CAMERA_BASE_PITCH; zoomLevel = 1; updateCamera(); };
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  let down: { x: number; y: number; id: number; time: number; angle: number; pitch: number; dragging: boolean } | null = null;
-  const pointerDown = (event: PointerEvent) => { if (event.button !== 0 || down || callbacks.getState().game.transition) return; down = { x: event.clientX, y: event.clientY, id: event.pointerId, time: performance.now(), angle: desiredOrbit, pitch: desiredPitch, dragging: false }; renderer.domElement.setPointerCapture?.(event.pointerId); };
+  let down: { x: number; y: number; id: number; time: number; angle: number; pitch: number; dragging: boolean; board: boolean } | null = null;
+  const boardAtPointer = (event: PointerEvent) => {
+    if (callbacks.getState().game.floor !== 'office') return false;
+    const rect = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
+    const hit = raycaster.intersectObjects([actorGroup, architecture.group], true).find(hit => isPointerEligible(hit.object));
+    return !!hit && isBoardHit(hit.object, 'office');
+  };
+  const pointerDown = (event: PointerEvent) => { if (event.button !== 0 || down || callbacks.getState().game.transition) return; down = { x: event.clientX, y: event.clientY, id: event.pointerId, time: performance.now(), angle: desiredOrbit, pitch: desiredPitch, dragging: false, board: boardAtPointer(event) }; renderer.domElement.setPointerCapture?.(event.pointerId); };
   const pointerMove = (event: PointerEvent) => {
-    if (!down || down.id !== event.pointerId || callbacks.getState().game.transition) return;
+    if (!down || down.board || down.id !== event.pointerId || callbacks.getState().game.transition) return;
     const delta = cameraDragRotation(event.clientX - down.x, event.clientY - down.y);
     if (delta !== null) down.dragging = true;
     if (down.dragging) { desiredOrbit = normalizeCameraAngle(down.angle - (event.clientX - down.x) * .009); desiredPitch = clampCameraPitch(down.pitch + (event.clientY - down.y) * .006); renderer.domElement.style.cursor = 'grabbing'; }
@@ -194,6 +200,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const pointerUp = (event: PointerEvent) => {
     const start = down; if (start?.id !== event.pointerId) return; down = null; renderer.domElement.style.cursor = '';
     if (!start || start.id !== event.pointerId || start.dragging || callbacks.getState().game.transition || cameraDragRotation(event.clientX - start.x, event.clientY - start.y) !== null || performance.now() - start.time > 650) return;
+    if (start.board) { if (boardAtPointer(event)) callbacks.onBoard?.(); return; }
     const rect = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); raycaster.setFromCamera(pointer, camera);
     const game = callbacks.getState().game, ownId = game.player.id;
     for (const hit of raycaster.intersectObject(actorGroup, true)) {
@@ -209,6 +216,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     // Intersect just the active floor; Three also raycasts children of invisible parents.
     for (const hit of raycaster.intersectObject(game.floor === 'rooftop' ? roof : architecture.group, true)) {
       if (!isPointerEligible(hit.object)) continue;
+      if (isBoardHit(hit.object, game.floor)) { callbacks.onBoard?.(); return; }
       let object: THREE.Object3D | null = hit.object, seat: number | null = null;
       while (object) { if (typeof object.userData.target === 'string' && object.userData.target.startsWith('seat:')) seat = Number(object.userData.target.slice(5)); object = object.parent; }
       if (seat !== null) { callbacks.onSeat(seat); return; }
@@ -226,7 +234,8 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     const dt = lastTime ? Math.min(.06, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
     if (document.hidden) return;
     callbacks.onFrame(dt); const state = callbacks.getState(), game = state.game, settings = game.settings, onRoof = game.floor === 'rooftop'; elapsed += dt;
-    if (capacity !== state.layout.capacity) { architecture.release(); architecture = createMultiArchitecture(state.layout); world.add(architecture.group); capacity = state.layout.capacity; }
+    if (capacity !== state.layout.capacity) { wallBoard.root.removeFromParent(); architecture.release(); architecture = createMultiArchitecture(state.layout); architecture.group.add(wallBoard.root); wallBoard.setBounds(state.layout.bounds); world.add(architecture.group); capacity = state.layout.capacity; }
+    wallBoard.update(callbacks.getBoardEntries?.());
     architecture.group.visible = !onRoof; roof.visible = onRoof;
     (world.background as THREE.Color).copy(onRoof ? roofColor : officeColor); ambient.color.set(onRoof ? '#fff0d5' : '#fff8e7');
     const quality = `${settings.quality}/${devicePixelRatio}`;
@@ -295,6 +304,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   try { render(performance.now()); callbacks.onReady(); } catch (error) { callbacks.onError(error instanceof Error ? error.message : '회사를 불러오지 못했어요.'); }
   return { zoom, rotate, tilt, resetView, screenToWorld: point => screenAxisToWorld(point, orbit), dispose() {
     dead = true; cancelAnimationFrame(frame); observer.disconnect();
+    wallBoard.dispose();
     renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', pointerCancel);
     architecture.release(); retired.forEach(object => world.add(object)); rigs.forEach(({ rig }) => { if (!rig.root.parent) world.add(rig.root); });
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();

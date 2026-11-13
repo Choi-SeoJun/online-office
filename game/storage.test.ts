@@ -26,3 +26,13 @@ test('storage access failures never escape and persisted data excludes transient
  assert.deepEqual(JSON.parse(saved),toPersistedState(e.state));assert.deepEqual(JSON.parse(saved).snacks,{cookie:2,choco:0,cracker:0});assert.equal('player' in JSON.parse(saved),false);assert.equal('coffee' in JSON.parse(saved).snacks,false);
  const loaded=createGameEngine(readSavedState({getItem:()=>saved}));assert.equal(loaded.state.weapon,'hammer');assert.equal(loaded.state.inventory.coffee,0);assert.equal(loaded.state.inventory.cookie,2);
 });
+
+test('solo company name survives profile saves and defaults for legacy records', () => {
+  const legacy = readSavedState({ getItem: () => JSON.stringify({ version: 1 }) })!;
+  assert.equal(legacy.companyName, '우리 회사');
+  const e = createGameEngine(legacy);
+  e.dispatch({ type: 'profile', value: { companyName: '  나의 회사  ', rank: '인턴', bossRank: '대표' } });
+  const saved = toPersistedState(e.state);
+  assert.equal(saved.companyName, '나의 회사'); assert.equal(saved.rank, '인턴'); assert.equal(saved.bossRank, '대표');
+  assert.equal(createGameEngine(saved).state.companyName, '나의 회사');
+});

@@ -9,8 +9,9 @@ export const BOARD_BODY_LIMIT = 32 * 1024;
 export type BoardKind = 'note' | 'text' | 'doodle';
 export type BoardColor = typeof BOARD_COLORS[number];
 export type BoardPoint = { x: number; y: number };
-export type BoardStroke = { color: BoardColor; points: BoardPoint[] };
-export type BoardDraft = { id: string; kind: BoardKind; color: BoardColor; text: string; strokes: BoardStroke[] };
+export type BoardPlacement = { x: number; y: number; width: number; height: number };
+export type BoardStroke = { color: BoardColor; points: BoardPoint[]; tool?: 'pen' | 'fill'; width?: number };
+export type BoardDraft = { id: string; kind: BoardKind; color: BoardColor; text: string; strokes: BoardStroke[]; placement?: BoardPlacement };
 export type BoardEntry = BoardDraft & { authorId: string; authorName: string; createdAt: number };
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -32,6 +33,15 @@ function isCoordinate(raw: unknown): raw is number {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 1;
 }
 
+export function parseBoardPlacement(raw: unknown): BoardPlacement | null {
+  const value = boardRecord(raw);
+  if (!value) return null;
+  const { x, y, width, height } = value;
+  if (!isCoordinate(x) || !isCoordinate(y) || !isCoordinate(width) || !isCoordinate(height) ||
+      width <= 0 || height <= 0 || x + width > 1 + 1e-10 || y + height > 1 + 1e-10) return null;
+  return { x, y, width, height };
+}
+
 export function parseBoardDraft(raw: unknown): BoardDraft | null {
   const value = boardRecord(raw);
   if (!value) return null;
@@ -39,14 +49,20 @@ export function parseBoardDraft(raw: unknown): BoardDraft | null {
   if (!validBoardId(id) || (kind !== 'note' && kind !== 'text' && kind !== 'doodle') ||
       !isColor(color) || typeof value.text !== 'string' || !Array.isArray(strokes)) return null;
   const text = value.text.replace(/\r\n?/g, '\n').trim();
+  const placement = value.placement === undefined ? undefined : parseBoardPlacement(value.placement);
+  if (placement === null) return null;
+  const position = placement ? { placement } : {};
   if (controls.test(text) || Array.from(text).length > (kind === 'note' ? BOARD_NOTE_LIMIT : BOARD_TEXT_LIMIT)) return null;
-  if (kind !== 'doodle') return text && strokes.length === 0 ? { id, kind, color, text, strokes: [] } : null;
+  if (kind !== 'doodle') return text && strokes.length === 0 ? { id, kind, color, text, strokes: [], ...position } : null;
   if (!strokes.length || strokes.length > BOARD_MAX_STROKES) return null;
   const parsed: BoardStroke[] = [];
   let count = 0;
   for (const rawStroke of strokes) {
     const stroke = boardRecord(rawStroke);
     if (!stroke || !isColor(stroke.color) || !Array.isArray(stroke.points) || !stroke.points.length) return null;
+    if (stroke.tool !== undefined && stroke.tool !== 'pen' && stroke.tool !== 'fill') return null;
+    if (stroke.width !== undefined && (typeof stroke.width !== 'number' || !Number.isFinite(stroke.width) || stroke.width < 1 || stroke.width > 32)) return null;
+    if (stroke.tool === 'fill' && stroke.points.length !== 1) return null;
     count += stroke.points.length;
     if (count > BOARD_MAX_POINTS) return null;
     const points: BoardPoint[] = [];
@@ -55,9 +71,11 @@ export function parseBoardDraft(raw: unknown): BoardDraft | null {
       if (!point || !isCoordinate(point.x) || !isCoordinate(point.y)) return null;
       points.push({ x: Math.round(point.x * 10000) / 10000, y: Math.round(point.y * 10000) / 10000 });
     }
-    parsed.push({ color: stroke.color, points });
+    parsed.push({ color: stroke.color, points,
+      ...(stroke.tool === undefined ? {} : { tool: stroke.tool }),
+      ...(stroke.width === undefined ? {} : { width: stroke.width as number }) });
   }
-  return { id, kind, color, text, strokes: parsed };
+  return { id, kind, color, text, strokes: parsed, ...position };
 }
 
 export function parseBoardEntry(raw: unknown): BoardEntry | null {

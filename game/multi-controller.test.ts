@@ -202,9 +202,26 @@ test('room boss rank overrides saved and actor ranks while each member keeps the
  guest.engine.dispatch({type:'enter',bossRank:'사장'});
  const snapshot=roomSnapshot(host,guest,1000);snapshot.room.bossRank='이사';snapshot.boss.actor.rank='부장';
  host.applySnapshot(snapshot);guest.applySnapshot(snapshot);
- for(const c of [host,guest]){assert.equal(c.engine.state.bossRank,'이사');assert.equal(c.engine.state.boss.name,'박이사');assert.equal(c.engine.state.boss.rank,'이사');}
+ for(const c of [host,guest]){assert.equal(c.engine.state.bossRank,'이사');assert.equal(c.engine.state.boss.name,'이사님');assert.equal(c.engine.state.boss.rank,'이사');}
  assert.equal(host.engine.state.rank,'대리');assert.equal(guest.engine.state.rank,'사원');assert.equal(host.player.name,'민수');assert.equal(guest.player.name,'영희');
  snapshot.serverTime++;snapshot.room.hostId='guest';guest.applySnapshot(snapshot);host.applySnapshot(snapshot);
  assert.equal(guest.serializeBoss()?.actor.rank,'이사');assert.equal(host.serializeBoss(),undefined);
  assert.equal(guest.engine.state.rank,'사원');assert.equal(host.engine.state.rank,'대리');host.engine.dispose();guest.engine.dispose();
+});
+
+test('profile snapshots change identity without rewinding movement or replacing solo company preferences', () => {
+  const c = createMultiController(member(4, 0), 4);
+  c.engine.dispatch({ type: 'profile', value: { companyName: '내 혼자 회사' } });
+  c.engine.state.inventory.cookie = 2; c.engine.state.inventory.coffee = 1;
+  const snapshot = roomSnapshot(c);
+  snapshot.room.name = '공용 회사'; snapshot.room.bossRank = '대표';
+  Object.assign(snapshot.players[0], { name: '새이름', rank: '팀장', avatar: 'ponytail' });
+  c.player.z -= .3; const location = { x: c.player.x, z: c.player.z };
+  c.applySnapshot(snapshot);
+  assert.equal(c.engine.state.name, '새이름'); assert.equal(c.player.name, '새이름');
+  assert.equal(c.engine.state.rank, '팀장'); assert.equal(c.player.avatar, 'ponytail');
+  assert.equal(c.engine.state.boss.name, '대표님'); assert.equal(c.engine.state.companyName, '내 혼자 회사');
+  assert.deepEqual({ x: c.player.x, z: c.player.z }, location);
+  assert.equal(c.engine.state.inventory.cookie, 2); assert.equal(c.engine.state.inventory.coffee, 1);
+  c.engine.dispose();
 });

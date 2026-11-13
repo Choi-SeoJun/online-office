@@ -18,6 +18,7 @@ function normalize(value: unknown): PersistedState | undefined {
   }
   return {
     version: 1,
+    companyName: typeof data.companyName === 'string' ? Array.from(data.companyName.trim().replace(/[\u0000-\u001f\u007f]/g, '')).slice(0, 24).join('') || '우리 회사' : '우리 회사',
     name: typeof data.name === 'string' ? data.name.trim().slice(0, 10) || '김사원' : '김사원',
     avatar: data.avatar === 'ponytail' ? 'ponytail' : 'short',
     rank: normalizeRank(data.rank), bossRank: normalizeRank(data.bossRank, '부장'),
@@ -40,7 +41,7 @@ export function readSavedState(storage?: Pick<Storage, 'getItem'>): PersistedSta
 }
 
 export function toPersistedState(state: GameState): PersistedState {
-  return normalize({ version: 1, name: state.name, avatar: state.player.avatar, rank: state.rank, bossRank: state.bossRank, weapon: state.weapon, settings: state.settings,
+  return normalize({ version: 1, name: state.name, companyName: state.companyName, avatar: state.player.avatar, rank: state.rank, bossRank: state.bossRank, weapon: state.weapon, settings: state.settings,
     snacks: { cookie: state.inventory.cookie, choco: state.inventory.choco, cracker: state.inventory.cracker } })!;
 }
 

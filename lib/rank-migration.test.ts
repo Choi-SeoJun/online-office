@@ -29,7 +29,7 @@ test('rank migration preserves existing office records and supplies legacy and n
   const tables = ['office_rooms', 'office_members', 'office_messages', 'office_notifications', 'office_feedback', 'office_board_entries', 'office_rate_limits', 'office_feedback_rate'];
   const before = tables.map(table => sql.prepare(`SELECT * FROM ${table}`).all());
   const indexes = sql.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' ORDER BY name").all();
-  migrations.filter(file => file >= '0005').forEach(apply);
+  migrations.filter(file => file.startsWith('0005')).forEach(apply);
 
   assert.equal(sql.prepare('SELECT * FROM office_members').get()!.rank, '사원');
   assert.equal(sql.prepare('SELECT * FROM office_rooms').get()!.boss_rank, '부장');
