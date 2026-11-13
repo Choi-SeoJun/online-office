@@ -37,6 +37,15 @@ test('leaving a room cancels pending work and ignores a late response', async ()
   const sync = createWallpaperSync({ ...c, save: async (_, requestSignal) => { signal = requestSignal; await new Promise<void>(resolve => { finish = resolve; }); }, onStatus() {}, onSaved: () => saved++ });
   sync.set('photo'); sync.dispose(); assert.equal(signal.aborted, true); finish(); await settle(); await c.advance(10000); assert.equal(saved, 0);
 });
+test('a lost upload response cannot suppress a newer reset to the previous default', async () => {
+  const c = clock(), writes: (string | null)[] = []; let fail!: () => void;
+  const sync = createWallpaperSync({ ...c, initialImage: null, save: async image => {
+    writes.push(image);
+    if (writes.length === 1) await new Promise<void>((_, reject) => { fail = () => reject(new Error('response lost after commit')); });
+  }, onStatus() {}, onSaved() {} });
+  sync.set('photo'); sync.set(null); fail(); await settle(); await c.advance(5000);
+  assert.deepEqual(writes, ['photo', null]); sync.dispose();
+});
 test('a fresh default needs no upload, but an explicit reset clears an existing room image', async () => {
   const writes: (string | null)[] = [];
   const options = { save: async (image: string | null) => { writes.push(image); }, onStatus() {}, onSaved() {} };

@@ -26,7 +26,9 @@ export function createWallpaperSync(options: {
       shared = image; after = now() + 2200; options.onSaved();
       options.onStatus(desired === shared ? 'saved' : 'syncing');
     } catch {
-      if (!stopped) { after = now() + 5000; options.onStatus('retrying'); }
+      // A timeout can happen after the server committed the image. Reassert the
+      // latest choice even when it equals the previously acknowledged value.
+      if (!stopped) { shared = undefined; after = now() + 5000; options.onStatus('retrying'); }
     } finally {
       running = false;
       if (!stopped && desired !== undefined && desired !== shared) cancelTimer = schedule(() => void flush(), Math.max(0, after - now()));
