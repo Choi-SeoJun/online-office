@@ -76,7 +76,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
     keys.current.clear();
     controller.setAxis({x:0,z:0});
     engine.dispatch({type:'pause',value:document.hidden||personalDialogOpen()});
-    audio.current?.sync(engine.state);
+    audio.current?.sync(engine.state, environmentRef.current.precipitation);
   }, [controller,engine,personalDialogOpen]);
   const handleFeedbackOpen = (open: boolean) => {
     feedbackOpen.current = open;
@@ -175,7 +175,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
         onFrame:dt=>{
           if(document.hidden||disposed.current)return;
           const k=keys.current,axis=modalRef.current?{x:0,z:0}:{x:Number(k.has('d')||k.has('arrowright'))-Number(k.has('a')||k.has('arrowleft')),z:Number(k.has('s')||k.has('arrowdown'))-Number(k.has('w')||k.has('arrowup'))};
-          controller.setAxis(scene.current?.screenToWorld(axis)??axis);controller.step(dt);audio.current?.sync(engine.state);
+          controller.setAxis(scene.current?.screenToWorld(axis)??axis);controller.step(dt);audio.current?.sync(engine.state, environmentRef.current.precipitation);
         },
         onActor:id=>{if(!modalRef.current&&id!==session.playerId){setSelectedCoworker(id);setMembersOpen(false);}},
         onGround:point=>{if(!modalRef.current){setPanel(null);send({type:'move',point});}},

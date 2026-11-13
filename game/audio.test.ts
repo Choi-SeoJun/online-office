@@ -36,9 +36,9 @@ function audioDevice(load?: (url: string) => Promise<ArrayBuffer>) {
   Object.defineProperty(globalThis, 'document', { value: document, configurable: true });
   return {
     voices, nodes, buffers, contexts, document, requests,
-    wind() {
+    ambience(name: 'wind' | 'rain') {
       const source = nodes.find(n => n instanceof Source && n.loop) as Source | undefined;
-      assert.ok(source, 'the rooftop needs a reusable looping wind source');
+      assert.ok(source, `expected a reusable looping ${name} source`);
       const highpass = source.connections[0], lowpass = highpass?.connections[0], level = lowpass?.connections[0];
       assert.equal(highpass?.type, 'highpass'); assert.equal(lowpass?.type, 'lowpass'); assert.equal(level?.kind, 'gain');
       return { source, highpass, lowpass, level, master: level.connections[0] };
@@ -132,7 +132,7 @@ test('wind starts softly only on an entered, audible and settled rooftop', () =>
     engine.state.settings.volume = .4; engine.state.entered = false; sound.sync(engine.state);
     assert.equal(device.nodes.some(n => n.loop), false);
     engine.state.entered = true; sound.sync(engine.state);
-    const wind = device.wind(), fade = wind.level.gain.schedule.at(-1)!;
+    const wind = device.ambience('wind'), fade = wind.level.gain.schedule.at(-1)!;
     assert.equal(fade.method, 'target'); assert.ok(fade.value > 0 && fade.value <= .12); assert.ok(fade.timeConstant! >= .5, 'enter with a soft fade');
     assert.equal(wind.master.gain.schedule.at(-1)?.value, .4, 'wind uses the existing volume control');
     assert.ok(wind.lowpass.frequency.value < 1500, 'wind should not be a bright hiss');
@@ -152,7 +152,7 @@ test('wind gently fades on travel and quickly silences for mute, pause, exit and
   try {
     engine.dispatch({type:'enter'}); engine.state.floor = 'rooftop'; engine.state.settings.sound = true;
     sound.start(); sound.sync(engine.state);
-    const {level, master} = device.wind();
+    const {level, master} = device.ambience('wind');
     const assertQuiet = (fast: boolean) => {
       const fade = level.gain.schedule.at(-1)!;
       assert.equal(fade.method, 'target'); assert.equal(fade.value, 0);
@@ -181,7 +181,7 @@ test('wind gusts stay calm, reuse resources on round trips and stop on disposal'
   try {
     engine.dispatch({type:'enter'}); engine.state.floor = 'rooftop'; engine.state.settings.sound = true;
     sound.start(); sound.sync(engine.state);
-    const wind = device.wind(), nodeCount = device.nodes.length, bufferCount = device.buffers.length;
+    const wind = device.ambience('wind'), nodeCount = device.nodes.length, bufferCount = device.buffers.length;
     for (let frame = 1; frame <= 1800; frame++) {
       engine.state.elapsed = frame / 60; device.contexts[0].currentTime = frame / 60; sound.sync(engine.state);
     }
@@ -200,6 +200,86 @@ test('wind gusts stay calm, reuse resources on round trips and stop on disposal'
     assert.ok([wind.source, wind.highpass, wind.lowpass, wind.level, wind.master].every(node => node.disconnected));
     assert.equal(device.contexts[0].state, 'closed');
     sound.start(); sound.sync(engine.state); assert.equal(device.nodes.length, nodeCount);
+  } finally { sound.dispose(); device.restore(); }
+});
+
+test('rain prepares a bounded, seamless stereo noise loop only when audible', async () => {
+  const device = audioDevice(), sound = createOfficeAudio(), { state } = createGameEngine();
+  try {
+    state.settings.sound = true;
+    sound.sync(state, 'rain');
+    assert.equal(device.contexts.length, 0);
+    await sound.start();
+    sound.sync(state, 'rain');
+    state.entered = true;
+    sound.sync(state, 'snow');
+    sound.sync(state);
+    assert.equal(device.voices.length, 0);
+    sound.sync(state, 'rain');
+    assert.deepEqual(device.voices.map(voice => voice.kind), ['noise']);
+    const {source, lowpass, level, master} = device.ambience('rain');
+    const fade = level.gain.schedule.at(-1)!;
+    assert.ok(fade.value > 0 && fade.value <= .12);
+    assert.ok(fade.timeConstant! >= .3);
+    assert.equal(master.gain.schedule.at(-1)?.value, state.settings.volume);
+    assert.ok(lowpass.frequency.value < 1500);
+    const {duration, data: [left, right]} = source.buffer!;
+    assert.ok(duration >= 12 && duration <= 24);
+    assert.ok(left.some((sample, i) => sample !== right[i]));
+    for (const channel of [left, right]) {
+      assert.ok(channel.every(sample => Number.isFinite(sample) && Math.abs(sample) <= 1));
+      assert.ok(Math.abs(channel[0] - channel.at(-1)!) < .0001);
+    }
+  } finally { sound.dispose(); device.restore(); }
+});
+
+test('rain fades across weather and floor changes and reuses its loop after interruptions', async () => {
+  const device = audioDevice(), sound = createOfficeAudio(), { state } = createGameEngine();
+  try {
+    state.entered = true;
+    state.settings.sound = true;
+    await sound.start();
+    sound.sync(state, 'rain');
+    const {source, highpass, lowpass, level, master} = device.ambience('rain');
+    const officeLevel = level.gain.value, officeCutoff = lowpass.frequency.value;
+    const rain = () => { device.contexts[0].currentTime += 1; sound.sync(state, 'rain'); };
+    const assertFade = (fast: boolean) => {
+      const fade = level.gain.schedule.at(-1)!;
+      assert.equal(fade.value, 0);
+      assert.ok(fade.timeConstant! > 0 && fade.timeConstant! <= (fast ? .05 : .45));
+      if (fast) assert.equal(master.gain.schedule.at(-1)?.value, 0);
+    };
+    state.transition = {from:'office',to:'rooftop',remaining:1,duration:1};
+    rain(); assertFade(false);
+    state.floor = 'rooftop'; state.transition = null;
+    rain();
+    assert.ok(level.gain.value > officeLevel && level.gain.value <= .16);
+    assert.ok(lowpass.frequency.value > officeCutoff);
+    sound.sync(state); assertFade(false);
+    state.floor = 'office'; rain();
+    assert.equal(level.gain.value, officeLevel);
+    const interruptions = [
+      (on: boolean) => { state.settings.sound = !on; },
+      (on: boolean) => { state.settings.volume = on ? 0 : .4; },
+      (on: boolean) => { state.paused = on; },
+      (on: boolean) => { device.document.hidden = on; },
+      (on: boolean) => { state.entered = !on; },
+    ];
+    const nodeCount = device.nodes.length, bufferCount = device.buffers.length;
+    for (const interrupt of interruptions) {
+      interrupt(true); rain(); assertFade(true);
+      interrupt(false); rain(); assert.equal(level.gain.value, officeLevel);
+    }
+    const scheduleCount = level.gain.schedule.length;
+    for (let frame = 0; frame < 60; frame++) sound.sync(state, 'rain');
+    assert.equal(level.gain.schedule.length, scheduleCount);
+    assert.equal(device.nodes.length, nodeCount);
+    assert.equal(device.buffers.length, bufferCount);
+    assert.equal(device.voices.length, 2, 'rain and rooftop wind each start once');
+    sound.dispose();
+    assert.ok(Number.isFinite(source.voice.until));
+    assert.ok([source, highpass, lowpass, level, master].every(node => node.disconnected));
+    assert.equal(device.contexts[0].state, 'closed');
   } finally { sound.dispose(); device.restore(); }
 });
 

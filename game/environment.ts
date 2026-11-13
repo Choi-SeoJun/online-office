@@ -1,16 +1,8 @@
 import { getPosition, getTimes } from 'suncalc';
 import type { EnvironmentFrame, Precipitation, Season, WeatherForecast, WeatherRegion } from './environment-types.ts';
+import { KOREA_REGIONS } from './korea-regions.ts';
 
-const city = (name: string, latitude: number, longitude: number, timezone = 'Asia/Seoul'): WeatherRegion =>
-  ({ name, latitude, longitude, timezone, source: 'manual' });
-
-export const WEATHER_REGIONS = [
-  city('서울', 37.57, 126.98), city('부산', 35.18, 129.08), city('인천', 37.46, 126.71),
-  city('대구', 35.87, 128.60), city('광주', 35.16, 126.85), city('대전', 36.35, 127.38),
-  city('울산', 35.54, 129.31), city('제주', 33.50, 126.53),
-  city('런던', 51.51, -0.13, 'Europe/London'), city('뉴욕', 40.71, -74.01, 'America/New_York'),
-  city('시드니', -33.87, 151.21, 'Australia/Sydney'),
-];
+export const WEATHER_REGIONS = KOREA_REGIONS;
 export const DEFAULT_REGION: WeatherRegion = { ...WEATHER_REGIONS[0], source: 'default' };
 
 const labels: ReadonlyMap<number, string> = new Map([

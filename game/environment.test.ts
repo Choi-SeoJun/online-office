@@ -31,10 +31,11 @@ test('parses Unix timestamps and rejects invalid current weather', () => {
   assert.equal(usableForecast({ ...forecast, fetchedAt: noon + 1 }, noon), null);
 });
 
-test('location precision is removed before region reuse', () => {
-  const region = normalizeRegion({ ...DEFAULT_REGION, source: 'location', latitude: 37.12345, longitude: -127.98765 });
-  assert.equal(region?.latitude, 37.12);
-  assert.equal(region?.longitude, -127.99);
+test('location is converted to a domestic representative point before reuse', () => {
+  const region = normalizeRegion({ ...DEFAULT_REGION, id: undefined, source: 'location', latitude: 36.7891234, longitude: 127.0045678 });
+  assert.equal(region?.name, '충청남도 아산시');
+  assert.equal(region?.latitude, 36.79);
+  assert.equal(region?.longitude, 127.00);
   assert.equal(normalizeRegion({ ...DEFAULT_REGION, latitude: 90.001 }), null);
 });
 
@@ -52,12 +53,12 @@ test('browser cache is bounded, matches the region and stores rounded coordinate
     if (previous) Object.defineProperty(globalThis, 'localStorage', previous);
     else Reflect.deleteProperty(globalThis, 'localStorage');
   });
-  const chosen = { ...DEFAULT_REGION, source: 'location' as const, latitude: 37.12345 };
+  const chosen = { ...DEFAULT_REGION, id: undefined, source: 'location' as const, latitude: 36.7891234, longitude: 127.0045678 };
   saveRegion(chosen);
   const forecast = parseWeatherForecast(raw, noon)!;
   saveForecast(DEFAULT_REGION, forecast);
-  assert.ok([...entries.values()].some(value => value.includes('"latitude":37.12')));
-  assert.ok([...entries.values()].every(value => !value.includes('37.12345')));
+  assert.ok([...entries.values()].some(value => value.includes('충청남도 아산시')));
+  assert.ok([...entries.values()].every(value => !value.includes('36.7891234')));
   assert.equal(readForecast(chosen, noon), null);
   assert.deepEqual(readForecast(DEFAULT_REGION, noon), forecast);
   assert.equal(readForecast(DEFAULT_REGION, noon + 121 * 60000), null);
@@ -73,13 +74,13 @@ test('weather requests transmit rounded coordinates and omit credentials and ref
   t.mock.method(Date, 'now', () => noon);
   const controller = new AbortController();
   t.mock.method(globalThis, 'fetch', async (url: URL, options: RequestInit) => {
-    assert.equal(url.href, 'https://example.com/api/weather?latitude=37.12&longitude=126.99');
+    assert.equal(url.href, 'https://example.com/api/weather?latitude=36.79&longitude=127.00');
     assert.equal(options.signal, controller.signal);
     assert.equal(options.credentials, 'omit');
     assert.equal(options.referrerPolicy, 'no-referrer');
     return Response.json(raw);
   });
-  const forecast = await requestForecast({ ...DEFAULT_REGION, source: 'location', latitude: 37.12345, longitude: 126.98765 }, controller.signal);
+  const forecast = await requestForecast({ ...DEFAULT_REGION, id: undefined, source: 'location', latitude: 36.7891234, longitude: 127.0045678 }, controller.signal);
   assert.equal(forecast.code, 61);
 });
 

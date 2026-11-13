@@ -55,7 +55,7 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   const wallpaper = usePersonalWallpaper() ?? null, wallpaperRef = useRef(wallpaper); wallpaperRef.current = wallpaper;
   const syncPause = useCallback(() => {
     engine.dispatch({ type: 'pause', value: document.hidden || feedbackOpen.current || boardOpen.current || wallpaperOpen.current || newsOpen.current || weatherOpen.current || panelRef.current === 'settings' || panelRef.current === 'help' });
-    audio.current?.sync(engine.state);
+    audio.current?.sync(engine.state, environmentRef.current.precipitation);
   }, [engine]);
   const handleFeedbackOpen = (open: boolean) => {
     feedbackOpen.current = open;
@@ -73,11 +73,11 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   useEffect(() => { const sound = createOfficeAudio(); audio.current = sound; return () => { sound.dispose(); audio.current = null; }; }, []);
   useEffect(() => {
     let cancelled = false; setReady(false); setError('');
-    const fail = (message: string) => { if (cancelled) return; engine.dispatch({ type: 'pause', value: true }); audio.current?.sync(engine.state); setError(message); };
+    const fail = (message: string) => { if (cancelled) return; engine.dispatch({ type: 'pause', value: true }); audio.current?.sync(engine.state, environmentRef.current.precipitation); setError(message); };
     void import('@/game/scene').then(({ createOfficeScene }) => {
       if (cancelled || !host.current) return;
       try { scene.current = createOfficeScene(host.current, {
-        getState: () => engine.state, onFrame: dt => { engine.step(dt); audio.current?.sync(engine.state); },
+        getState: () => engine.state, onFrame: dt => { engine.step(dt); audio.current?.sync(engine.state, environmentRef.current.precipitation); },
         getWallpaper: () => wallpaperRef.current,
         getEnvironment: () => environmentRef.current,
         getBoardEntries: () => boardEntries.current, onBoard: openWallBoard,

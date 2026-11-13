@@ -121,9 +121,16 @@
 }
 
 .weather-settings {
-  align-items: end;
+  align-items: stretch;
+  flex-direction: column;
   margin-top: 18px;
 }
+
+.weather-region-fields { display: flex; align-items: end; gap: 8px; }
+.weather-settings > .weather-action { align-self: flex-start; }
+.weather-sources { display: flex; flex-direction: column; gap: 4px; }
+.weather-region-fields select { min-width: 0; font-size: 14px; }
+@media (max-width: 440px) { .weather-region-fields { flex-direction: column; align-items: stretch; } }
 
 .weather-settings label {
   display: grid;

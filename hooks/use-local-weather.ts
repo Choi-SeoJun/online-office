@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_REGION, environmentFrame } from '../game/environment.ts';
+import { nearestKoreaRegion } from '../game/korea-regions.ts';
 import type { WeatherForecast, WeatherRegion, WeatherStatus } from '../game/environment-types.ts';
 import { normalizeRegion, readForecast, readRegion, regionKey, requestForecast, saveForecast, saveRegion, usableForecast, WEATHER_CACHE_AGE } from '../game/weather-client.ts';
 
@@ -98,23 +99,20 @@ export function useLocalWeather() {
     }
     navigator.geolocation.getCurrentPosition(({ coords }) => {
       if (locationChoice.current !== choice) return;
-      const next = normalizeRegion({
-        source: 'location',
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      });
-      if (next) selectRegion(next);
-      else fail();
+      const next = nearestKoreaRegion(coords.latitude, coords.longitude);
+      if (next) selectRegion({ ...next, source: 'location' });
+      else { setLocating(false); setLocationError('가까운 대한민국 지역을 찾지 못했어요. 시·도를 직접 선택해 주세요.'); }
     }, fail, { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 });
   }, [selectRegion]);
 
   const refresh = useCallback(() => { void load(selected.current, true); }, [load]);
+  const cancelLocation = useCallback(() => { locationChoice.current++; setLocating(false); setLocationError(''); }, []);
 
   useEffect(() => {
     const initial = readRegion();
     selected.current = initial;
     setRegion(initial);
+    saveRegion(initial);
     void load(initial);
 
     function tick() {
@@ -149,5 +147,5 @@ export function useLocalWeather() {
   const forecast = usableForecast(weather.forecast, now);
   const status = !forecast && (weather.status === 'live' || weather.status === 'cached') ? 'unavailable' : weather.status;
   const frame = environmentFrame(region, forecast, now);
-  return { frame, region, forecast, status, error: locationError || error, locating, selectRegion, useCurrentLocation, refresh };
+  return { frame, region, forecast, status, error: locationError || error, locating, selectRegion, useCurrentLocation, cancelLocation, refresh };
 }

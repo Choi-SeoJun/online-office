@@ -2,6 +2,7 @@ import type { GameState, Weapon } from './types.ts';
 import { WEAPON_IMPACT, WEAPONS } from './layout.ts';
 import { publicAssetPath } from './hosting.ts';
 import { workExpression } from './expression.ts';
+import type { Precipitation } from './environment-types.ts';
 
 const IMPACT_SAMPLES: Record<Weapon, { url: string; offset: number }> = {
   fan: { url: publicAssetPath('audio/ribhavagrawal-hit-by-a-wood-230542.mp3'), offset: .048 },
@@ -9,12 +10,46 @@ const IMPACT_SAMPLES: Record<Weapon, { url: string; offset: number }> = {
   punch: { url: publicAssetPath('audio/soraatwod-punch-416719.mp3'), offset: .375 },
 };
 
-/** Uploaded impact recordings, synthesized keyboard and wind; no background timers. */
+function rainBuffer(context: AudioContext) {
+  const rate = context.sampleRate, length = Math.ceil(rate * 16);
+  const buffer = context.createBuffer(2, length, rate);
+  const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
+  const smoothing = Math.exp(-2 * Math.PI * 2700 / rate);
+  const dropDecay = Math.exp(-1 / (rate * .018));
+  let common = 0, leftDrop = 0, rightDrop = 0;
+  for (let i = 0; i < length; i++) {
+    const noise = Math.random() * 2 - 1;
+    common = smoothing * common + (1 - smoothing) * noise;
+    leftDrop *= dropDecay;
+    rightDrop *= dropDecay;
+    // Independent soft splashes are bursts of noise with short, irregular tails.
+    const drop = Math.random() * rate;
+    if (drop < 18) leftDrop += .19 * (1 - drop / 18);
+    else if (drop < 36) rightDrop += .19 * (1 - (drop - 18) / 18);
+    left[i] = common * .36 + (Math.random() * 2 - 1) * (.09 + leftDrop);
+    right[i] = common * .36 + (Math.random() * 2 - 1) * (.09 + rightDrop);
+  }
+  for (const channel of [left, right]) {
+    // Match the endpoints with a slow correction removed by the high-pass.
+    const drift = channel[length - 1] - channel[0];
+    let peak = 0;
+    for (let i = 0; i < length; i++) {
+      channel[i] -= drift * i / (length - 1);
+      peak = Math.max(peak, Math.abs(channel[i]));
+    }
+    if (peak > .8) for (let i = 0; i < length; i++) channel[i] *= .8 / peak;
+  }
+  return buffer;
+}
+
+/** Uploaded impact recordings and synthesized keyboard, wind and rain. */
 export function createOfficeAudio() {
   let context: AudioContext | null = null, master: GainNode | null = null;
   let keyNoise: AudioBuffer | null = null, currentState: GameState | null = null;
   let wind: AudioBufferSourceNode | null = null, windHighpass: BiquadFilterNode | null = null, windLowpass: BiquadFilterNode | null = null, windLevel: GainNode | null = null;
   let windActive = false, nextWindUpdate = 0;
+  let rain: { source: AudioBufferSourceNode; highpass: BiquadFilterNode; lowpass: BiquadFilterNode; level: GainNode } | null = null;
+  let rainTarget = 0;
   const impactBuffers = new Map<Weapon, AudioBuffer>(), sampleRequest = new AbortController();
   let impactLoading: Promise<void> | null = null;
   let hitKey: string | null = null, impactDone = false;
@@ -125,6 +160,30 @@ export function createOfficeAudio() {
     if (active) windLowpass.frequency.setTargetAtTime(800 + Math.sin(state.elapsed * .23) * 180, at, 1.2);
     windActive = active; nextWindUpdate = at + .25;
   }
+  function syncRain(state: GameState, enabled: boolean, precipitation: Precipitation) {
+    if (!context || !master || context.state !== 'running') return;
+    const indoors = inOffice(state);
+    const target = enabled && !state.transition && precipitation === 'rain' ? (indoors ? .055 : .125) : 0;
+    if (target === rainTarget) return;
+    const cutoff = indoors ? 950 : 3200;
+    if (!rain) {
+      const source = context.createBufferSource();
+      source.buffer = rainBuffer(context);
+      source.loop = true;
+      const highpass = context.createBiquadFilter(), lowpass = context.createBiquadFilter();
+      highpass.type = 'highpass'; highpass.frequency.value = 170; highpass.Q.value = .5;
+      lowpass.type = 'lowpass'; lowpass.frequency.value = cutoff; lowpass.Q.value = .5;
+      const level = context.createGain();
+      level.gain.value = 0;
+      source.connect(highpass).connect(lowpass).connect(level).connect(master);
+      source.start();
+      rain = { source, highpass, lowpass, level };
+    }
+    const at = context.currentTime;
+    if (target) rain.lowpass.frequency.setTargetAtTime(cutoff, at, .35);
+    rain.level.gain.setTargetAtTime(target, at, target ? .45 : enabled ? .24 : .04);
+    rainTarget = target;
+  }
   function clickNoise(at: number, level: number, pitch: number) {
     if (!context || !master || !keyNoise) return;
     const source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
@@ -146,11 +205,12 @@ export function createOfficeAudio() {
     if (!state || !audible(state) || !working(state) || !context || context.currentTime - lastDirect < .025) return;
     lastDirect = context.currentTime; directUntil = state.elapsed + .65; keyStroke(key);
   }
-  function sync(state: GameState) {
+  function sync(state: GameState, precipitation: Precipitation = 'none') {
     currentState = state;
     const enabled = audible(state);
     if (master && context) master.gain.setTargetAtTime(enabled ? Math.min(1, Math.max(0, state.settings.volume)) : 0, context.currentTime, 0.04);
     syncWind(state, enabled);
+    syncRain(state, enabled, precipitation);
     syncImpact(state, enabled);
     if (!enabled) { lastEvent = state.event?.id ?? lastEvent; nextTyping = state.elapsed + .08; burstLeft = 0; return; }
     if (state.event && state.event.id !== lastEvent) {
@@ -174,6 +234,11 @@ export function createOfficeAudio() {
     if (disposed) return;
     disposed = true; currentState = null; sampleRequest.abort(); impactBuffers.clear(); stopImpacts();
     wind?.stop(); wind?.disconnect(); windHighpass?.disconnect(); windLowpass?.disconnect(); windLevel?.disconnect();
+    if (rain) {
+      rain.source.stop();
+      rain.source.disconnect(); rain.highpass.disconnect(); rain.lowpass.disconnect(); rain.level.disconnect();
+      rain = null;
+    }
     master?.disconnect(); if (context) void context.close().catch(() => {});
     context = null; master = null; keyNoise = null; wind = null; windHighpass = null; windLowpass = null; windLevel = null;
   } };

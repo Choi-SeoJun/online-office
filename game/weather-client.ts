@@ -1,6 +1,7 @@
 import { boundedNumber, DEFAULT_REGION, MAX_FORECAST_AGE, parseWeatherForecast, validTimezone, validWeatherCode, WEATHER_REGIONS } from './environment.ts';
 import type { WeatherForecast, WeatherRegion } from './environment-types.ts';
 import { roomEndpoint } from './hosting.ts';
+import { koreaRegionById, legacyKoreaRegion, nearestKoreaRegion } from './korea-regions.ts';
 
 export const WEATHER_CACHE_AGE = 15 * 60000;
 const REGION_KEY = 'office-weather-region-v1';
@@ -8,12 +9,13 @@ const CACHE_KEY = 'office-weather-forecast-v1';
 
 export function normalizeRegion(value: unknown): WeatherRegion | null {
   if (!value || typeof value !== 'object') return null;
-  const { latitude, longitude, source, timezone } = value as Partial<WeatherRegion>;
-  if (!boundedNumber(latitude, -90, 90) || !boundedNumber(longitude, -180, 180) || !validTimezone(timezone)) return null;
+  const { id, name, latitude, longitude, source } = value as Partial<WeatherRegion>;
+  if (!boundedNumber(latitude, -90, 90) || !boundedNumber(longitude, -180, 180)) return null;
   if (source === 'default') return DEFAULT_REGION;
-  if (source === 'manual') return WEATHER_REGIONS.find(city => city.latitude === latitude && city.longitude === longitude) ?? null;
-  if (source !== 'location') return null;
-  return { name: '현재 위치', latitude: Math.round(latitude * 100) / 100, longitude: Math.round(longitude * 100) / 100, timezone, source };
+  if (source !== 'manual' && source !== 'location') return null;
+  const region = id !== undefined ? koreaRegionById(id) : source === 'location' ? nearestKoreaRegion(latitude, longitude)
+    : legacyKoreaRegion(name) ?? WEATHER_REGIONS.find(city => city.latitude === latitude && city.longitude === longitude);
+  return region ? { ...region, source } : null;
 }
 
 export function usableForecast(forecast: WeatherForecast | null, now: number) {
