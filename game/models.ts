@@ -167,13 +167,32 @@ export function createActor(parent: THREE.Object3D, role: number, name: string, 
   const hand = new THREE.Group(); hand.position.set(0, -.40, .04); arms[1].add(hand);
   const weapons = { punch: new THREE.Group(), hammer: new THREE.Group(), fan: new THREE.Group() }; Object.values(weapons).forEach(g => hand.add(g));
   sphere(weapons.punch, .13, '#eeb48a', 0, 0, 0, 1.08, .9, 1.1);
-  cylinder(weapons.hammer, .036, .045, .48, '#cf825d', 0, .14);
-  for (let i = 0; i < 4; i++) cylinder(weapons.hammer, .048, .048, .022, '#efbb83', 0, -.03 + i * .045);
+  // A white moulded handle and soft, red bellows distinguish the squeaky toy
+  // from a wooden mallet. Keep its hand pivot and strike axis unchanged.
+  weapons.hammer.name = 'red-toy-hammer';
+  const handle = cylinder(weapons.hammer, .032, .043, .48, '#fffdf3', 0, .14);
+  handle.material = material('#fffdf3', .28);
+  sphere(weapons.hammer, .048, '#fffdf3', 0, -.08, 0, 1, .75, 1).material = handle.material;
+  for (let i = 0; i < 3; i++) sphere(weapons.hammer, .046, '#fffdf3', 0, -.015 + i * .065, 0, 1, .55, 1).material = handle.material;
+  const collar = cylinder(weapons.hammer, .065, .038, .10, '#f5fbfb', 0, .33);
+  collar.material = material('#f5fbfb', .25);
+  const sticker = box(weapons.hammer, .071, .048, .009, '#66b9db', 0, .339, .052, .008);
+  sticker.material = material('#66b9db', .3);
   const hammer = new THREE.Group(); hammer.name = 'hammer-head'; hammer.position.y = .43; weapons.hammer.add(hammer);
-  const center = cylinder(hammer, .135, .135, .44, '#e9a14f'); center.rotation.z = Math.PI / 2;
+  const redPlastic = material('#ff3027', .25);
+  const center = cylinder(hammer, .115, .115, .25, '#ff3027'); center.rotation.z = Math.PI / 2; center.material = redPlastic;
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 3; i++) { const ridge = cylinder(hammer, .19 + i * .012, .19 + i * .012, .035, i % 2 ? '#edb459' : '#f5c76d', side * (.12 + i * .043)); ridge.rotation.z = Math.PI / 2; }
-    const cap = cylinder(hammer, .218, .218, .045, '#efb35d', side * .25); cap.rotation.z = Math.PI / 2;
+    const lobe = cylinder(hammer, .174, .174, .21, '#ed211c', side * .17);
+    lobe.rotation.z = Math.PI / 2; lobe.material = material('#ed211c', .3);
+    const ridgeKey = 'toy-hammer-bellows';
+    if (!geos.has(ridgeKey)) geos.set(ridgeKey, new THREE.TorusGeometry(.179, .018, 6, 24));
+    for (let i = 0; i < 6; i++) {
+      const ridge = new THREE.Mesh(geos.get(ridgeKey), redPlastic);
+      ridge.name = 'toy-hammer-ridge'; ridge.position.x = side * (.09 + i * .034); ridge.rotation.y = Math.PI / 2;
+      ridge.castShadow = true; ridge.receiveShadow = true; hammer.add(ridge);
+    }
+    const cap = sphere(hammer, .196, '#ff3027', side * .279, 0, 0, .20, 1, 1);
+    cap.name = 'toy-hammer-soft-cap'; cap.material = redPlastic;
   }
   // Keep the saved "fan" identifier while replacing the object with a thick
   // sheaf of office reports. Slight offsets expose the layered paper edges.

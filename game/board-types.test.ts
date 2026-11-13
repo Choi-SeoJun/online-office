@@ -13,6 +13,16 @@ test('board parsing retains legacy notes and optional bounded positions', () => 
   }
 });
 
+test('placement parsing round-trips the canvas coordinate system and rejects unknown versions', () => {
+  for (const canvasWidth of [1200, 2160]) {
+    const placement = { x: .1, y: .2, width: .2, height: .3, canvasWidth };
+    assert.deepEqual(parseBoardDraft({ ...note, placement }), { ...note, placement });
+  }
+  for (const canvasWidth of [0, 720, 1201, '2160', null]) {
+    assert.equal(parseBoardDraft({ ...note, placement: { x: .1, y: .2, width: .2, height: .3, canvasWidth } }), null);
+  }
+});
+
 test('board drawing parses legacy pens and validates fill seeds and pen widths', () => {
   const legacy = { color: 'ink', points: [{ x: .1, y: .1 }, { x: .9, y: .9 }] };
   const fill = { tool: 'fill', color: 'blue', points: [{ x: .5, y: .5 }] };

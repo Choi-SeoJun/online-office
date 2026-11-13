@@ -13,7 +13,7 @@ import { FeedbackDialog } from './feedback-dialog';
 import { OfficeBulletinBoard } from './office-bulletin-board';
 import { CompanySettings } from './company-settings';
 import type { BoardEntry } from '@/game/board-types';
-import { boardApproachPoint } from '@/game/wall-board-layout';
+import { isNearWallBoard } from '@/game/wall-board-layout';
 import { UpdateNews } from './update-news';
 import { WorkClock } from './work-clock';
 import { AvatarPortrait } from './avatar-picker';
@@ -178,7 +178,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
       if(modalRef.current)return;
       if((event.target as HTMLElement)?.closest('button')&&(key===' '||key==='enter'))return;
       if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){event.preventDefault();keys.current.add(key);}
-      if(!event.repeat&&key==='e'){event.preventDefault();const point=boardApproachPoint(controller.layout.bounds);if(engine.state.floor==='office'&&!engine.state.seat&&Math.hypot(engine.state.player.x-point.x,engine.state.player.z-point.z)<=2)openWallBoard();else send({type:'interact'});}
+      if(!event.repeat&&key==='e'){event.preventDefault();if(engine.state.floor==='office'&&!engine.state.seat&&isNearWallBoard(engine.state.player,controller.layout.bounds))openWallBoard();else send({type:'interact'});}
       if(!event.repeat&&key===' '&&engine.state.seat==='desk'){event.preventDefault();send({type:'desk',mode:'work'});}
     };
     const up=(event:KeyboardEvent)=>keys.current.delete(event.key.toLowerCase());
@@ -202,8 +202,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   leaveRef.current=()=>{void leave();};
   const resize=async()=>{setResizing(true);try{await request('capacity',{capacity:newCapacity});setNotice('새 정원에 맞춰 책상을 준비했어요.');}catch(error){setNotice(messageOf(error));}finally{setResizing(false);}};
   const isHost=snapshot.room.hostId===session.playerId,roof=state.floor==='rooftop';
-  const boardPoint=boardApproachPoint(controller.layout.bounds);
-  const nearBoard=!roof&&!state.transition&&!state.seat&&Math.hypot(state.player.x-boardPoint.x,state.player.z-boardPoint.z)<=2;
+  const nearBoard=!roof&&!state.transition&&!state.seat&&isNearWallBoard(state.player,controller.layout.bounds);
   const coworker=snapshot.players.find(p=>p.id===selectedCoworker&&p.id!==session.playerId&&p.floor===state.floor);
   const invite=typeof location==='undefined'?'':roomInviteUrl(session.code,location.href);
   return <main className={`multi-room office-app is-playing ${chatOpen?'chat-is-open':''} ${roof?'is-rooftop':''} ${state.transition?'is-travelling':''}`}>

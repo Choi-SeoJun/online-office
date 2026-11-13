@@ -9,7 +9,9 @@ export const BOARD_BODY_LIMIT = 32 * 1024;
 export type BoardKind = 'note' | 'text' | 'doodle';
 export type BoardColor = typeof BOARD_COLORS[number];
 export type BoardPoint = { x: number; y: number };
-export type BoardPlacement = { x: number; y: number; width: number; height: number };
+// Missing canvasWidth denotes the original 1200px board. Keep it optional so
+// saved notes and drawings remain readable without rewriting stored content.
+export type BoardPlacement = { x: number; y: number; width: number; height: number; canvasWidth?: 1200 | 2160 };
 export type BoardStroke = { color: BoardColor; points: BoardPoint[]; tool?: 'pen' | 'fill'; width?: number };
 export type BoardDraft = { id: string; kind: BoardKind; color: BoardColor; text: string; strokes: BoardStroke[]; placement?: BoardPlacement };
 export type BoardEntry = BoardDraft & { authorId: string; authorName: string; createdAt: number };
@@ -36,10 +38,11 @@ function isCoordinate(raw: unknown): raw is number {
 export function parseBoardPlacement(raw: unknown): BoardPlacement | null {
   const value = boardRecord(raw);
   if (!value) return null;
-  const { x, y, width, height } = value;
+  const { x, y, width, height, canvasWidth } = value;
   if (!isCoordinate(x) || !isCoordinate(y) || !isCoordinate(width) || !isCoordinate(height) ||
       width <= 0 || height <= 0 || x + width > 1 + 1e-10 || y + height > 1 + 1e-10) return null;
-  return { x, y, width, height };
+  if (canvasWidth !== undefined && canvasWidth !== 1200 && canvasWidth !== 2160) return null;
+  return { x, y, width, height, ...(canvasWidth === undefined ? {} : { canvasWidth }) };
 }
 
 export function parseBoardDraft(raw: unknown): BoardDraft | null {

@@ -6,11 +6,11 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ClipboardList, Loader
 import type { RoomSession } from '@/game/multi-types';
 import { BOARD_COLORS, BOARD_MAX_ENTRIES, BOARD_MAX_POINTS, BOARD_MAX_STROKES, BOARD_NOTE_LIMIT, BOARD_TEXT_LIMIT, parseBoardDraft, type BoardColor, type BoardEntry, type BoardPlacement, type BoardPoint, type BoardStroke } from '@/game/board-types';
 import { createBoardEntry, deleteBoardEntry, listBoard, loadLocalBoard, moveBoardEntry, saveLocalBoard } from '@/game/board-client';
-import { BOARD_HEIGHT, BOARD_INK, BOARD_WIDTH, drawBoard, getBoardPaintOrder, getBoardPlacement, isBoardDrawing } from '@/game/board-render';
+import { BOARD_HEIGHT, BOARD_INK, BOARD_WIDTH, drawBoard, getBoardPaintOrder, getBoardPlacement, isBoardDrawing, newBoardPlacement } from '@/game/board-render';
 import './office-bulletin-board.css';
 
 const colorNames: Record<BoardColor, string> = { yellow: '노랑', pink: '분홍', blue: '파랑', green: '초록', purple: '보라', ink: '먹색' };
-const fullBoard = { x: 0, y: 0, width: 1, height: 1 };
+const fullBoard: BoardPlacement = { x: 0, y: 0, width: 1, height: 1, canvasWidth: BOARD_WIDTH };
 const previewId = '00000000-0000-4000-8000-000000000000';
 type Drag = { id: string; pointer: number; start: BoardPoint; placement: BoardPlacement; next: BoardPlacement };
 
@@ -112,7 +112,7 @@ export function OfficeBulletinBoard({ name, session, hostId, onOpenChange, openR
     idRef.current ||= crypto.randomUUID();
     const draftKind = drawing ? 'doodle' : kind;
     const draft = parseBoardDraft({ id: idRef.current, kind: draftKind, color: drawing ? 'ink' : color, text: drawing ? '' : text,
-      strokes: drawing ? strokesRef.current : [], placement: drawing ? fullBoard : getBoardPlacement({ id: idRef.current, kind: draftKind }) });
+      strokes: drawing ? strokesRef.current : [], placement: drawing ? fullBoard : newBoardPlacement({ id: idRef.current, kind: draftKind }) });
     if (!draft) { setError(drawing ? '보드에 그린 뒤 저장해 주세요.' : `내용을 ${limit}자 안으로 적어 주세요.`); return; }
     lock.current = true; ++revision.current; setBusy(true); setLoading(false); setError('');
     try {
@@ -203,11 +203,13 @@ export function OfficeBulletinBoard({ name, session, hostId, onOpenChange, openR
         {notice && <p className="bulletin-notice" role="status"><Check size={14} />{notice}</p>}
         <div className="bulletin-body">
           <section className="bulletin-workspace" aria-label="확대된 벽 게시판" aria-busy={loading && !loaded}>
-            <div className={`bulletin-surface tool-${tool}`} ref={surface}>
+            <div className="bulletin-board-scroll" tabIndex={0} aria-label="게시판 가로 스크롤 영역">
+            <div className={`bulletin-surface tool-${tool}`} ref={surface} style={{ aspectRatio: `${BOARD_WIDTH} / ${BOARD_HEIGHT}` }}>
               <canvas ref={canvas} width={BOARD_WIDTH} height={BOARD_HEIGHT} className="bulletin-canvas" aria-label="벽 게시판 그리기 영역. 펜으로 그리거나 채우기로 선 안쪽을 눌러 주세요." onPointerDown={beginDraw} onPointerMove={draw} onPointerUp={endDraw} onPointerCancel={endDraw} onLostPointerCapture={() => { activePointer.current = null; }} />
               {visibleEntries.filter(entry => !isBoardDrawing(entry)).map(entry => { const p = getBoardPlacement(entry); return <button key={entry.id} type="button" className={`bulletin-note-handle ${entry.id === selectedId ? 'is-selected' : ''}`} style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%`, width: `${p.width * 100}%`, height: `${p.height * 100}%` }} aria-label={`${entry.authorName}의 ${entry.kind === 'doodle' ? '낙서' : '메모'}: ${entry.text || '그림'}. 선택 후 방향키로 이동`} tabIndex={tool === 'move' ? 0 : -1} disabled={busy} onClick={() => { setSelectedId(entry.id); setConfirmDelete(false); }} onKeyDown={event => keyMove(event, entry)} onPointerDown={event => beginMove(event, entry)} onPointerMove={dragMove} onPointerUp={event => endMove(event)} onPointerCancel={event => endMove(event, true)} onLostPointerCapture={event => endMove(event, true)} />; })}
             </div>
-            <p className="bulletin-hint">{tool === 'move' ? '메모를 끌어 옮겨요 · 선택한 메모는 방향키로도 이동해요' : tool === 'fill' ? '같은 색으로 이어진 곳을 채워요 · 닫힌 선 안쪽을 눌러 보세요' : '보드 위에 바로 그려요 · 완성한 뒤 그림 저장을 눌러 주세요'}{strokes.length > 0 && <strong>저장 전 {strokes.length}/{BOARD_MAX_STROKES}획 · {pointCount}/{BOARD_MAX_POINTS}점</strong>}</p>
+            </div>
+            <p className="bulletin-hint"><span>넓은 게시판은 가로로 스크롤해요</span>{tool === 'move' ? '메모를 끌어 옮겨요 · 선택한 메모는 방향키로도 이동해요' : tool === 'fill' ? '같은 색으로 이어진 곳을 채워요 · 닫힌 선 안쪽을 눌러 보세요' : '보드 위에 바로 그려요 · 완성한 뒤 그림 저장을 눌러 주세요'}{strokes.length > 0 && <strong>저장 전 {strokes.length}/{BOARD_MAX_STROKES}획 · {pointCount}/{BOARD_MAX_POINTS}점</strong>}</p>
           </section>
           <aside className="bulletin-inspector">
             {composing ? <form className="bulletin-compose" onSubmit={submit}><fieldset disabled={busy}><legend>새 메모</legend><div className="bulletin-kinds"><button type="button" aria-pressed={kind === 'note'} onClick={() => { requestId.current = ''; setKind('note'); }}>포스트잇</button><button type="button" aria-pressed={kind === 'text'} onClick={() => { requestId.current = ''; setKind('text'); }}>정보 공유</button></div><div className="bulletin-palette"><span>종이 색</span>{BOARD_COLORS.filter(c => c !== 'ink').map(c => <button key={c} type="button" className={`paper-${c}`} aria-label={`${colorNames[c]} 종이`} aria-pressed={color === c} onClick={() => { requestId.current = ''; setColor(c); }}>{color === c && <Check size={13} />}</button>)}</div><label htmlFor="bulletin-text">{kind === 'note' ? '짧게 남기는 한마디' : '나누고 싶은 정보'}</label><textarea id="bulletin-text" value={text} rows={6} maxLength={limit * 2} placeholder="오늘도 무사히 퇴근합시다 ☘" onChange={event => { requestId.current = ''; setText(event.target.value); }} /><div className="bulletin-compose-foot"><span className={length > limit ? 'over-limit' : ''}>{length}/{limit}</span><button className="bulletin-add" type="submit" disabled={full || length > limit || !text.trim()}><StickyNote size={16} />붙이기</button></div></fieldset></form> : <>

@@ -16,7 +16,7 @@ import { FeedbackDialog } from './feedback-dialog';
 import { OfficeBulletinBoard } from './office-bulletin-board';
 import { CompanySettings } from './company-settings';
 import type { BoardEntry } from '@/game/board-types';
-import { boardApproachPoint } from '@/game/wall-board-layout';
+import { isNearWallBoard } from '@/game/wall-board-layout';
 import { UpdateNews } from './update-news';
 import { OfficePlayControls } from './office-play-controls';
 import './office-rooftop.css';
@@ -104,7 +104,7 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       if (panelRef.current || engine.state.paused) return;
       if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) { event.preventDefault(); keys.add(key); axis(); setHints(false); }
       if (event.repeat) return;
-      if (key === 'e') { event.preventDefault(); const point = boardApproachPoint(BOUNDS); if (engine.state.floor === 'office' && !engine.state.seat && Math.hypot(engine.state.player.x - point.x, engine.state.player.z - point.z) <= 2) openWallBoard(); else engine.dispatch({ type: 'interact' }); }
+      if (key === 'e') { event.preventDefault(); if (engine.state.floor === 'office' && !engine.state.seat && isNearWallBoard(engine.state.player, BOUNDS)) openWallBoard(); else engine.dispatch({ type: 'interact' }); }
     };
     const keyup = (event: KeyboardEvent) => { if (keys.delete(event.key.toLowerCase())) axis(); };
     const focus = (event: FocusEvent) => { if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [role="dialog"]')) clear(); };
@@ -113,8 +113,7 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   }, [engine, syncPause, openWallBoard]);
   useEffect(() => { engine.dispatch({ type: 'axis', x: 0, z: 0 }); syncPause(); }, [engine, panel, syncPause]);
   const select = (target: TargetId) => { setHints(false); setPanel(null); send({ type: 'select', target }); };
-  const boardPoint = boardApproachPoint(BOUNDS);
-  const nearBoard = state.entered && !roof && !state.transition && !state.seat && Math.hypot(state.player.x - boardPoint.x, state.player.z - boardPoint.z) <= 2;
+  const nearBoard = state.entered && !roof && !state.transition && !state.seat && isNearWallBoard(state.player, BOUNDS);
 
   return <main className={`office-app ${state.entered ? 'is-playing' : 'is-welcome'} ${roof ? 'is-rooftop' : ''} ${state.transition ? 'is-travelling' : ''}`}>
     <div ref={host} className="scene-host" aria-label={roof ? '도시가 보이는 3D 옥상. 벤치에 앉거나 벽에 기대 사탕을 물고 쉴 수 있습니다.' : '상사와 동료가 있는 3D 사무실. 장소 버튼으로 이동하고 행동을 선택할 수 있습니다.'} />

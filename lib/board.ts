@@ -54,14 +54,18 @@ export async function handleBoardAction(db: RoomDatabase, raw: unknown, now = Da
   }
   if (action === 'move' && placement && validBoardId(id)) {
     const fallback = getBoardPlacement({ id, kind: 'note' });
+    // Coordinates can cross from the original board to the wider one without
+    // changing a card's physical size. Missing metadata is the 1200px canvas.
+    const fallbackWidth = fallback.width * (fallback.canvasWidth ?? 1200);
+    const requestedWidth = placement.width * (placement.canvasWidth ?? 1200);
     statements.push(db.prepare(`WITH member AS (${activeMember})
       UPDATE office_board_entries SET placement = ? WHERE room_code = ? AND id = ?
       AND EXISTS (SELECT 1 FROM member)
-      AND ABS(COALESCE(json_extract(placement, '$.width'), ?) - ?) < 0.0000000001
+      AND ABS(COALESCE(json_extract(placement, '$.width') * COALESCE(json_extract(placement, '$.canvasWidth'), 1200), ?) - ?) < 0.0000001
       AND ABS(COALESCE(json_extract(placement, '$.height'), ?) - ?) < 0.0000000001
       AND NOT (kind = 'doodle' AND COALESCE(json_extract(placement, '$.width'), 0) = 1
         AND COALESCE(json_extract(placement, '$.height'), 0) = 1)
-      RETURNING id`).bind(...accessParams, JSON.stringify(placement), code, id, fallback.width, placement.width, fallback.height, placement.height));
+      RETURNING id`).bind(...accessParams, JSON.stringify(placement), code, id, fallbackWidth, requestedWidth, fallback.height, placement.height));
   }
   if (action === 'delete' && validBoardId(id)) {
     statements.push(db.prepare(`WITH member AS (${activeMember})

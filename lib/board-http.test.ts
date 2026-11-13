@@ -194,3 +194,50 @@ test('moving a card cannot resize it or transform a saved full-board drawing', a
   assert.ok('entries' in listed.body);
   assert.deepEqual(listed.body.entries.find(entry => entry.id === drawing.id)?.placement, drawing.placement);
 });
+
+test('legacy card moves accept either canvas coordinate system without allowing physical resizing', async () => {
+  for (const initialPlacement of [undefined, { x: .1, y: .2, width: .215, height: .265 }]) {
+    const { author, visitor, send } = await fixture();
+    const draft = note(initialPlacement ? { placement: initialPlacement } : {});
+    assert.equal((await send({ action: 'create', ...author, draft })).status, 201);
+    const wide = { x: .2, y: .4, width: .215 * 1200 / 2160, height: .265, canvasWidth: 2160 as const };
+    const converted = await send({ action: 'move', ...visitor, id: draft.id, placement: wide });
+    assert.equal(converted.status, 200);
+    assert.ok('entries' in converted.body);
+    assert.deepEqual(converted.body.entries[0].placement, wide, 'wide metadata survives the response');
+    for (const resized of [{ ...wide, width: .215 }, { ...wide, height: .3 }, { ...wide, canvasWidth: 1200 }]) {
+      assert.equal((await send({ action: 'move', ...visitor, id: draft.id, placement: resized })).status, 400);
+    }
+    const oldClient = { x: .4, y: .5, width: .215, height: .265 };
+    const back = await send({ action: 'move', ...visitor, id: draft.id, placement: oldClient });
+    assert.equal(back.status, 200, 'an old client can move the same physical card in legacy coordinates');
+    assert.ok('entries' in back.body);
+    assert.deepEqual(back.body.entries[0].placement, oldClient);
+    const movedAgain = await send({ action: 'move', ...visitor, id: draft.id, placement: { ...wide, x: .3 } });
+    assert.equal(movedAgain.status, 200);
+    const listed = await send({ action: 'list', ...visitor });
+    assert.ok('entries' in listed.body);
+    assert.deepEqual(listed.body.entries[0].placement, { ...wide, x: .3 });
+  }
+});
+
+test('new wide-board cards preserve canvas metadata and full-board drawings remain immovable', async () => {
+  const { author, visitor, send } = await fixture();
+  const placement = { x: .1, y: .2, width: .14, height: .3, canvasWidth: 2160 as const };
+  const draft = note({ placement });
+  const created = await send({ action: 'create', ...author, draft });
+  assert.equal(created.status, 201);
+  assert.ok('entries' in created.body);
+  assert.deepEqual(created.body.entries[0].placement, placement);
+  const next = { ...placement, x: .6 };
+  const moved = await send({ action: 'move', ...visitor, id: draft.id, placement: next });
+  assert.equal(moved.status, 200);
+  assert.ok('entries' in moved.body);
+  assert.deepEqual(moved.body.entries[0].placement, next);
+  assert.equal((await send({ action: 'move', ...visitor, id: draft.id, placement: { ...next, canvasWidth: 1200 } })).status, 400);
+
+  const drawing = note({ kind: 'doodle', text: '', strokes: [{ color: 'ink', points: [{ x: .1, y: .1 }] }],
+    placement: { x: 0, y: 0, width: 1, height: 1, canvasWidth: 2160 } });
+  assert.equal((await send({ action: 'create', ...author, draft: drawing }, start + BOARD_CREATE_INTERVAL_MS)).status, 201);
+  assert.equal((await send({ action: 'move', ...visitor, id: drawing.id, placement: drawing.placement })).status, 400);
+});

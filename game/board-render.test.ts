@@ -12,8 +12,50 @@ test('legacy placement stays stable as other posts arrive and explicit positions
   assert.deepEqual(render.getBoardPlacement(edited), placement);
   assert.ok(placement.x >= 0 && placement.y >= 0 && placement.width > 0 && placement.height > 0);
   assert.ok(placement.x + placement.width <= 1 && placement.y + placement.height <= 1);
-  const moved = { x: .1, y: .2, width: .25, height: .3 };
+  const moved = { x: .1, y: .2, width: .25, height: .3, canvasWidth: 2160 as const };
   assert.deepEqual(render.getBoardPlacement({ ...note, placement: moved }), moved);
+});
+
+test('widening preserves legacy card dimensions and positions inside the right-hand original board', () => {
+  const original = { x: .1, y: .2, width: .25, height: .3 };
+  const converted = render.getBoardPlacement({ ...note, placement: original });
+  assert.equal(converted.canvasWidth, 2160);
+  assert.equal(converted.x * render.BOARD_WIDTH, 960 + original.x * 1200);
+  assert.equal(converted.width * render.BOARD_WIDTH, original.width * 1200);
+  assert.equal(converted.y, original.y); assert.equal(converted.height, original.height);
+  assert.deepEqual(render.getBoardPlacement({ ...note, placement: converted }), converted, 'moving a converted note cannot shrink it again');
+  const defaultLegacy = render.getBoardPlacement(note);
+  assert.ok(defaultLegacy.x >= 960 / render.BOARD_WIDTH);
+  assert.ok(Math.abs(defaultLegacy.width * render.BOARD_WIDTH - 258) < 1e-8);
+  const fresh = render.newBoardPlacement(note);
+  assert.equal(fresh.canvasWidth, 2160);
+  assert.ok(Math.abs(fresh.width * render.BOARD_WIDTH - 258) < 1e-8);
+  assert.ok(fresh.x + fresh.width <= 1 && fresh.y + fresh.height <= 1);
+});
+
+test('legacy freehand shapes and fills stay inside the original board while new ink can cover the extension', () => {
+  const paths: number[][] = [], reads: number[][] = [], widths: number[] = [];
+  const context = {
+    fillStyle: '', strokeStyle: '', lineWidth: 0,
+    save() {}, restore() {}, setTransform() {}, clearRect() {}, beginPath() {}, rect() {}, clip() {}, arc() {}, fill() {}, fillText() {}, fillRect() {},
+    moveTo(x: number, y: number) { paths.push([x, y]); }, lineTo(x: number, y: number) { paths.push([x, y]); },
+    stroke(this: { lineWidth: number }) { widths.push(this.lineWidth); },
+    getImageData(x: number, y: number, w: number, h: number) { reads.push([x, y, w, h]); return { data: new Uint8ClampedArray(w * h * 4) }; },
+    putImageData() {},
+  } as unknown as CanvasRenderingContext2D;
+  const oldDrawing: BoardEntry = { ...note, kind: 'doodle', placement: { x: 0, y: 0, width: 1, height: 1 }, strokes: [
+    { color: 'ink', width: 8, points: [{ x: .1, y: .2 }, { x: .2, y: .4 }] },
+    { color: 'blue', tool: 'fill', points: [{ x: .5, y: .5 }] },
+  ] };
+  assert.equal(render.isBoardDrawing(oldDrawing), true);
+  render.drawBoard(context, [oldDrawing], 216, 72);
+  assert.deepEqual(paths, [[108, 14.4], [120, 28.8]]);
+  assert.deepEqual(reads, [[96, 0, 120, 72]]);
+  assert.deepEqual(widths, [.8]);
+  paths.length = 0; reads.length = 0;
+  render.drawBoard(context, [{ ...oldDrawing, placement: { ...oldDrawing.placement!, canvasWidth: 2160 } }], 216, 72);
+  assert.deepEqual(reads, [[0, 0, 216, 72]]);
+  assert.deepEqual(paths, [[21.6, 14.4], [43.2, 28.8]]);
 });
 
 test('board fills are replayed beneath notes so moving notes cannot change their region', () => {
@@ -89,4 +131,8 @@ test('drawing cache reuses filled pixels across note moves and a changing final 
   previousReads = reads;
   render.drawBoard(context, [{ ...drawing, createdAt: 300 }, later], 80, 48);
   assert.ok(reads > previousReads, 'changing drawing order invalidates the composed image');
+  render.drawBoard(context, [drawing], 80, 48);
+  previousReads = reads;
+  render.drawBoard(context, [{ ...drawing, placement: { ...drawing.placement!, canvasWidth: 2160 } }], 80, 48);
+  assert.ok(reads > previousReads, 'the same strokes on a new-width canvas must not reuse a legacy-width bitmap');
 });

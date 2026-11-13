@@ -1,19 +1,37 @@
 import type { BoardColor, BoardEntry, BoardPlacement, BoardStroke } from './board-types.ts';
 
-export const BOARD_WIDTH = 1200;
+// The editor and wall texture share the wide board's 3:1 drawing surface.
+export const BOARD_WIDTH = 2160;
 export const BOARD_HEIGHT = 720;
+const ORIGINAL_BOARD_WIDTH = 1200;
 export const BOARD_INK: Record<BoardColor, string> = { yellow: '#b78918', pink: '#c66681', blue: '#4784aa', green: '#54866b', purple: '#8d6ba6', ink: '#354b45' };
 export const BOARD_PAPER: Record<BoardColor, string> = { yellow: '#f6e8a6', pink: '#f3d8d7', blue: '#d4e6ea', green: '#dce7c9', purple: '#e5dcef', ink: '#f2efdf' };
 export const BOARD_SURFACE = '#d6bc92';
 
-/** The id, rather than list index, keeps old cards still when a new post arrives. */
-export function getBoardPlacement(entry: Pick<BoardEntry, 'id' | 'kind' | 'placement'>): BoardPlacement {
-  if (entry.placement) return entry.placement;
+function placementHash(id: string): number {
   let hash = 2166136261;
-  for (const character of entry.id) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
-  return { x: .035 + (hash % 4) * .235 + ((hash >>> 8) % 15) / 1500,
+  for (const character of id) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
+  return hash;
+}
+
+/** The extension is on the left; old ink and cards retain their pixel shapes. */
+export function getBoardPlacement(entry: Pick<BoardEntry, 'id' | 'kind' | 'placement'>): BoardPlacement {
+  const hash = placementHash(entry.id);
+  const placement = entry.placement ?? { x: .035 + (hash % 4) * .235 + ((hash >>> 8) % 15) / 1500,
     y: .045 + ((hash >>> 4) % 3) * .30 + ((hash >>> 16) % 15) / 1500,
     width: .215, height: .265 };
+  if (placement.canvasWidth === BOARD_WIDTH) return placement;
+  const ratio = ORIGINAL_BOARD_WIDTH / BOARD_WIDTH;
+  return { ...placement, x: (BOARD_WIDTH - ORIGINAL_BOARD_WIDTH + placement.x * ORIGINAL_BOARD_WIDTH) / BOARD_WIDTH,
+    width: placement.width * ratio, canvasWidth: BOARD_WIDTH };
+}
+
+/** New cards use the whole board, at the same readable size as existing cards. */
+export function newBoardPlacement(entry: Pick<BoardEntry, 'id' | 'kind'>): BoardPlacement {
+  const hash = placementHash(entry.id);
+  return { x: .035 + (hash % 6) * .16 + ((hash >>> 8) % 15) / 1500,
+    y: .045 + ((hash >>> 4) % 3) * .30 + ((hash >>> 16) % 15) / 1500,
+    width: .215 * ORIGINAL_BOARD_WIDTH / BOARD_WIDTH, height: .265, canvasWidth: BOARD_WIDTH };
 }
 
 export function isBoardDrawing(entry: Pick<BoardEntry, 'kind' | 'placement'>): boolean {
@@ -79,8 +97,14 @@ const drawingCaches = new WeakMap<CanvasRenderingContext2D, DrawingCache>();
 
 /** At most two bitmaps per live context: the drawing and the prefix before its active last stroke. */
 function paintBoardDrawing(ctx: CanvasRenderingContext2D, entries: BoardEntry[], width: number, height: number) {
-  const strokes = entries.flatMap(entry => entry.strokes), area = { x: 0, y: 0, width, height }, scale = width / BOARD_WIDTH;
-  if (!ctx.canvas) { paintStrokes(ctx, strokes, area, scale); return; }
+  const scale = width / BOARD_WIDTH;
+  const strokes = entries.flatMap(entry => {
+    const placement = getBoardPlacement(entry);
+    const area = { x: placement.x * width, y: placement.y * height, width: placement.width * width, height: placement.height * height };
+    return entry.strokes.map(stroke => ({ stroke, area }));
+  });
+  const paint = (items: typeof strokes) => { for (const { stroke, area } of items) paintStrokes(ctx, [stroke], area, scale); };
+  if (!ctx.canvas) { paint(strokes); return; }
   if (!strokes.length) { drawingCaches.delete(ctx); return; }
   const key = JSON.stringify(strokes), cached = drawingCaches.get(ctx);
   const previous = cached?.width === width && cached.height === height ? cached : undefined;
@@ -90,11 +114,11 @@ function paintBoardDrawing(ctx: CanvasRenderingContext2D, entries: BoardEntry[],
   if (previous?.key === prefixKey) prefix = previous.image;
   else if (previous?.prefixKey === prefixKey) prefix = previous.prefix;
   else {
-    paintStrokes(ctx, prefixStrokes, area, scale);
+    paint(prefixStrokes);
     prefix = ctx.getImageData(0, 0, width, height);
   }
   ctx.putImageData(prefix, 0, 0);
-  paintStrokes(ctx, strokes.slice(-1), area, scale);
+  paint(strokes.slice(-1));
   drawingCaches.set(ctx, { width, height, key, image: ctx.getImageData(0, 0, width, height), prefixKey, prefix });
 }
 
