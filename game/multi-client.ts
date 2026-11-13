@@ -75,7 +75,7 @@ export function clearRoomSession(code:string,storage?:Pick<Storage,'removeItem'>
   } catch {return false;}
 }
 
-export async function requestRoom<T>(body:unknown,signal?:AbortSignal,resource:'rooms'|'board'='rooms'):Promise<T> {
+export async function requestRoom<T>(body:unknown,signal?:AbortSignal,resource:'rooms'|'board'|'wallpaper'='rooms'):Promise<T> {
   if(signal?.aborted) throw new DOMException('Request cancelled','AbortError');
   let payload:string|undefined;
   try {payload=JSON.stringify(resource==='rooms'&&record(body)?{...record(body),layoutVersion:OFFICE_LAYOUT_VERSION}:body);} catch {throw new RoomApiError('INVALID_REQUEST',400,'요청 내용을 확인해 주세요.');}

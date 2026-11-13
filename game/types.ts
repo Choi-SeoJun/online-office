@@ -48,6 +48,7 @@ export interface GameEngine {
   dispose(): void;
 }
 export interface SceneCallbacks {
+  getWallpaper?: () => string | null;
   getBoardEntries?: () => BoardEntry[]; onBoard?: () => void;
   getState(): GameState; onFrame(dt: number): void; onGround(point: Point): void;
   onTarget(target: TargetId, point?: Point): void; onReady(): void; onError(message: string): void;

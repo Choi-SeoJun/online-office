@@ -1,6 +1,12 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type { JobRank } from '../game/ranks.ts';
 
+// Retain file metadata after room/member deletion so expired R2 objects can be collected.
+export const officeWallpaperFiles = sqliteTable('office_wallpaper_files', {
+  id: text('id').primaryKey(), roomCode: text('room_code').notNull(), ownerId: text('owner_id').notNull(),
+  createdAt: integer('created_at').notNull(), expiresAt: integer('expires_at').notNull(),
+}, t => [index('office_wallpaper_expiry').on(t.expiresAt), index('office_wallpaper_owner').on(t.ownerId)]);
+
 export const officeRooms = sqliteTable('office_rooms', {
   code: text('code').primaryKey(), name: text('name').notNull(), capacity: integer('capacity').notNull(),
   hostId: text('host_id').notNull(), createdAt: integer('created_at').notNull(), expiresAt: integer('expires_at').notNull(),
@@ -12,6 +18,8 @@ export const officeMembers = sqliteTable('office_members', {
   id: text('id').primaryKey(), roomCode: text('room_code').notNull().references(() => officeRooms.code, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull(), seatIndex: integer('seat_index').notNull(), name: text('name').notNull(),
   rank: text('rank').$type<JobRank>().notNull().default('사원'),
+  wallpaperId: text('wallpaper_id'),
+  wallpaperUpdatedAt: integer('wallpaper_updated_at').notNull().default(0),
   avatar: text('avatar').notNull().default('short'), lastPoke: integer('last_poke').notNull().default(0),
   floor: text('floor').notNull().default('office'), visual: text('visual'), lastAttack: integer('last_attack').notNull().default(0),
   x: real('x').notNull(), z: real('z').notNull(), angle: real('angle').notNull(), pose: text('pose').notNull(), moving: integer('moving').notNull(),

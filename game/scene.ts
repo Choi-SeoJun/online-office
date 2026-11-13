@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createMonitorScreen } from './monitor-screen.ts';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { BOUNDS, DESKS, isRoofTarget, ROOF_BOUNDS, roofWallForTarget, TARGETS } from './layout.ts';
 import type { Floor, OfficeScene, Point, SceneCallbacks, TargetId } from './types.ts';
@@ -121,6 +122,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
   const desks = DESKS.map((d, i) => desk(room, d.x, d.z, i));
   desks[5].group.userData.target = 'desk'; desks[5].chair.userData.target = 'desk';
   desks[5].chair.userData.dynamic = true;
+  const ownMonitor = createMonitorScreen(desks[5].screen);
   createBossDesk(room, furniture.bossDesk);
   const rearDeskZ = Math.min(...DESKS.map(item => item.z));
   for (const item of DESKS) {
@@ -230,6 +232,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     if (dead || graphicsLost) return; frame = requestAnimationFrame(render); if (!visible) return;
     const dt = lastTime ? Math.min(.05, Math.max(0, (now - lastTime) / 1000)) : 0; lastTime = now;
     callbacks.onFrame(dt); const s = callbacks.getState();
+    ownMonitor.set(callbacks.getWallpaper?.() ?? null);
     wallBoard.update(callbacks.getBoardEntries?.());
     const onRoof = s.floor === 'rooftop'; room.visible = !onRoof; roof.visible = onRoof;
     const background = onRoof ? roofColor : officeColor;
@@ -256,7 +259,7 @@ export function createOfficeScene(host: HTMLElement, callbacks: SceneCallbacks):
     zoom, rotate, tilt, resetView, screenToWorld:axis=>screenAxisToWorld(axis,orbit),
     dispose() {
       dead = true; cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener('visibilitychange', visibility);
-      wallBoard.dispose();
+      wallBoard.dispose(); ownMonitor.dispose();
       renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss);
       const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
       scene.traverse(object => { if (object instanceof THREE.InstancedMesh) object.dispose(); if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) { if (object instanceof THREE.Mesh) geometries.add(object.geometry); const ms = Array.isArray(object.material) ? object.material : [object.material]; ms.forEach(m => { materials.add(m); const map = (m as THREE.MeshStandardMaterial).map; if (map) textures.add(map); }); } });

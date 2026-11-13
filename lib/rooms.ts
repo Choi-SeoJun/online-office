@@ -10,7 +10,7 @@ export type RoomDatabase = Pick<D1Database, 'prepare' | 'batch'>;
 export const ROOM_LIFETIME_MS = 24 * 60 * 60 * 1000;
 export const ROOM_SEAT_LEASE_MS = 120_000;
 type RoomRow = { code: string; name: string; capacity: number; host_id: string; created_at: number; expires_at: number; boss_rank: JobRank; boss_state: string | null; boss_hit: string | null; boss_hit_id: number };
-type MemberRow = { id: string; room_code: string; token_hash: string; seat_index: number; name: string; rank: JobRank; avatar: AvatarStyle; x: number; z: number; angle: number; pose: RoomPose; moving: number; joined_at: number; last_seen: number; last_sync: number; last_chat: number; last_poke: number; floor: Floor; visual: string | null; last_attack: number };
+type MemberRow = { id: string; room_code: string; token_hash: string; seat_index: number; name: string; rank: JobRank; avatar: AvatarStyle; x: number; z: number; angle: number; pose: RoomPose; moving: number; joined_at: number; last_seen: number; last_sync: number; last_chat: number; last_poke: number; floor: Floor; visual: string | null; last_attack: number; wallpaper_id: string | null };
 type MessageRow = { id: number; player_id: string; name: string; text: string; created_at: number };
 type NotificationRow = { id: number; sender_id: string; sender_name: string; created_at: number; read_at: number | null };
 type Context = { now?: number; rateKey?: string };
@@ -156,7 +156,7 @@ async function repairRoomLayout(db: RoomDatabase, room: RoomRow, now: number) {
 async function snapshot(db: RoomDatabase, code: string, selfId: string, now: number): Promise<RoomSnapshot> {
   const [rooms, members, messages, notifications] = await db.batch([
     db.prepare('SELECT * FROM office_rooms WHERE code = ?').bind(code),
-    db.prepare('SELECT id, name, rank, avatar, seat_index, x, z, angle, pose, moving, last_seen, floor, visual FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY seat_index LIMIT 16').bind(code, now - ROOM_SEAT_LEASE_MS),
+    db.prepare('SELECT id, name, rank, avatar, seat_index, x, z, angle, pose, moving, last_seen, floor, visual, wallpaper_id FROM office_members WHERE room_code = ? AND last_seen >= ? ORDER BY seat_index LIMIT 16').bind(code, now - ROOM_SEAT_LEASE_MS),
     db.prepare('SELECT id, player_id, name, text, created_at FROM office_messages WHERE room_code = ? ORDER BY id DESC LIMIT 100').bind(code),
     db.prepare('SELECT id, sender_id, sender_name, created_at, read_at FROM office_notifications WHERE room_code = ? AND recipient_id = ? ORDER BY id DESC LIMIT 100').bind(code, selfId),
   ]);
@@ -164,7 +164,7 @@ async function snapshot(db: RoomDatabase, code: string, selfId: string, now: num
   if (!room || room.expires_at <= now) fail(410, 'ROOM_EXPIRED', '이 회사의 하루가 끝났어요. 새 방을 만들어 주세요.');
   return {
     room: { code: room.code, name: room.name, capacity: room.capacity, hostId: room.host_id, expiresAt: room.expires_at, bossRank: normalizeRank(room.boss_rank, '부장') }, selfId, serverTime: now,
-    players: (members.results as unknown as MemberRow[]).map(m => ({ id: m.id, name: m.name, avatar: m.avatar, seatIndex: m.seat_index, x: m.x, z: m.z, angle: m.angle, pose: m.pose, moving: !!m.moving, lastSeen: m.last_seen, ...memberVisual(m), rank: normalizeRank(m.rank) })),
+    players: (members.results as unknown as MemberRow[]).map(m => ({ id: m.id, name: m.name, avatar: m.avatar, seatIndex: m.seat_index, x: m.x, z: m.z, angle: m.angle, pose: m.pose, moving: !!m.moving, lastSeen: m.last_seen, wallpaperId: m.wallpaper_id ?? null, ...memberVisual(m), rank: normalizeRank(m.rank) })),
     boss: sharedBoss(room, now),
     messages: (messages.results as unknown as MessageRow[]).reverse().map(m => ({ id: m.id, playerId: m.player_id, name: m.name, text: m.text, createdAt: m.created_at })),
     notifications: (notifications.results as unknown as NotificationRow[]).map(n => ({ id: n.id, senderId: n.sender_id, senderName: n.sender_name, createdAt: n.created_at, readAt: n.read_at })),

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createMonitorScreen } from './monitor-screen.ts';
 import { animateActor, box, chair, createActor, createBossDesk, cylinder, desk, disposeModelCaches, mug, plant, plaque } from './models.ts';
 import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelectionForHit } from './scene.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
@@ -29,6 +30,7 @@ export type MultiSceneCallbacks = {
   onSeat(index: number): void;
   onTarget(target: TargetId, point?: Point): void;
   onActor?(id: string): void;
+  getWallpapers?(): ReadonlyMap<number, string>;
   getBoardEntries?(): BoardEntry[];
   onBoard?(): void;
   onReady(): void;
@@ -65,10 +67,12 @@ export function createMultiArchitecture(layout: MultiLayout) {
     const divider = box(group, .05, 1.35, .05, '#f5f4e8', x, 1.95, b.minZ + .05); divider.userData.cutawaySide = 'north';
   }
   const chairs = new Map<number, THREE.Group>();
+  const monitors = new Map<number, ReturnType<typeof createMonitorScreen>>();
   for (const item of layout.desks) {
     const workstation = new THREE.Group(); workstation.position.set(item.point.x, 0, item.point.z); workstation.rotation.y = item.angle + Math.PI;
     workstation.userData.target = `seat:${item.index}`; group.add(workstation);
     const model = desk(workstation, 0, 0, item.index);
+    monitors.set(item.index, createMonitorScreen(model.screen));
     model.chair.userData.dynamic = true; chairs.set(item.index, model.chair);
     // Pale surfaces and blue-green fabric partitions echo a shared cubicle office.
     box(workstation, 2.51, .025, 1.12, '#ebece3', 0, 1.142);
@@ -122,6 +126,7 @@ export function createMultiArchitecture(layout: MultiLayout) {
   const cutaways = prepareCameraCutaways(group);
   batchArchitecture(group);
   const release = () => {
+    monitors.forEach(monitor => monitor.dispose());
     const disposed = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
     group.traverse(object => {
       if (object instanceof THREE.Mesh && (!initialGeometry.has(object.geometry) || object.userData.uniqueGeometry)) object.geometry.dispose();
@@ -135,7 +140,7 @@ export function createMultiArchitecture(layout: MultiLayout) {
     });
     textures.forEach(texture => texture.dispose()); disposed.forEach(material => material.dispose()); group.removeFromParent();
   };
-  return { group, cutaways, release, chairs };
+  return { group, cutaways, release, chairs, monitors };
 }
 
 export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbacks): OfficeScene {
@@ -287,6 +292,8 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
     }
     playerRing.position.set(game.player.x, .06, game.player.z);
     const ownDesk = state.seatIndex === undefined ? null : state.layout.desks[state.seatIndex]; seatRing.visible = !!ownDesk && !onRoof; if (ownDesk) seatRing.position.set(ownDesk.seat.x, .055, ownDesk.seat.z);
+    const wallpapers = callbacks.getWallpapers?.();
+    architecture.monitors.forEach((monitor, index) => monitor.set(wallpapers?.get(index) ?? null));
     for (const [index, chair] of architecture.chairs) {
       const occupant = index === state.seatIndex ? game.player : state.players.find(player => player.seatIndex === index && player.floor === 'office');
       const visual = occupant ? members.find(member => member.actor.id === occupant.id)?.context : null;
