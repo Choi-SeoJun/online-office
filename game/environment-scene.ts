@@ -3,6 +3,7 @@ import { ROOF_BOUNDS } from './layout.ts';
 import type { EnvironmentFrame, Precipitation } from './environment-types.ts';
 import type { Settings } from './types.ts';
 import { paintWindowPrecipitation } from './window-weather.ts';
+import { createRoofSurfaceWeather } from './roof-surface-weather.ts';
 
 const MAX_PARTICLES = 144;
 const neutralFrame: EnvironmentFrame = {
@@ -195,6 +196,7 @@ export function createEnvironmentScene(scene: THREE.Scene, roof: THREE.Group, am
     particleSystem.visible = false;
     roof.add(particleSystem);
   }
+  const surfaces = createRoofSurfaceWeather(roof);
 
   const seeds = Array.from({ length: MAX_PARTICLES }, (_, i) => [noise(i * 3), noise(i * 3 + 1), noise(i * 3 + 2)]);
   let clock = 0, lastSky = -Infinity, lastCloud = -1, season = '';
@@ -204,6 +206,7 @@ export function createEnvironmentScene(scene: THREE.Scene, roof: THREE.Group, am
   const sunsetSun = new THREE.Color('#ffd0a0'), daylightSun = new THREE.Color('#fff4d9');
   return {
     update(frame: EnvironmentFrame | undefined, onRoof: boolean, settings: Settings, dt: number) {
+      surfaces.update(frame?.precipitation ?? 'none', onRoof, settings, dt);
       const count = outdoorParticleCount(frame?.precipitation ?? 'none', onRoof, settings.quality, settings.reducedMotion);
       rain.visible = count > 0 && frame?.precipitation === 'rain';
       snow.visible = count > 0 && frame?.precipitation === 'snow';
@@ -268,6 +271,7 @@ export function createEnvironmentScene(scene: THREE.Scene, roof: THREE.Group, am
       }
     },
     dispose() {
+      surfaces.dispose();
       sky.texture.dispose();
       for (const particleSystem of [rain, snow]) {
         particleSystem.removeFromParent();
