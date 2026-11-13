@@ -19,7 +19,7 @@ import type { BoardEntry } from '@/game/board-types';
 import { isNearWallBoard } from '@/game/wall-board-layout';
 import { UpdateNews } from './update-news';
 import { MonitorWallpaper } from './monitor-wallpaper';
-import { readWallpaper, WALLPAPER_STORAGE_KEY } from '@/game/wallpaper';
+import { usePersonalWallpaper } from '@/hooks/use-personal-wallpaper';
 import { OfficePlayControls } from './office-play-controls';
 import './office-rooftop.css';
 import { BOUNDS, isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layout';
@@ -48,8 +48,7 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
   const [boardRequest, setBoardRequest] = useState(0);
   const receiveBoard = useCallback((entries: BoardEntry[]) => { boardEntries.current = entries; }, []);
   const newsOpen = useRef(false), wallpaperOpen = useRef(false);
-  const [wallpaper, setWallpaper] = useState(() => readWallpaper()), wallpaperRef = useRef(wallpaper); wallpaperRef.current = wallpaper;
-  useEffect(() => { const refresh = (event: StorageEvent) => { if (event.key === WALLPAPER_STORAGE_KEY || event.key === null) setWallpaper(readWallpaper()); }; window.addEventListener("storage", refresh); return () => window.removeEventListener("storage", refresh); }, []);
+  const wallpaper = usePersonalWallpaper() ?? null, wallpaperRef = useRef(wallpaper); wallpaperRef.current = wallpaper;
   const syncPause = useCallback(() => {
     engine.dispatch({ type: 'pause', value: document.hidden || feedbackOpen.current || boardOpen.current || wallpaperOpen.current || newsOpen.current || panelRef.current === 'settings' || panelRef.current === 'help' });
     audio.current?.sync(engine.state);
@@ -136,7 +135,7 @@ function Game({ engine, onMultiplayer }: { engine: GameEngine; onMultiplayer?:()
       {nearBoard && !panel && !boardOpen.current && !feedbackOpen.current && !wallpaperOpen.current && !newsOpen.current && <button className="nearby-board" onClick={openWallBoard}><Files size={17}/>벽 게시판 보기<kbd>E</kbd></button>}
       <CameraControls disabled={!!state.transition} onZoom={delta=>scene.current?.zoom(delta)} />
       {hints && <div className="first-hint"><MousePointer2 size={17} /><span>눌러서 걷기 · 상하좌우 드래그로 시점 조절</span><button aria-label="안내 닫기" onClick={() => setHints(false)}><X size={15} /></button></div>}
-      <OfficePlayControls wallpaperAction={<MonitorWallpaper image={wallpaper} onApplied={setWallpaper} onOpenChange={handleWallpaperOpen}/>} state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>send({type:"exit"})} onType={key=>audio.current?.typeKey(key)} newsAction={<UpdateNews context={{mode:'solo',floor:roof?'roof':'office'}} autoOpenReady={ready && !wallpaperOpen.current && !panel && !state.transition} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={employeeLabel(state.name,state.rank)} openRequest={boardRequest} onEntriesChange={receiveBoard} onOpenChange={handleBoardOpen}/>} />
+      <OfficePlayControls wallpaperAction={<MonitorWallpaper image={wallpaper} onOpenChange={handleWallpaperOpen}/>} state={state} send={send} panel={panel} setPanel={setPanel} onExit={()=>send({type:"exit"})} onType={key=>audio.current?.typeKey(key)} newsAction={<UpdateNews context={{mode:'solo',floor:roof?'roof':'office'}} autoOpenReady={ready && !wallpaperOpen.current && !panel && !state.transition} onOpenChange={handleNewsOpen}/>} boardAction={<OfficeBulletinBoard name={employeeLabel(state.name,state.rank)} openRequest={boardRequest} onEntriesChange={receiveBoard} onOpenChange={handleBoardOpen}/>} />
     </>}
     {(panel === 'settings' || panel === 'help') && <div className="modal-backdrop" onClick={() => setPanel(null)}><section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={e => e.stopPropagation()}><div className="panel-title"><h2 id="dialog-title">{panel === 'settings' ? '내 취향대로' : '이 회사에서 노는 법'}</h2><button className="icon-button" aria-label="닫기" autoFocus onClick={() => setPanel(null)}><X size={20} /></button></div>{panel === 'settings' ? <>
       <CompanySettings profile={{name:state.name,rank:state.rank,avatar:state.player.avatar??'short'}} company={{roomName:state.companyName,bossRank:state.bossRank,capacity:2}} onProfile={value=>{engine.dispatch({type:'profile',value});setName(value.name);setRank(value.rank);setAvatar(value.avatar);}} onCompany={value=>{engine.dispatch({type:'profile',value:{companyName:value.roomName,bossRank:value.bossRank}});setBossRank(value.bossRank);}}/>

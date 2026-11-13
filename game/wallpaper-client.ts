@@ -23,8 +23,8 @@ export async function prepareWallpaper(file: File, fit: 'contain' | 'cover'): Pr
   } finally { bitmap.close(); }
 }
 
-export async function saveRoomWallpaper(session: RoomSession, image: string | null): Promise<string | null> {
-  const result = await requestRoom<{ wallpaperId: unknown }>({ action: image ? 'set' : 'remove', ...session, image }, undefined, 'wallpaper');
+export async function saveRoomWallpaper(session: RoomSession, image: string | null, signal?: AbortSignal): Promise<string | null> {
+  const result = await requestRoom<{ wallpaperId: unknown }>({ action: image ? 'set' : 'remove', ...session, image }, signal, 'wallpaper');
   if (result.wallpaperId !== null && !validWallpaperId(result.wallpaperId)) throw new Error('저장 결과를 확인하지 못했어요.');
   return result.wallpaperId;
 }

@@ -3,6 +3,7 @@ export const WALLPAPER_MAX_BYTES = 96 * 1024;
 export const WALLPAPER_BODY_LIMIT = 140 * 1024;
 export const WALLPAPER_INPUT_LIMIT = 10 * 1024 * 1024;
 export const WALLPAPER_STORAGE_KEY = 'office-monitor-wallpaper-v1';
+export const WALLPAPER_CHANGE_EVENT = 'office-monitor-wallpaper-change';
 export const validWallpaperId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id);
 
 /** Only bounded JPEG pixels enter storage; SVG, URLs and arbitrary data are rejected. */
@@ -37,8 +38,21 @@ export function wallpaperDataUrl(bytes: Uint8Array): string {
 }
 
 export function readWallpaper(storage?: Pick<Storage, 'getItem'>): string | null {
-  try { const image = (storage ?? globalThis.localStorage).getItem(WALLPAPER_STORAGE_KEY); return decodeWallpaper(image) ? image : null; } catch { return null; }
+  return readWallpaperPreference(storage) ?? null;
 }
-export function writeWallpaper(image: string | null, storage?: Pick<Storage, 'setItem' | 'removeItem'>): boolean {
-  try { const target = storage ?? globalThis.localStorage; if (image === null) target.removeItem(WALLPAPER_STORAGE_KEY); else if (decodeWallpaper(image)) target.setItem(WALLPAPER_STORAGE_KEY, image); else return false; return true; } catch { return false; }
+/** undefined means no personal choice yet; null is an intentional default/reset. */
+export function readWallpaperPreference(storage?: Pick<Storage, 'getItem'>): string | null | undefined {
+  try { const image = (storage ?? globalThis.localStorage).getItem(WALLPAPER_STORAGE_KEY); return image === 'default' ? null : decodeWallpaper(image) ? image! : undefined; } catch { return undefined; }
+}
+export function writeWallpaper(image: string | null, storage?: Pick<Storage, 'setItem'>): boolean {
+  try {
+    if (image !== null && !decodeWallpaper(image)) return false;
+    (storage ?? globalThis.localStorage).setItem(WALLPAPER_STORAGE_KEY, image ?? 'default');
+    if (!storage && typeof window !== 'undefined') window.dispatchEvent(new Event(WALLPAPER_CHANGE_EVENT));
+    return true;
+  } catch { return false; }
+}
+
+export function adoptRoomWallpaper(image: string, storage?: Pick<Storage, 'getItem' | 'setItem'>): boolean {
+  return readWallpaperPreference(storage) === undefined && writeWallpaper(image, storage);
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { decodeWallpaper, readWallpaper, writeWallpaper, wallpaperDataUrl, WALLPAPER_MAX_BYTES, WALLPAPER_STORAGE_KEY } from './wallpaper.ts';
+import { adoptRoomWallpaper, decodeWallpaper, readWallpaper, readWallpaperPreference, writeWallpaper, wallpaperDataUrl, WALLPAPER_MAX_BYTES, WALLPAPER_STORAGE_KEY } from './wallpaper.ts';
 const bytes = new Uint8Array(readFileSync(new URL('./fixtures/monitor.jpg', import.meta.url)));
 const image = wallpaperDataUrl(bytes);
 test('wallpaper accepts a real bounded JPEG and rejects non-raster, oversized and wrong dimensions', () => {
@@ -10,6 +10,14 @@ test('wallpaper accepts a real bounded JPEG and rejects non-raster, oversized an
   const wrongSize = bytes.slice(), marker = wrongSize.findIndex((value, index) => value === 255 && wrongSize[index + 1] === 192);
   assert.ok(marker > 0); wrongSize[marker + 5] = 100;
   assert.equal(decodeWallpaper(wallpaperDataUrl(wrongSize)), null);
+});
+test('old room-only wallpaper is adopted once, and explicit resets cannot resurrect it', () => {
+  const data = new Map<string, string>(), storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
+  assert.equal(readWallpaperPreference(storage), undefined);
+  assert.equal(adoptRoomWallpaper(image, storage), true); assert.equal(readWallpaperPreference(storage), image);
+  assert.equal(adoptRoomWallpaper(image, storage), false);
+  assert.equal(writeWallpaper(null, storage), true); assert.equal(readWallpaperPreference(storage), null);
+  assert.equal(adoptRoomWallpaper(image, storage), false); assert.equal(readWallpaper(storage), null);
 });
 test('solo wallpaper persists, restores and removes without depending on the game mode save', () => {
   const data = new Map<string, string>(), storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } };
