@@ -149,7 +149,9 @@ test('room host keeps the shared boss alive from the roof and a guest can approa
   const sync=()=>{const snapshot=roomSnapshot(host,guest,now+=200);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);};sync();
   assert.equal(guest.serializeBoss(),undefined);assert.ok(host.serializeBoss());
   host.engine.dispatch({type:'travel',floor:'rooftop'});advance(host,1.7);
-  const before={x:host.engine.state.boss.x,z:host.engine.state.boss.z};advance(host,3);
+  const before={x:host.engine.state.boss.x,z:host.engine.state.boss.z};advance(host,50);
+  assert.deepEqual({x:host.engine.state.boss.x,z:host.engine.state.boss.z},before);assert.equal(host.engine.state.boss.pose,'type');
+  advance(host,7);
   assert.notDeepEqual({x:host.engine.state.boss.x,z:host.engine.state.boss.z},before);
   sync();guest.engine.dispatch({type:'select',target:'boss'});
   for(let i=0;i<1200&&!guest.engine.state.ready;i++){host.step(.05);guest.step(.05);if(i%13===0)sync();}
@@ -162,13 +164,15 @@ test('room host keeps the shared boss alive from the roof and a guest can approa
 test('slacking guest gets the same private warning and can immediately return to work',()=>{
   const host=createMultiController({...member(8,0),id:'host'},8),guest=createMultiController({...member(8,1),id:'guest'},8);
   arrive(guest,'desk');guest.engine.dispatch({type:'interact'});guest.engine.dispatch({type:'desk',mode:'shopping'});
-  host.engine.state.elapsed=12;guest.engine.state.elapsed=12;
-  Object.assign(host.engine.state.boss,{x:guest.player.x-1.4,z:guest.player.z});
-  let snapshot=roomSnapshot(host,guest,12000);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);host.step(.05);
+  let now=1000,snapshot=roomSnapshot(host,guest,now);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);
+  for(let i=0;i<1800&&host.engine.state.bossPhase!=='watch';i++){
+    host.step(.05);guest.step(.05);snapshot=roomSnapshot(host,guest,now+=50);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);
+  }
+  assert.ok(host.engine.state.elapsed>=55,'a guest cannot interrupt the initial work period');
   assert.equal(host.engine.state.bossPhase,'watch');
-  snapshot=roomSnapshot(host,guest,12100);guest.applySnapshot(snapshot);guest.step(.05);assert.equal(guest.engine.state.warning,2);
+  guest.step(.05);assert.equal(guest.engine.state.warning,2);
   guest.engine.dispatch({type:'desk',mode:'work'});assert.equal(guest.engine.state.warning,0);assert.equal(guest.engine.state.scold,0);
-  snapshot=roomSnapshot(host,guest,12200);host.applySnapshot(snapshot);host.step(.05);assert.equal(host.engine.state.bossPhase,'routine');
+  snapshot=roomSnapshot(host,guest,now+100);host.applySnapshot(snapshot);host.step(.05);assert.equal(host.engine.state.bossPhase,'routine');
 });
 
 test('host takeover adopts the shared boss and stale snapshots cannot move it backwards',()=>{
@@ -190,4 +194,17 @@ test('roof navigation and restored corner positions use the same clearance as so
     c.engine.dispatch({type:'axis',x:x<0?1:-1,z:0});advance(c,.1);c.engine.dispatch({type:'axis',x:0,z:0});
     assert.ok(Math.abs(c.player.x)<Math.abs(x),'manual movement also accepts roof edge points');
   }
+});
+
+test('room boss rank overrides saved and actor ranks while each member keeps their own rank',()=>{
+ const host=createMultiController({...member(4,0),id:'host',name:'민수',rank:'대리'},4);
+ const guest=createMultiController({...member(4,1),id:'guest',name:'영희',rank:'사원'},4);
+ guest.engine.dispatch({type:'enter',bossRank:'사장'});
+ const snapshot=roomSnapshot(host,guest,1000);snapshot.room.bossRank='이사';snapshot.boss.actor.rank='부장';
+ host.applySnapshot(snapshot);guest.applySnapshot(snapshot);
+ for(const c of [host,guest]){assert.equal(c.engine.state.bossRank,'이사');assert.equal(c.engine.state.boss.name,'박이사');assert.equal(c.engine.state.boss.rank,'이사');}
+ assert.equal(host.engine.state.rank,'대리');assert.equal(guest.engine.state.rank,'사원');assert.equal(host.player.name,'민수');assert.equal(guest.player.name,'영희');
+ snapshot.serverTime++;snapshot.room.hostId='guest';guest.applySnapshot(snapshot);host.applySnapshot(snapshot);
+ assert.equal(guest.serializeBoss()?.actor.rank,'이사');assert.equal(host.serializeBoss(),undefined);
+ assert.equal(guest.engine.state.rank,'사원');assert.equal(host.engine.state.rank,'대리');host.engine.dispose();guest.engine.dispose();
 });

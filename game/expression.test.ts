@@ -8,9 +8,12 @@ import { chairSpinAngle } from './expression.ts';
 import type { RoomPlayer } from './multi-types.ts';
 
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-  createElement: () => ({ width: 0, height: 0, getContext: () => ({
-    beginPath() {}, roundRect() {}, fill() {}, fillText() {},
-  }) }),
+  createElement: () => {
+    const canvas = { width: 0, height: 0, text: '', getContext: () => ({
+      beginPath() {}, roundRect() {}, fill() {}, fillText(text: string) { canvas.text = text; },
+    }) };
+    return canvas;
+  },
 } });
 
 test('spin phase follows activity progress instead of unrelated observer clocks', () => {
@@ -39,6 +42,30 @@ test('room spin expires for the same rendered avatar and seated state', () => {
   animateActor(rig, active.player, active, active.elapsed);
   assert.ok(rig.body.rotation.y > 0);
   assert.equal(chairSpinAngle(active), rig.body.rotation.y, 'the remote chair and avatar share a phase');
+});
+
+test('spinning, working and resting keep the actual pants above the office chair cushion', () => {
+  const state = createGameEngine().state, rig = createActor(new THREE.Group(), 0, state.player.name);
+  for (const reduced of [false, true]) for (const pose of ['spin', 'type', 'sit', 'lean', 'sleep'] as const) {
+    state.settings.reducedMotion = reduced; state.player.pose = pose; state.seat = pose === 'sit' || pose === 'lean' ? 'lounge' : 'desk';
+    state.deskMode = 'work'; state.activity = pose === 'spin' ? { kind: 'spin', duration: 2, remaining: 1 } : null;
+    for (const time of [2, 13.2]) {
+      animateActor(rig, state.player, state, time); rig.root.updateMatrixWorld(true);
+      const pantsBottom = new THREE.Box3().setFromObject(rig.legs[0].children[0], true).min.y;
+      assert.ok(Math.abs(pantsBottom - .65) < .012, `${pose}: pants must rest on the cushion at y=.65, got ${pantsBottom}`);
+    }
+  }
+  state.player.pose = 'idle'; state.seat = null; state.activity = null;
+  animateActor(rig, state.player, state, 20);
+  assert.equal(rig.body.position.y, 0, 'standing removes the seated height adjustment');
+});
+
+test('a working boss uses the same supported seat height as a player', () => {
+  const state = createGameEngine().state, rig = createActor(new THREE.Group(), 1, state.boss.name);
+  state.boss.pose = 'type'; state.boss.moving = false;
+  animateActor(rig, state.boss, state, 13.2); rig.root.updateMatrixWorld(true);
+  const pantsBottom = new THREE.Box3().setFromObject(rig.legs[0].children[0], true).min.y;
+  assert.ok(Math.abs(pantsBottom - .65) < .012, 'the boss also sits on top of the cushion');
 });
 
 test('dance stands up, has a bounded duration, and cancels on travel or movement', () => {
@@ -71,6 +98,17 @@ test('floating scene labels remain visible through walls and never block clicks'
   assert.equal(label.material.depthWrite, false);
   assert.ok(label.renderOrder >= 1000);
   assert.equal(label.userData.pointerPassthrough, true);
+});
+
+test('changing an actor rank refreshes the visible name label even when the name is unchanged', () => {
+  const state = createGameEngine().state; state.player.name = '서준'; state.player.rank = '사원';
+  const rig = createActor(new THREE.Group(), 0, state.player.name);
+  animateActor(rig, state.player, state, 1);
+  assert.equal((rig.label.material.map!.image as { text: string }).text, '서준 사원');
+  const before = rig.label.material.map;
+  state.player.rank = '과장'; animateActor(rig, state.player, state, 2);
+  assert.equal((rig.label.material.map!.image as { text: string }).text, '서준 과장');
+  assert.notEqual(rig.label.material.map, before, 'a rank change replaces the displayed label texture');
 });
 
 test('dance scene includes its mirrorball and spotlight only while the actor dances', () => {

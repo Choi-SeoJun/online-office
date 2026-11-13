@@ -57,7 +57,7 @@ export const TARGETS: Record<TargetId, { label: string; point: Point; action: st
   roofWallWest: { label: '왼쪽 벽', point: ROOF_WALLS.west.point, action: '벽에 기대기' },
 };
 export const WEAPONS = {
-  punch: { label: '펀치', interval: 0.55 }, hammer: { label: '뿅망치', interval: 0.85 }, fan: { label: '서류 뭉치', interval: 0.9 },
+  punch: { label: '펀치', interval: 0.55 }, hammer: { label: '뿅망치', interval: 0.85 }, fan: { label: '서류 던지기', interval: 0.9 },
 } as const;
 export const WEAPON_IMPACT = .43;
 export const SNACKS = { cookie: '쿠키', choco: '초코바', cracker: '크래커' } as const;

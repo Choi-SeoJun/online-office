@@ -1,7 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readSavedState, writeSavedState, toPersistedState, STORAGE_KEY } from './storage.ts';
+import { readSavedState, writeSavedState, toPersistedState, writeRankChoice, writeAvatarChoice, STORAGE_KEY } from './storage.ts';
 import { createGameEngine } from './engine.ts';
+
+test('rank selections survive profile edits and older profiles receive safe defaults',()=>{
+ let value=JSON.stringify({version:1,name:'테스트',snacks:{cookie:2},settings:{sound:false}});
+ const storage={getItem:()=>value,setItem(_key:string,next:string){value=next;}};
+ assert.equal(readSavedState(storage)?.rank,'사원');assert.equal(readSavedState(storage)?.bossRank,'부장');
+ assert.equal(writeRankChoice('대리','이사',storage),true);writeAvatarChoice('ponytail',storage);
+ const saved=readSavedState(storage)!;
+ assert.equal(saved.rank,'대리');assert.equal(saved.bossRank,'이사');assert.equal(saved.avatar,'ponytail');assert.equal(saved.snacks.cookie,2);
+ const invalid=readSavedState({getItem:()=>JSON.stringify({...saved,rank:'왕',bossRank:'황제'})})!;
+ assert.equal(invalid.rank,'사원');assert.equal(invalid.bossRank,'부장');
+});
 test('corrupt and incompatible saved records safely return defaults or no save',()=>{
  for(const raw of ['{','null','[]','{"version":2}'])assert.equal(readSavedState({getItem:()=>raw}),undefined);
  const p=readSavedState({getItem:()=>JSON.stringify({version:1,name:'  아주긴이름입니다열글자초과  ',weapon:'laser',settings:{sound:'true',volume:Infinity,reducedMotion:true,quality:'ultra'},snacks:{cookie:-1,choco:20,cracker:1.5}})})!;

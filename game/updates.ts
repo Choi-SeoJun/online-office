@@ -4,6 +4,16 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 // Changes from the previous 04:00 (inclusive) to this 04:00 (exclusive)
 // belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
+  '2026-11-14': {
+    added: [
+      '출근 전에 나의 직급을 고를 수 있어요. 혼자 쉬기에서는 내 상사의 직급을, 동료들과에서는 방장이 모두의 상사 직급을 정해요.',
+      '서류 뭉치가 서류 던지기로 바뀌었어요. 종이가 상사 쪽으로 날아가며 흩날려요. 펀치와 뿅망치는 그대로 사용할 수 있어요.',
+    ],
+    fixed: [
+      '의자를 돌릴 때 몸이 쿠션 안으로 잠기던 자세를 바로잡았어요.',
+      '상사가 자리에 앉아 일하는 시간을 늘리고, 순찰은 가끔 짧게 하도록 조정했어요.',
+    ],
+  },
   '2026-11-13': {
     added: [
       '아직 읽지 않은 업데이트 소식은 접속하면 한 번 자동으로 열려요. 읽은 소식도 업데이트 버튼에서 다시 볼 수 있어요.',

@@ -5,6 +5,8 @@ import { createActor, animateActor } from './models.ts';
 import { createGameEngine } from './engine.ts';
 import { ROOF_REST, ROOF_WALLS, WEAPONS, WEAPON_IMPACT } from './layout.ts';
 import type { Activity, GameState, Snack, Weapon } from './types.ts';
+import { remoteAnimationState } from './multi-animation.ts';
+import type { RoomPlayer } from './multi-types.ts';
 
 // Only label rasterization needs a DOM; geometry, transforms and props stay real.
 Object.defineProperty(globalThis, 'document', { configurable: true, value: {
@@ -28,9 +30,10 @@ function position(object: THREE.Object3D) { return object.getWorldPosition(new T
 test('leaning in the pantry keeps seated legs and visibly reclines instead of standing through the chair', () => {
   const { state, rig, render } = setup();
   state.seat = 'lounge'; state.player.pose = 'sit'; render();
-  const seatedLeg = rig.legs[0].rotation.x;
+  const seatedLeg = new THREE.Vector3(0, 1, 0).applyQuaternion(rig.legs[0].getWorldQuaternion(new THREE.Quaternion()));
   state.player.pose = 'lean'; render();
-  assert.equal(rig.legs[0].rotation.x, seatedLeg);
+  const leaningLeg = new THREE.Vector3(0, 1, 0).applyQuaternion(rig.legs[0].getWorldQuaternion(new THREE.Quaternion()));
+  assert.ok(leaningLeg.distanceTo(seatedLeg) < .001, 'thighs remain supported while the torso leans');
   assert.ok(rig.body.rotation.x < -.1, 'lean visibly tilts backward');
   state.seat = null; state.player.pose = 'idle'; render();
   assert.equal(rig.body.rotation.x, 0); assert.equal(rig.legs[0].rotation.x, 0);
@@ -116,7 +119,7 @@ test('the toy hammer crosses sideways into its strike instead of chopping in one
   assert.ok(Math.abs(impact.x - windup.x) > .22, 'hammer needs a readable diagonal side sweep');
 });
 
-test('the paper stack has substantial layered pages and drops from overhead into one downward slam', () => {
+test('the paper bundle leaves the hand, flies to the boss and breaks into drifting sheets', () => {
   const { state, rig, render } = setup();
   state.player.x = state.player.z = 0; state.player.angle = 0; state.player.pose = 'hit';
   state.boss.x = 0; state.boss.z = 1.5; state.lastHit = { id: 1, at: 12, weapon: 'fan' };
@@ -126,20 +129,62 @@ test('the paper stack has substantial layered pages and drops from overhead into
   assert.ok(sheets.length >= 6, 'the stack visibly has multiple paper edges');
   for (const reduced of [false, true]) {
     state.settings.reducedMotion = reduced;
-    state.elapsed = 12 + WEAPONS.fan.interval * .23; render();
-    const lifted = position(stack);
+    state.elapsed = 12 + WEAPONS.fan.interval * .12; render();
+    assert.equal(rig.weapons.fan.visible, true, 'the bundle is held during the windup');
+    const pulledBack = position(rig.hand);
+    state.elapsed = 12 + WEAPONS.fan.interval * .34; render();
+    const flight = rig.root.getObjectByName('paper-flight');
+    assert.ok(flight?.visible, 'the released bundle has its own visible flight');
+    assert.equal(rig.weapons.fan.visible, false, 'the thrown papers are no longer attached to the hand');
+    assert.ok(position(rig.hand).z > pulledBack.z + .3, 'the arm swings forward after pulling back');
+    const flying = position(flight);
     state.elapsed = 12 + WEAPONS.fan.interval * WEAPON_IMPACT; render();
-    const impact = position(stack);
-    assert.ok(lifted.y > 1.9, 'the whole bundle lifts above the player head');
-    assert.ok(lifted.y - impact.y > .5, 'the papers come down instead of waving sideways');
-    assert.ok(impact.z - lifted.z > .45, 'the downward swing travels forward to the boss');
-    state.elapsed = 12 + WEAPONS.fan.interval * .53; render();
-    const loose = rig.weapons.fan.getObjectByName('loose-paper-0');
-    assert.ok(loose, 'one loose top page reads as paper, not a rigid board');
-    assert.equal(Math.abs(loose.rotation.x) > .02, !reduced, 'paper flutter obeys reduced motion');
+    assert.ok(position(flight).z > flying.z + .15, 'the released bundle advances independently toward the boss');
+    state.elapsed = 12 + WEAPONS.fan.interval * .70; render();
+    const pages = flight.children.filter(object => object.name.startsWith('flying-paper-') && object.visible);
+    assert.ok(pages.length >= 3, 'several separate sheets drift away from the bundle');
+    assert.ok(pages.some(page => position(page).distanceTo(position(pages[0])) > .3), 'the papers visibly spread apart');
+    assert.equal(pages.some(page => Math.abs(page.rotation.x) > .2), !reduced, 'reduced motion avoids tumbling paper');
     state.player.pose = 'idle'; render();
-    assert.equal(loose.rotation.x, 0, 'the next action starts from a flat stack');
+    assert.equal(flight.visible, false, 'finishing or cancelling leaves no flying paper behind');
     state.player.pose = 'hit';
+  }
+});
+
+test('a remote paper throw shares the impact timing and clears on cancellation, travel or expiry', () => {
+  const { state } = setup(); state.boss.x = 0; state.boss.z = 1.5;
+  const peer: RoomPlayer = { ...state.player, id: 'paper-throw-peer', x: 0, z: 0, angle: 0, pose: 'hit', seatIndex: 0,
+    lastSeen: 10000, floor: 'office', seat: null, deskMode: null, roofRest: null, roofWallSide: null,
+    candyInMouth: false, activity: null, weapon: 'fan', elapsed: 12, lastHit: { id: 1, weapon: 'fan', at: 12 }, carryingCoffee: false };
+  const rig = createActor(new THREE.Group(), 0, peer.name);
+  const context = remoteAnimationState(state, peer, 10000 + WEAPONS.fan.interval * WEAPON_IMPACT * 1000);
+  animateActor(rig, context.player, context, context.elapsed); rig.root.updateMatrixWorld(true);
+  const flight = rig.root.getObjectByName('paper-flight'); assert.ok(flight?.visible);
+  assert.ok(Math.abs(position(flight).z - state.boss.z) < .35, 'colleagues see the papers reach the shared boss on the impact beat');
+  for (const condition of ['cancel', 'walk', 'roof', 'transition', 'expiry'] as const) {
+    const next = { ...context, player: { ...context.player }, transition: null } as GameState;
+    if (condition === 'cancel') next.player.pose = 'idle';
+    if (condition === 'walk') next.player.moving = true;
+    if (condition === 'roof') next.floor = 'rooftop';
+    if (condition === 'transition') next.transition = { from: 'office', to: 'rooftop', remaining: .5, duration: 1 };
+    if (condition === 'expiry') next.elapsed = 12 + WEAPONS.fan.interval;
+    animateActor(rig, next.player, next, next.elapsed);
+    assert.equal(flight.visible, false, `${condition} removes all airborne pages`);
+  }
+});
+
+test('paper release starts at the actual hand-held bundle and lands correctly from every approach side', () => {
+  const { state, rig, render } = setup(); state.player.pose = 'hit'; state.lastHit = { id: 1, at: 12, weapon: 'fan' };
+  state.player.x = 2; state.player.z = -3;
+  for (const angle of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) {
+    state.player.angle = angle; state.boss.x = state.player.x + Math.sin(angle) * 1.4; state.boss.z = state.player.z + Math.cos(angle) * 1.4;
+    state.elapsed = 12 + WEAPONS.fan.interval * .269999; render();
+    const heldCenter = position(rig.weapons.fan.getObjectByName('paper-stack-core')!);
+    state.elapsed = 12 + WEAPONS.fan.interval * .270001; render();
+    const flight = rig.root.getObjectByName('paper-flight')!;
+    assert.ok(position(flight).distanceTo(heldCenter) < .01, 'the thrown bundle cannot jump from the releasing hand');
+    state.elapsed = 12 + WEAPONS.fan.interval * WEAPON_IMPACT; render();
+    assert.ok(position(flight).distanceTo(new THREE.Vector3(state.boss.x, 1.48, state.boss.z)) < .3, 'every approach reaches the actual boss position');
   }
 });
 
@@ -245,15 +290,17 @@ test('wall rest preserves back and shoe contact while keeping head and candy ins
   }
 });
 
-test('all weapons stay visible through their full swing and reset after recovery', () => {
+test('held tools and thrown papers stay visible through recovery then reset', () => {
   const { state, rig, render } = setup();
   for (const weapon of ['punch', 'hammer', 'fan'] as Weapon[]) {
     const duration = WEAPONS[weapon].interval;
     state.player.pose = 'hit'; state.lastHit = { id: 1, at: 12, weapon };
     state.elapsed = 12 + duration * .72; render();
-    assert.equal(rig.weapons[weapon].visible, true, `${weapon} remains visible through recovery`);
+    const visibleTool = weapon === 'fan' ? rig.root.getObjectByName('paper-flight') : rig.weapons[weapon];
+    assert.equal(visibleTool?.visible, true, `${weapon} remains visible through recovery`);
     state.elapsed = 12 + duration + .05; state.player.pose = 'idle'; render();
     assert.equal(Object.values(rig.weapons).some(item => item.visible), false);
+    assert.equal(rig.root.getObjectByName('paper-flight')?.visible, false);
     assert.equal(rig.rightArm.scale.y, 1, 'arm extension cannot leak into idle');
   }
 });
@@ -295,7 +342,8 @@ test('actual paper stack surfaces contact the boss at the shared impact beat in 
     state.elapsed = 12 + WEAPONS.fan.interval * WEAPON_IMPACT; render();
     animateActor(bossRig, state.boss, state, state.elapsed); bossRig.root.updateMatrixWorld(true);
     const inverse = sphere.matrixWorld.clone().invert();
-    rig.weapons.fan.traverse(object => {
+    const flight = rig.root.getObjectByName('paper-flight'); assert.ok(flight?.visible);
+    flight.traverse(object => {
       if (!(object instanceof THREE.Mesh)) return;
       const transform = inverse.clone().multiply(object.matrixWorld), points = object.geometry.attributes.position, index = object.geometry.index;
       for (let i = 0; i < (index ? index.count : points.count); i += 3) {
@@ -356,7 +404,7 @@ test('each weapon connects across the maximum attack gap with reduced motion as 
     for (let sample = 1; sample < 100; sample++) {
       state.elapsed = 12 + WEAPONS[weapon].interval * sample / 100; render();
       animateActor(bossRig, state.boss, state, state.elapsed); bossRig.root.updateMatrixWorld(true);
-      const tool = new THREE.Box3().setFromObject(rig.weapons[weapon]);
+      const tool = new THREE.Box3().setFromObject(weapon === 'fan' ? rig.root.getObjectByName('paper-flight')! : rig.weapons[weapon]);
       const head = new THREE.Box3().setFromObject(bossRig.head);
       connected ||= tool.intersectsBox(head);
       assert.ok(1.5 - rig.body.position.z > .8, 'tool contact must not require overlapping bodies');

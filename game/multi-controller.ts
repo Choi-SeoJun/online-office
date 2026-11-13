@@ -4,6 +4,7 @@ import { createMultiLayout, isMultiWalkable } from './multi-layout.ts';
 import { createGameEngine, type OfficeEnvironment } from './engine.ts';
 import { ROOF_REST, ROOF_WALLS } from './layout.ts';
 import { restSeatAt, restSeatById } from './rest-seats.ts';
+import { normalizeRank } from './ranks.ts';
 
 /** The same simulation drives both play modes; rooms only add shared presence. */
 export function createMultiController(initial: RoomPlayer, capacity: number, saved?: PersistedState) {
@@ -21,6 +22,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       bounds: layout.bounds, obstacles: layout.obstacles, start: layout.spawn,
       targets: { ...layout.targets, desk: { ...layout.targets.desk, point: desk.seat } },
       deskAngle: desk.angle, loungeAngle: Math.PI,
+      bossSeat: { x: layout.furniture.bossDesk.x - 1.05, z: layout.furniture.bossDesk.z, angle: Math.PI / 2 },
       loungeSeats: layout.loungeSeats,
       coffeeFacing: layout.furniture.coffee, snacksFacing: layout.furniture.snacks,
       patrol: [first, { x: layout.spawn.x, z: layout.bounds.maxZ - .9 }, layout.boss,
@@ -32,7 +34,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
     getPeers: () => latestSnapshot?.players.filter(p => p.id !== initial.id).map(actor => ({ actor, floor: actor.floor, seat: actor.seat, restSeatId: actor.restSeatId, deskMode: actor.deskMode })) ?? [],
   });
   const state = engine.state;
-  Object.assign(state.player, { id: initial.id, name: initial.name, avatar: initial.avatar ?? saved?.avatar ?? 'short', x: initial.x, z: initial.z, angle: initial.angle, pose: 'idle', moving: false });
+  Object.assign(state.player, { id: initial.id, name: initial.name, rank: normalizeRank(initial.rank), avatar: initial.avatar ?? saved?.avatar ?? 'short', x: initial.x, z: initial.z, angle: initial.angle, pose: 'idle', moving: false });
   state.floor = initial.floor ?? 'office';
   if (initial.seat === 'desk' && state.floor === 'office') {
     state.seat = 'desk'; state.deskMode = initial.deskMode ?? 'work';
@@ -50,7 +52,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
   state.candyInMouth = state.floor === 'rooftop' && !!initial.candyInMouth;
   if (initial.carryingCoffee) state.inventory.coffee = 1;
   if (state.floor === 'office' && !isMultiWalkable(layout, state.player)) engine.refreshEnvironment();
-  engine.dispatch({ type: 'enter', name: initial.name, avatar: initial.avatar });
+  engine.dispatch({ type: 'enter', name: initial.name, avatar: initial.avatar, rank: normalizeRank(initial.rank) });
   // Keep stable membership metadata on the public actor for existing callers.
   const player = state.player as Actor & { seatIndex: number; lastSeen: number };
   player.seatIndex = seatIndex; player.lastSeen = initial.lastSeen;
@@ -88,7 +90,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       if (state.restSeatId && snapshot.players.some(peer => peer.id !== initial.id && peer.floor === state.floor
         && (peer.seat === 'lounge' || peer.seat === 'roof-bench')
         && (peer.restSeatId === state.restSeatId || Math.hypot(peer.x - player.x, peer.z - player.z) < .5))) engine.rejectRestSeat(state.restSeatId);
-      player.lastSeen = self.lastSeen;
+      player.lastSeen = self.lastSeen; player.rank = state.rank = normalizeRank(self.rank);
       const shared = snapshot.boss;
       if (!shared) return;
       const newHit = shared.lastHit && shared.lastHit.id !== lastBossHit;
@@ -99,7 +101,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
       // point on takeover or an accepted hit, which also freezes that patrol.
       const replacePosition = !initializedBoss || !hostAuthority || !wasHost || !!newHit;
       const sharedActor = isMultiWalkable(layout, shared.actor) ? shared.actor : { ...shared.actor, ...layout.boss, pose: 'idle' as const, moving: false };
-      engine.applyBossState(sharedActor, shared.phase, hit, replacePosition);
+      engine.applyBossState({ ...sharedActor, rank: normalizeRank(snapshot.room.bossRank ?? sharedActor.rank, '부장') }, shared.phase, hit, replacePosition);
       initializedBoss = true;
     },
     move(point: Point) { dispatch({ type: 'move', point }); },

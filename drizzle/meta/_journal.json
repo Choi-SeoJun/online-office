@@ -36,6 +36,13 @@
       "when": 1794473247072,
       "tag": "0004_office_board",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794556484887,
+      "tag": "0005_office_ranks",
+      "breakpoints": true
     }
   ]
 }

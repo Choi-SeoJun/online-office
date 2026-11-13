@@ -4,6 +4,8 @@ import type { Actor, AvatarStyle, GameState, Snack, Weapon } from './types.ts';
 import { DESKS, ROOF_REST, WEAPONS, WEAPON_IMPACT } from './layout.ts';
 import { chairSpinAngle, workExpression } from './expression.ts';
 import { animateDanceEffects, createDanceEffects, type DanceEffects } from './dance-effects.ts';
+import { animatePaperFlight, createPaperFlight, PAPER_RELEASE, type PaperFlight } from './paper-throw.ts';
+import { employeeLabel } from './ranks.ts';
 
 const mats = new Map<string, THREE.MeshStandardMaterial>();
 const geos = new Map<string, THREE.BufferGeometry>();
@@ -106,7 +108,7 @@ export function desk(parent: THREE.Object3D, x: number, z: number, index: number
   return { group: g, chair: ch, screen };
 }
 
-type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; dance: DanceEffects; isBoss: boolean; lastName: string };
+type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; paperFlight: PaperFlight; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; dance: DanceEffects; isBoss: boolean; lastName: string };
 export function createActor(parent: THREE.Object3D, role: number, name: string, avatar: AvatarStyle = 'short'): Rig {
   const root = new THREE.Group(); parent.add(root); const body = new THREE.Group(); root.add(body);
   const boss = role === 1; const shirt = ['#4e8a7e', '#2f4355', '#c48d6b', '#7e8da5', '#bbab78'][role] ?? '#9fa8b4'; const skin = ['#f0c5a2', '#e7ba94', '#eec09c', '#e5b692', '#f0cbad'][role] ?? '#edc3a0';
@@ -172,6 +174,7 @@ export function createActor(parent: THREE.Object3D, role: number, name: string, 
     box(page, .09, .055, .004, '#c78c7b', .16, .13, .007, .002);
   }
   weapons.hammer.rotation.z = Math.PI; weapons.fan.rotation.z = Math.PI;
+  const paperFlight = createPaperFlight(root, weapons.fan, loosePages);
   const snacks = { cookie: new THREE.Group(), choco: new THREE.Group(), cracker: new THREE.Group() };
   for (const [kind, item] of Object.entries(snacks)) { item.name = `held-${kind}`; item.visible = false; hand.add(item); }
   const cookie = cylinder(snacks.cookie, .135, .135, .045, '#d8a058'); cookie.rotation.x = Math.PI / 2;
@@ -209,7 +212,7 @@ export function createActor(parent: THREE.Object3D, role: number, name: string, 
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
   const dance = createDanceEffects(root);
-  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, dance, isBoss: boss, lastName: name };
+  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, paperFlight, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, dance, isBoss: boss, lastName: name };
 }
 
 // Aim the wrist at the prop's grip and its actual rim/bite edge at the lips.
@@ -255,7 +258,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   const lift = ease(.02, .3) * (1 - ease(.75, 1));
   r.root.position.set(a.x, 0, a.z); r.root.rotation.y = a.angle;
   const wave = Math.sin(time * 9 + (a.id.length % 3));
-  r.body.position.y = roofRest === 'bench' ? ROOF_REST.bench.seatTop + .095 - .66 : seated ? -.17 : walk && !reduced ? Math.abs(wave) * .035 : 0;
+  r.body.position.y = roofRest === 'bench' ? ROOF_REST.bench.seatTop + .095 - .66 : seated ? .65 + .095 - .66 : walk && !reduced ? Math.abs(wave) * .035 : 0;
   r.body.position.x = r.body.position.z = 0; r.body.scale.set(1, 1, 1);
   r.body.rotation.set(0, 0, 0); r.head.position.z = 0; r.head.rotation.set(0, reduced ? 0 : Math.sin(time * .7) * .025, 0); r.leftArm.rotation.set(0, 0, .07); r.rightArm.rotation.set(0, 0, -.07);
   r.leftArm.scale.set(1, 1, 1); r.rightArm.scale.set(1, 1, 1); r.hand.rotation.set(0, 0, 0);
@@ -264,6 +267,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   r.candy.visible = r.wrapper.visible = false; r.candy.position.set(0, 0, 0); r.candy.rotation.set(0, 0, 0); r.candy.scale.setScalar(1); r.wrapper.scale.setScalar(1);
   r.mouthCandy.visible = player && state.floor === 'rooftop' && !state.transition && state.candyInMouth && !['drink', 'eat'].includes(a.pose);
   Object.entries(r.weapons).forEach(([kind, item]) => { item.visible = false; item.rotation.set(0, 0, kind === 'punch' ? 0 : Math.PI); });
+  r.paperFlight.group.visible = false;
   r.loosePages.forEach(page => { page.rotation.set(0, 0, 0); });
   r.legs.forEach((leg, i) => { leg.rotation.x = seated ? -1.42 : walk ? wave * .42 * (i ? -1 : 1) : 0; r.calves[i].rotation.x = seated ? 1.44 : 0; });
   if (roofRest === 'bench') r.legs.forEach((leg, i) => { leg.rotation.x = -Math.PI / 2; r.calves[i].rotation.x = Math.PI / 2; });
@@ -379,7 +383,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   const visualHit = r.isBoss ? state.bossHit ?? state.lastHit : state.lastHit;
   const hitAge = visualHit ? state.elapsed - visualHit.at : 10;
   const swingDuration = visualHit ? WEAPONS[visualHit.weapon].interval : .55;
-  if (player && a.pose === 'hit' && hitAge >= 0 && hitAge < swingDuration && state.lastHit) {
+  if (player && a.pose === 'hit' && !walk && state.floor === 'office' && !state.transition && hitAge >= 0 && hitAge < swingDuration && state.lastHit) {
     const p = hitAge / swingDuration, windup = THREE.MathUtils.smoothstep(p, 0, .23), strike = THREE.MathUtils.smoothstep(p, .23, WEAPON_IMPACT), recover = THREE.MathUtils.smoothstep(p, .62, 1);
     const weapon = state.lastHit.weapon; const finish = 1 - recover;
     const gap = Math.hypot(state.boss.x - a.x, state.boss.z - a.z);
@@ -399,16 +403,13 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
       // Keep functional reach when reduced motion removes the extra body sway.
       r.body.position.z = THREE.MathUtils.clamp(gap - 1.2, 0, .3) * strike * finish;
     } else {
-      // One overhead lift and a firm downward smack: the long end of the
-      // sheaf follows the hand, without turning into the former side-to-side fan.
-      r.rightArm.rotation.set(THREE.MathUtils.lerp(-.75 - 2.20 * windup, -1.82, strike) * finish, 0, -.10);
-      r.rightArm.scale.y = 1 + (.18 * windup * (1 - strike) + .08 * strike) * finish;
-      r.leftArm.rotation.set(-.7 - .6 * windup * (1 - strike), 0, .22);
-      r.body.position.z = THREE.MathUtils.clamp(gap - 1.15, .08, .35) * strike * finish;
-      r.body.rotation.x = (reduced ? .02 : .08) * strike * finish;
-      if (!seated) { r.legs[0].rotation.x = -.22 * strike * finish; r.calves[0].rotation.x = .16 * strike * finish; }
-      const flutter = reduced ? 0 : Math.sin(THREE.MathUtils.clamp((p - WEAPON_IMPACT) / .30, 0, 1) * Math.PI) * finish;
-      r.loosePages.forEach((page, i) => { page.rotation.x = (.14 + i * .10) * flutter; page.rotation.z = (i ? .04 : -.035) * flutter; });
+      // Pull back, release the bundle, then let the independent sheets carry the motion.
+      const pull = THREE.MathUtils.smoothstep(p, 0, .16), release = THREE.MathUtils.smoothstep(p, .16, PAPER_RELEASE);
+      r.rightArm.rotation.set(THREE.MathUtils.lerp(-.75 + 1.4 * pull, -1.7, release) * finish, 0, -.10);
+      r.leftArm.rotation.set(-.55 - .25 * pull * (1 - release), 0, .22);
+      r.body.position.z = 0;
+      r.weapons.fan.visible = p < PAPER_RELEASE;
+      animatePaperFlight(r.paperFlight, a, state.boss, p, reduced);
     }
   }
   const reactionAge = hitAge - swingDuration * WEAPON_IMPACT;
@@ -421,6 +422,13 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     if (weapon === 'fan') { r.head.rotation.x = (reduced ? .08 : .25) * amount; r.body.position.y -= (reduced ? .025 : .09) * amount; r.body.rotation.x = .06 * amount; }
     r.stars.forEach((s, i) => { const a = i / r.stars.length * Math.PI * 2 + (reduced ? 0 : reactionAge * 3); s.position.set(Math.cos(a) * .49, Math.sin(a * 2) * .10, Math.sin(a) * .49); const size = Math.max(.1, amount * 1.5); s.scale.set(size, weapon === 'fan' ? size * 1.55 : size, weapon === 'fan' ? .45 : 1); s.rotation.z = a; s.rotation.x = weapon === 'fan' && !reduced ? reactionAge * 9 + i : 0; });
   }
-  if (a.name !== r.lastName) { updateSpriteLabel(r.label, a.name, r.isBoss ? '#51372d' : '#243e35'); r.lastName = a.name; }
+  if (seated && !roofRest) {
+    // Keep thighs horizontal and their lower surface on the actual cushion even
+    // when the upper body leans, sighs or turns with the chair.
+    r.legs.forEach((leg, index) => { leg.rotation.x = -Math.PI / 2 - r.body.rotation.x; r.calves[index].rotation.x = Math.PI / 2; });
+    r.body.position.y = .65 + .095 * r.body.scale.y - .66 * Math.cos(r.body.rotation.x) * r.body.scale.y;
+  }
+  const label = employeeLabel(a.name, a.rank);
+  if (label !== r.lastName) { updateSpriteLabel(r.label, label, r.isBoss ? '#51372d' : '#243e35'); r.lastName = label; }
 }
 export function disposeModelCaches() { mats.forEach(m => m.dispose()); geos.forEach(g => g.dispose()); mats.clear(); geos.clear(); }

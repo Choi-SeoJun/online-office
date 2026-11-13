@@ -3,6 +3,7 @@ import { BOUNDS, DESKS, OBSTACLES, ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, ROOF_
 import { readSavedState, toPersistedState } from './storage.ts';
 import { getRoofLean, ROOF_LEAN_DISTANCE } from './roof-rest.ts';
 import { ROOF_BENCH_SEATS, SOLO_LOUNGE_SEATS, restSeatById, type RestSeat } from './rest-seats.ts';
+import { bossName, normalizeRank } from './ranks.ts';
 import { SOLO_OFFICE_PLAN } from './office-plan.ts';
 
 const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
@@ -13,7 +14,7 @@ export type OfficeEnvironment = {
   bounds: typeof BOUNDS; obstacles: { x: number; z: number; w: number; d: number }[];
   start: Point; targets: typeof TARGETS; deskAngle: number; loungeAngle: number;
   coffeeFacing: Point; snacksFacing: Point; patrol: Point[];
-  loungeSeats?: RestSeat[];
+  loungeSeats?: RestSeat[]; bossSeat?: Point & { angle: number };
 };
 export type GameEnvironment = {
   getOffice(): OfficeEnvironment; coworkers?: boolean;
@@ -21,6 +22,7 @@ export type GameEnvironment = {
   getPeers?: () => { actor: Actor; floor: Floor; seat: GameState['seat']; restSeatId?: string | null; deskMode: GameState['deskMode'] }[];
 };
 const SOLO_OFFICE: OfficeEnvironment = { bounds: BOUNDS, obstacles: OBSTACLES, start: START, targets: TARGETS, deskAngle: Math.PI, loungeAngle: Math.PI,
+  bossSeat: { x: SOLO_OFFICE_PLAN.furniture.bossDesk.x - 1.05, z: SOLO_OFFICE_PLAN.furniture.bossDesk.z, angle: Math.PI / 2 },
   coffeeFacing: SOLO_OFFICE_PLAN.furniture.coffee, snacksFacing: SOLO_OFFICE_PLAN.furniture.snacks,
   patrol: [{ x: TARGETS.desk.point.x + 1.5, z: TARGETS.desk.point.z }, { x: -3.8, z: 4 }, TARGETS.boss.point, { x: 3.5, z: .3 }] };
 function createNavigation(office: OfficeEnvironment) {
@@ -175,10 +177,11 @@ function travel(actor: Actor, path: Point[], speed: number, dt: number) {
 function actor(id: string, name: string, point: Point, pose: Pose = 'idle'): Actor { return { id, name, ...point, angle: pose === 'type' || pose === 'sleep' ? Math.PI : 0, pose, moving: false }; }
 function initialState(saved?: PersistedState): GameState {
   const p = saved && readSavedState({ getItem: () => JSON.stringify(saved) });
+  const rank = normalizeRank(p?.rank), bossRank = normalizeRank(p?.bossRank, '부장');
   return {
-    entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원',
+    rank, bossRank, entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원',
     floor: 'office', transition: null,
-    player: { ...actor('player', p?.name ?? '김사원', START), avatar: p?.avatar ?? 'short' }, boss: actor('boss', '박부장', TARGETS.boss.point),
+    player: { ...actor('player', p?.name ?? '김사원', START), avatar: p?.avatar ?? 'short', rank }, boss: { ...actor('boss', bossName(bossRank), TARGETS.boss.point), rank: bossRank },
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
     target: null, ready: false, destination: null, seat: null, restSeatId: null, deskMode: null, activity: null, roofRest: null, roofWallSide: null, roofLeanPoint: null, candyInMouth: false,
     inventory: { cookie: p?.snacks.cookie ?? 0, choco: p?.snacks.choco ?? 0, cracker: p?.snacks.cracker ?? 0, coffee: 0 },
@@ -195,8 +198,9 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
   const route = (a: Point, b: Point, avoid?: Point, floor: Floor = 'office') => navigation.route(a, b, avoid, floor);
   const bossApproach = (player: Point, boss: Point) => navigation.bossApproach(player, boss);
   const state = initialState(initial);
+  const bossSeat = () => office.bossSeat ?? { ...office.targets.boss.point, angle: office.deskAngle };
   const applyEnvironment = () => {
-    Object.assign(state.player, office.start); Object.assign(state.boss, office.targets.boss.point);
+    Object.assign(state.player, office.start); Object.assign(state.boss, bossSeat(), { pose: 'type', moving: false });
     if (environment?.coworkers === false) state.coworkers = [];
   };
   applyEnvironment();
@@ -211,6 +215,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
   let nextObservation = 10, patrolIndex = 0, patrolWait = 0, coworkerPhase = -1, coworkerPath: Point[] = [];
   let observedPeer: string | null = null, peerObservationUntil = 0;
   let patrol = office.patrol;
+  let bossRoutine: 'work' | 'patrol' | 'return' = 'work', routineTime = 55, patrolStops = 0;
   const notify = () => {
     if (disposed) return;
     snapshot = structuredClone(state); snapshotClock = 0;
@@ -302,6 +307,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     eventId = 0; lastAttack = -Infinity; attackUntil = hitUntil = recoverUntil = immunityUntil = 0;
     nextObservation = 10; patrolIndex = 0; patrolWait = 0; coworkerPhase = -1; followClock = 0; followedBoss = { ...state.boss };
     officeReturn = { ...office.start }; pendingRest = null;
+    bossRoutine = 'work'; routineTime = 55; patrolStops = 0; observedPeer = null;
   };
   const dispatch = (command: Command) => {
     if (disposed) return;
@@ -313,6 +319,8 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       if (command.weapon in WEAPONS) state.weapon = command.weapon;
     } else if (command.type === 'enter') {
       state.name = command.name?.trim().slice(0, 10) || state.name; state.player.name = state.name; state.entered = true; state.paused = false;
+      state.rank = normalizeRank(command.rank, state.rank); state.player.rank = state.rank;
+      state.bossRank = normalizeRank(command.bossRank, state.bossRank); state.boss.rank = state.bossRank; state.boss.name = bossName(state.bossRank);
       if (command.avatar === 'short' || command.avatar === 'ponytail') state.player.avatar = command.avatar;
     } else if (command.type === 'pause') { state.paused = command.value; axis = { x: 0, z: 0 }; }
     else if (state.entered && !state.paused) {
@@ -375,7 +383,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
         case 'dance':
           if (state.floor === 'office' && !busy()) {
             cancel(); stand(); state.target = null; state.ready = false;
-            begin('dance', 8); event('부장님 몰래, 여기는 잠깐 나의 무대.');
+            begin('dance', 8); event('여기는 잠깐 나의 무대.');
           }
           break;
         case 'interact':
@@ -422,6 +430,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
           face(state.player, state.boss); face(state.boss, state.player);
           lastAttack = state.elapsed; attackUntil = state.elapsed + WEAPONS[state.weapon].interval; state.player.pose = 'hit';
           state.warning = state.scold = 0; state.bossPhase = 'hit'; state.boss.pose = 'hit'; state.boss.moving = false; bossPath = [];
+          bossRoutine = 'return'; routineTime = 0;
           hitUntil = state.elapsed + 2; state.lastHit = { id: (state.lastHit?.id ?? 0) + 1, weapon: state.weapon, at: state.elapsed };
           if (environment) state.bossHit = { ...state.lastHit };
           event(state.weapon === 'fan' ? '나 안 해! 오늘의 서류는 여기까지.' : '앗! 장난은 살살 해 주세요.', state.weapon); break;
@@ -441,7 +450,30 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     if ((state.floor === 'office' && state.target === 'boss' && !state.seat && distance(state.player, state.boss) <= 2.45) || approachingPeer) {
       // The boss acknowledges an approaching player instead of walking through
       // the encounter. Leaving or cancelling immediately resumes the routine.
+      bossRoutine = 'return'; routineTime = 0;
       bossPath = []; state.boss.moving = false; state.boss.pose = 'idle'; face(state.boss, approachingPeer?.actor ?? state.player); return;
+    }
+    // Long uninterrupted work periods separate short visits to the staff aisle.
+    // Authority takeover adopts a seated boss without inheriting another client's clock.
+    if (bossRoutine === 'work' && distance(state.boss, bossSeat()) > .1) bossRoutine = 'return';
+    if (bossRoutine === 'work') {
+      routineTime -= dt;
+      Object.assign(state.boss, bossSeat(), { pose: 'type', moving: false });
+      if (routineTime > 0) return;
+      bossRoutine = 'patrol'; routineTime = 20; patrolStops = 0; patrolIndex = 0; patrolWait = 0; bossPath = [];
+    }
+    if (bossRoutine === 'patrol') {
+      routineTime -= dt;
+      if (routineTime <= 0 || patrolStops >= 2 || !patrol.length) { bossRoutine = 'return'; bossPath = []; }
+    }
+    if (bossRoutine === 'return') {
+      observedPeer = null; state.warning = state.scold = 0; state.bossPhase = 'routine';
+      if (distance(state.boss, bossSeat()) < .05) {
+        Object.assign(state.boss, bossSeat(), { pose: 'type', moving: false });
+        bossRoutine = 'work'; routineTime = 55; bossPath = []; return;
+      }
+      if (!bossPath.length) bossPath = route(state.boss, bossSeat());
+      travel(state.boss, bossPath, 1.65, dt); return;
     }
     const slack = state.floor === 'office' && state.seat === 'desk' && state.deskMode !== 'work' && !state.player.moving && state.elapsed >= attackUntil;
     const slackingPeers = peers.filter(peer => peer.seat === 'desk' && peer.deskMode !== 'work' && !peer.actor.moving);
@@ -462,7 +494,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     if (state.scold > 0) { state.scold = Math.max(0, state.scold - dt); if (!state.scold) endObservation(); return; }
     if (state.elapsed >= nextObservation && state.elapsed >= immunityUntil && slack && distance(state.boss, state.player) <= BOSS_REACH) {
       state.warning = 2; state.bossPhase = 'watch'; state.boss.pose = 'watch'; state.boss.moving = false; bossPath = [];
-      nextObservation = state.elapsed + 30; event('부장님이 화면을 보고 있어요. 업무로 돌아갈 시간!'); return;
+      nextObservation = state.elapsed + 30; event(`${state.bossRank}님이 화면을 보고 있어요. 업무로 돌아갈 시간!`); return;
     }
     const peerToObserve = slackingPeers.sort((a, b) => distance(state.boss, a.actor) - distance(state.boss, b.actor))[0];
     if (state.elapsed >= nextObservation && state.elapsed >= immunityUntil && peerToObserve) {
@@ -480,7 +512,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       if (state.elapsed >= nextObservation && slack) patrolIndex = 0;
       bossPath = route(state.boss, patrol[patrolIndex]);
       if (distance(state.boss, patrol[patrolIndex]) < .1) {
-        patrolWait = patrolIndex === 0 ? 7 : 3; patrolIndex = (patrolIndex + 1) % patrol.length;
+        patrolWait = patrolIndex === 0 ? 7 : 3; patrolIndex = (patrolIndex + 1) % patrol.length; patrolStops++;
         state.boss.pose = 'idle'; state.boss.moving = false; return;
       }
     }
@@ -494,7 +526,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       if (!state.warning) { state.scold = 3; event('잠깐, 화면이 업무 같지는 않은데요? 괜찮아요, 다시 해 봐요.', 'caught'); }
     } else if (state.scold > 0) state.scold = Math.max(0, state.scold - dt);
     else if (state.elapsed >= nextObservation && state.bossPhase === 'watch' && distance(state.boss, state.player) <= BOSS_REACH) {
-      state.warning = 2; nextObservation = state.elapsed + 30; event('부장님이 화면을 보고 있어요. 업무로 돌아갈 시간!');
+      state.warning = 2; nextObservation = state.elapsed + 30; event(`${state.bossRank}님이 화면을 보고 있어요. 업무로 돌아갈 시간!`);
     }
   };
   const updateCoworkers = (dt: number) => {
@@ -590,13 +622,19 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
         if (seat?.floor === 'office') { selectedRestSeat = seat; Object.assign(state.player, seat.seat); restorePose(); }
       }
       if (state.floor === 'office' && !valid(state.player)) { cancel(); stand(); Object.assign(state.player, office.start); }
-      if (!valid(state.boss)) Object.assign(state.boss, office.targets.boss.point);
+      if (!valid(state.boss)) Object.assign(state.boss, bossSeat(), { pose: 'type', moving: false });
       if (state.seat === 'desk') { Object.assign(state.player, office.targets.desk.point); restorePose(); }
       ready(); notify();
     },
     applyBossState(actor: Actor, phase: GameState['bossPhase'], hit: GameState['lastHit'], replacePosition = true) {
-      if (replacePosition) { Object.assign(state.boss, actor, { id: 'boss', name: '박부장' }); bossPath = []; }
+      state.bossRank = normalizeRank(actor.rank, state.bossRank);
+      if (replacePosition) {
+        Object.assign(state.boss, actor, { id: 'boss' }); bossPath = [];
+        bossRoutine = actor.pose === 'type' || actor.pose === 'sit' ? 'work' : 'return'; routineTime = 55;
+      }
+      state.boss.rank = state.bossRank; state.boss.name = bossName(state.bossRank);
       if (hit) {
+        bossRoutine = 'return';
         state.bossHit = { ...hit }; hitUntil = Math.max(hitUntil, hit.at + 2);
         if (state.elapsed < hitUntil) { state.bossPhase = 'hit'; state.boss.pose = 'hit'; state.boss.moving = false; bossPath = []; }
       }

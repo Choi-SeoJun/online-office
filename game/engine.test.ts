@@ -98,16 +98,16 @@ test('following from the pantry reaches the moving boss instead of oscillating a
 });
 test('boss gives a grace window, work cancels it, and observations have cooldown',()=>{
  const e=enter();arrived(e,'desk');e.dispatch({type:'interact'});e.dispatch({type:'desk',mode:'shopping'});
- for(let i=0;i<600&&!e.state.warning;i++) e.step(.05);
+ for(let i=0;i<1800&&!e.state.warning;i++) e.step(.05);
  assert.ok(e.state.warning>0);advance(e,1);assert.equal(e.state.scold,0);
  e.dispatch({type:'desk',mode:'work'});assert.equal(e.state.warning,0);
  e.dispatch({type:'desk',mode:'game'});advance(e,15);assert.equal(e.state.warning,0);assert.equal(e.state.scold,0);
- for(let i=0;i<1000&&!e.state.warning;i++)e.step(.05);
+ for(let i=0;i<2400&&!e.state.warning;i++)e.step(.05);
  assert.ok(e.state.warning>0);advance(e,2.1);assert.ok(e.state.scold>0);assert.equal(e.state.event?.kind,'caught');advance(e,3.1);assert.equal(e.state.scold,0);
 });
 test('hits interrupt observations and grant recovery immunity',()=>{
  const e=enter();arrived(e,'desk');e.dispatch({type:'interact'});e.dispatch({type:'desk',mode:'sleep'});
- for(let i=0;i<600&&!e.state.warning;i++)e.step(.05);
+ for(let i=0;i<1800&&!e.state.warning;i++)e.step(.05);
  assert.ok(e.state.warning>0);e.dispatch({type:'attack'});assert.equal(e.state.warning,0);assert.equal(e.state.scold,0);assert.equal(e.state.bossPhase,'hit');
  advance(e,2.1);assert.notEqual(e.state.bossPhase,'hit');advance(e,9);assert.equal(e.state.warning,0);
 });
@@ -169,7 +169,7 @@ test('exit clears transients but keeps choices and snacks; reset clears all choi
  const e=enter();e.dispatch({type:'weapon',weapon:'fan'});e.state.inventory.cookie=2;e.state.inventory.coffee=3;e.dispatch({type:'exit'});assert.equal(e.state.entered,false);assert.equal(e.state.inventory.cookie,2);assert.equal(e.state.inventory.coffee,0);assert.equal(e.state.weapon,'fan');
  e.dispatch({type:'reset'});assert.equal(e.state.weapon,'punch');assert.equal(e.state.inventory.cookie,0);assert.equal(e.state.name,'김사원');assert.equal(e.state.event,null);
 });
-test('boss keeps patrolling while the player works and never observes the pantry',()=>{
+test('boss rests between patrols while the player works and never observes the pantry',()=>{
  const e=enter();arrived(e,'desk');e.dispatch({type:'interact'});
  let returnedAcrossOffice=false;
  for(let i=0;i<1100;i++){e.step(.05);if(e.state.elapsed>30&&e.state.boss.x < -4)returnedAcrossOffice=true;}
@@ -221,4 +221,35 @@ for(const activity of ['spin','eat','drink'] as const) test(`returning to work i
  e.dispatch({type:'desk',mode:'work'});
  assert.equal(e.state.activity,null);assert.equal(e.state.deskMode,'work');assert.equal(e.state.warning,0);assert.equal(e.state.scold,0);
  advance(e,4);assert.equal(e.state.inventory.cookie,activity==='eat'?1:0);assert.equal(e.state.inventory.coffee,activity==='drink'?3:0);assert.notEqual(e.state.event?.kind,'caught');
+});
+test('boss works on the actual chair for 55 seconds and returns after a short patrol',()=>{
+ const e=enter(),f=SOLO_OFFICE_PLAN.furniture.bossDesk,home={x:f.x-1.05,z:f.z};
+ assert.equal(e.state.boss.pose,'type');assert.deepEqual({x:e.state.boss.x,z:e.state.boss.z},home);assert.equal(e.state.boss.angle,Math.PI/2);
+ advance(e,54);assert.equal(e.state.boss.pose,'type');
+ let walking=0,working=54,returned=false;
+ for(let i=0;i<2400;i++){e.step(.05);clear(e,e.state.boss);if(e.state.boss.moving)walking+=.05;if(e.state.boss.pose==='type'){working+=.05;if(e.state.elapsed>76)returned=true;}}
+ assert.ok(walking>0);assert.ok(returned);assert.ok(working/e.state.elapsed>.6);e.dispose();
+});
+test('an approached working boss stands, reacts to a hit, then returns to work',()=>{
+ const e=enter();arrived(e,'boss');assert.equal(e.state.boss.pose,'idle');e.dispatch({type:'attack'});assert.equal(e.state.boss.pose,'hit');
+ e.dispatch({type:'move',point:{x:1.8,z:5}});advance(e,30);assert.equal(e.state.boss.pose,'type');e.dispose();
+});
+test('chosen ranks preserve raw names and shared boss rank updates without rewinding position',()=>{
+ const e=createGameEngine();e.dispatch({type:'enter',name:'민수',rank:'대리',bossRank:'사장'});
+ assert.equal(e.state.name,'민수');assert.equal(e.state.player.name,'민수');assert.equal(e.state.player.rank,'대리');assert.equal(e.state.boss.name,'박사장');
+ const before={x:e.state.boss.x,z:e.state.boss.z};e.applyBossState({...e.state.boss,x:0,z:0,rank:'과장'},'routine',null,false);
+ assert.equal(e.state.bossRank,'과장');assert.equal(e.state.boss.name,'박과장');assert.deepEqual({x:e.state.boss.x,z:e.state.boss.z},before);e.dispose();
+});
+test('only the host advances the work cycle, including while visiting the roof',()=>{
+ let authority=false;
+ const fixture=SOLO_OFFICE_PLAN.furniture.bossDesk;
+ const home={x:fixture.x-1.05,z:fixture.z,angle:Math.PI/2};
+ const office:OfficeEnvironment={bounds:BOUNDS,obstacles:OBSTACLES,start:{x:1.8,z:5},targets:TARGETS,deskAngle:Math.PI,loungeAngle:Math.PI,
+  coffeeFacing:SOLO_OFFICE_PLAN.furniture.coffee,snacksFacing:SOLO_OFFICE_PLAN.furniture.snacks,bossSeat:home,patrol:[{x:-3.8,z:4}]};
+ const e=createGameEngine(undefined,{getOffice:()=>office,coworkers:false,bossAuthority:()=>authority,continueBossOnRoof:true});
+ e.dispatch({type:'enter'});e.state.floor='rooftop';advance(e,70);
+ assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.x,home.x);
+ e.applyBossState({...e.state.boss,rank:'이사'},'routine',null);authority=true;
+ advance(e,54);assert.equal(e.state.boss.pose,'type');advance(e,2);assert.equal(e.state.boss.moving,true);
+ advance(e,35);assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.name,'박이사');e.dispose();
 });

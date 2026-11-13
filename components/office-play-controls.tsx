@@ -22,7 +22,7 @@ export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,show
   const count = state.inventory.cookie + state.inventory.choco + state.inventory.cracker;
   const target = state.target ? TARGETS[state.target] : null;
   const TargetIcon = state.target ? targetIcons[state.target] : MousePointer2;
-  const activityLabels = { brew: '커피 내리는 중', take: '아무도 못 봤겠지?', eat: '잠깐, 한 입만', drink: '커피 한 모금', spin: '의자도 기분 전환', candy: '사탕 하나, 입에 쏙', dance: '부장님 몰래, 지금은 내 무대' };
+  const activityLabels = { brew: '커피 내리는 중', take: '아무도 못 봤겠지?', eat: '잠깐, 한 입만', drink: '커피 한 모금', spin: '의자도 기분 전환', candy: '사탕 하나, 입에 쏙', dance: '지금은 내 무대' };
   const roof = state.floor === 'rooftop';
   const nearbyLean = roof && !state.transition && !state.roofRest && !state.activity ? getRoofLean(state.player) : null;
   const nearWall = !!nearbyLean && nearbyLean.distance <= ROOF_LEAN_DISTANCE;

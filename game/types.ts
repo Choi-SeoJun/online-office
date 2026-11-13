@@ -1,3 +1,5 @@
+import type { JobRank } from './ranks.ts';
+
 export type Point = { x: number; z: number };
 export type Floor = 'office' | 'rooftop';
 export type RoofWallSide = 'north' | 'south' | 'east' | 'west';
@@ -7,13 +9,13 @@ export type Snack = 'cookie' | 'choco' | 'cracker';
 export type DeskMode = 'work' | 'shopping' | 'game' | 'sleep';
 export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'wallLean' | 'hit' | 'watch' | 'scold' | 'candy' | 'dance';
 export type AvatarStyle = 'short' | 'ponytail';
-export type Actor = Point & { id: string; name: string; angle: number; pose: Pose; moving: boolean; avatar?: AvatarStyle };
+export type Actor = Point & { id: string; name: string; angle: number; pose: Pose; moving: boolean; avatar?: AvatarStyle; rank?: JobRank };
 export type Settings = { sound: boolean; volume: number; reducedMotion: boolean; quality: 'auto' | 'low' | 'high' };
 export type Inventory = Record<Snack, number> & { coffee: number };
 export type Activity = { kind: 'brew' | 'take' | 'eat' | 'drink' | 'spin' | 'candy' | 'dance'; remaining: number; duration: number; snack?: Snack };
 export type GameEvent = { id: number; kind: 'notice' | 'step' | 'type' | 'coffee' | 'snack' | 'sip' | 'punch' | 'hammer' | 'fan' | 'caught'; text: string; at: number };
 export type GameState = {
-  entered: boolean; paused: boolean; elapsed: number; name: string;
+  entered: boolean; paused: boolean; elapsed: number; name: string; rank: JobRank; bossRank: JobRank;
   floor: Floor; transition: { from: Floor; to: Floor; remaining: number; duration: number } | null;
   player: Actor; boss: Actor; coworkers: Actor[];
   target: TargetId | null; ready: boolean; destination: Point | null;
@@ -25,9 +27,9 @@ export type GameState = {
   bossHit?: { id: number; weapon: Weapon; at: number } | null;
   event: GameEvent | null; message: string; messageUntil: number;
 };
-export type PersistedState = { version: 1; name: string; avatar?: AvatarStyle; weapon: Weapon; settings: Settings; snacks: Record<Snack, number> };
+export type PersistedState = { version: 1; name: string; avatar?: AvatarStyle; rank?: JobRank; bossRank?: JobRank; weapon: Weapon; settings: Settings; snacks: Record<Snack, number> };
 export type Command =
-  | { type: 'enter'; name?: string; avatar?: AvatarStyle } | { type: 'exit' } | { type: 'pause'; value: boolean }
+  | { type: 'enter'; name?: string; avatar?: AvatarStyle; rank?: JobRank; bossRank?: JobRank } | { type: 'exit' } | { type: 'pause'; value: boolean }
   | { type: 'select'; target: TargetId; point?: Point; restSeatId?: string } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
   | { type: 'interact' } | { type: 'stand' } | { type: 'cancel' }
   | { type: 'travel'; floor: Floor } | { type: 'candy' } | { type: 'rest'; place: 'bench' | 'wall'; wall?: RoofWallSide; restSeatId?: string }

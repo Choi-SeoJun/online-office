@@ -5,6 +5,8 @@ import { newestNotificationId, pokeMessage, unreadNotifications } from './notifi
 test('poke messages identify the sender without doubling the employee suffix',()=>{
   assert.equal(pokeMessage('서준'),'서준 사원이 당신을 콕! 찔렀어요');
   assert.equal(pokeMessage('김사원'),'김사원이 당신을 콕! 찔렀어요');
+  assert.equal(pokeMessage('민지 대리'),'민지 대리가 당신을 콕! 찔렀어요');
+  assert.equal(pokeMessage('서준 과장'),'서준 과장이 당신을 콕! 찔렀어요');
 });
 test('unread notifications and read cursor do not depend on list ordering',()=>{
   const base={senderId:'one',senderName:'민지',createdAt:0};

@@ -39,6 +39,71 @@ function fixture() {
   return { sql, send, advance, create, beforeNextBatch(query: string, run: () => Promise<void>) { interleaving = { query, run }; } };
 }
 
+test('room admission persists personal ranks and one shared boss rank without changing raw names', async () => {
+  const f = fixture();
+  const created = await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, rank: '대리', bossRank: '상무' });
+  assert.equal(created.status, 201);
+  const host = created.body as { session: RoomSession; snapshot: RoomSnapshot };
+  assert.equal(host.snapshot.players[0].name, '서준'); assert.equal(host.snapshot.players[0].rank, '대리');
+  assert.equal(host.snapshot.room.bossRank, '상무'); assert.equal(host.snapshot.boss.actor.name, '박상무'); assert.equal(host.snapshot.boss.actor.rank, '상무');
+  const joined = await f.send({ action: 'join', code: host.session.code, name: '김사원', rank: '과장', bossRank: '사장' });
+  assert.equal(joined.status, 201);
+  const guest = joined.body as { session: RoomSession; snapshot: RoomSnapshot };
+  assert.equal(guest.snapshot.players.find(p => p.id === guest.session.playerId)!.rank, '과장');
+  assert.equal(guest.snapshot.room.bossRank, '상무'); assert.equal(guest.snapshot.boss.actor.name, '박상무');
+  const restored = await f.send({ action: 'sync', ...host.session, player: { ...host.snapshot.players[0], name: '위조', rank: '사장' } });
+  assert.equal(restored.status, 200);
+  const state = (restored.body as { snapshot: RoomSnapshot }).snapshot;
+  assert.equal(state.players.find(p => p.id === host.session.playerId)!.rank, '대리');
+  assert.equal(state.players.find(p => p.id === host.session.playerId)!.name, '서준');
+  assert.equal(f.sql.prepare('SELECT boss_rank FROM office_rooms').get()!.boss_rank, '상무');
+  assert.equal(f.sql.prepare('SELECT rank FROM office_members WHERE id = ?').get(host.session.playerId)!.rank, '대리');
+  assert.equal((await f.send({ action: 'leave', ...host.session })).status, 200);
+  const inherited = (await f.send({ action: 'sync', ...guest.session, bossRank: '사장' })).body as { snapshot: RoomSnapshot };
+  assert.equal(inherited.snapshot.room.hostId, guest.session.playerId);
+  assert.equal(inherited.snapshot.room.bossRank, '상무'); assert.equal(inherited.snapshot.boss.actor.rank, '상무');
+});
+
+test('legacy admission defaults ranks and unsupported rank choices are rejected', async () => {
+  const f = fixture(), host = await f.create();
+  assert.equal(host.snapshot.players[0].rank, '사원'); assert.equal(host.snapshot.room.bossRank, '부장');
+  assert.equal(host.snapshot.boss.actor.name, '박부장');
+  for (const value of ['회장', '', null, 1]) {
+    assert.equal((await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, rank: value })).status, 400);
+    assert.equal((await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, bossRank: value })).status, 400);
+    assert.equal((await f.send({ action: 'join', code: host.session.code, name: '서준', rank: value })).status, 400);
+  }
+});
+
+test('chat and poke labels include the server-owned rank without duplicating existing titles', async () => {
+  const f = fixture();
+  const host = (await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, rank: '대리' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '김사원', rank: '과장' })).body as { session: RoomSession };
+  const chat = await f.send({ action: 'chat', ...host.session, name: '위조', rank: '사장', text: '직급 표시' });
+  assert.equal(chat.status, 200);
+  assert.equal((chat.body as { snapshot: RoomSnapshot }).snapshot.messages[0].name, '서준 대리');
+  assert.equal((await f.send({ action: 'poke', ...guest.session, targetId: host.session.playerId, name: '위조', rank: '사장' })).status, 200);
+  const observed = await f.send({ action: 'sync', ...host.session });
+  assert.equal((observed.body as { snapshot: RoomSnapshot }).snapshot.notifications[0].senderName, '김과장');
+});
+
+test('shared boss identity is authoritative while host work poses remain valid', async () => {
+  const f = fixture();
+  const host = (await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, bossRank: '이사' })).body as { session: RoomSession; snapshot: RoomSnapshot };
+  const guest = (await f.send({ action: 'join', code: host.session.code, name: '동료' })).body as { session: RoomSession };
+  for (const pose of ['type', 'sit'] as const) {
+    const boss = { actor: { ...host.snapshot.boss.actor, name: '위조', rank: '사장', pose, moving: false }, phase: 'routine' };
+    assert.equal((await f.send({ action: 'sync', ...guest.session, boss })).status, 403);
+    const response = await f.send({ action: 'sync', ...host.session, boss });
+    assert.equal(response.status, 200);
+    const shared = (response.body as { snapshot: RoomSnapshot }).snapshot.boss.actor;
+    assert.equal(shared.name, '박이사'); assert.equal(shared.rank, '이사'); assert.equal(shared.pose, pose);
+    f.advance(300);
+  }
+  const stored = JSON.parse(String(f.sql.prepare('SELECT boss_state FROM office_rooms').get()!.boss_state));
+  assert.equal(stored.actor.name, '박이사'); assert.equal(stored.actor.rank, '이사');
+});
+
 test('concurrent lounge occupancy admits one member and rejects the other atomically', async () => {
   const f = fixture(), host = await f.create();
   const guest = (await f.send({ action: 'join', code: host.session.code, name: '이사원' })).body as { session: RoomSession; snapshot: RoomSnapshot };

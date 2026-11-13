@@ -115,7 +115,7 @@ export function createMultiArchitecture(layout: MultiLayout) {
   for (let i = 0; i < 3; i++) { box(copier, 1.13, .025, .018, '#b4c0b3', 0, .30 + i * .25, .585); box(copier, .23, .045, .023, '#8d9c90', 0, .39 + i * .25, .60); }
   const copierLabel = spriteLabel(copier, '복사기', '#617368', .95); copierLabel.position.set(0, 1.95, 0);
   const { group: chief } = createBossDesk(group, furniture.bossDesk); chief.name = 'shared-boss-desk';
-  const chiefLabel = spriteLabel(chief, '부장님 자리', '#51372d', 1.10); chiefLabel.position.set(0, 2.10, 0);
+  const chiefLabel = spriteLabel(chief, '상사 자리', '#51372d', 1.10); chiefLabel.position.set(0, 2.10, 0);
   plant(group, b.maxX - .6, b.maxZ - .6, .8);
   plant(group, b.minX + .65, b.minZ + .65, .8);
   const entry = box(group, 1.8, .02, .55, '#6a9387', layout.spawn.x, .055, layout.spawn.z + .42, .08); entry.userData.target = 'exit';
@@ -262,7 +262,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
       const shown = entry.shown, local = actor.id === game.player.id, amount = local || justArrived || settings.reducedMotion ? 1 : 1 - Math.exp(-dt * 10);
       shown.x += (actor.x - shown.x) * amount; shown.z += (actor.z - shown.z) * amount;
       shown.angle += normalizeCameraAngle(actor.angle - shown.angle) * amount;
-      shown.name = actor.name; shown.avatar = actor.avatar; shown.pose = actor.pose; shown.moving = actor.moving || Math.hypot(actor.x - shown.x, actor.z - shown.z) > .08;
+      shown.name = actor.name; shown.rank = actor.rank; shown.avatar = actor.avatar; shown.pose = actor.pose; shown.moving = actor.moving || Math.hypot(actor.x - shown.x, actor.z - shown.z) > .08;
       animateActor(entry.rig, shown, context, context.elapsed);
     });
     const currentSpeech = new Map((state.speeches ?? []).filter(speech => speech.until > Date.now()).map(speech => [speech.id, speech]));

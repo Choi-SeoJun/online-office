@@ -1,4 +1,5 @@
 import type { Actor, AvatarStyle, GameState, Pose, Weapon } from './types.ts';
+import type { JobRank } from './ranks.ts';
 
 export type RoomPose = Pose;
 /** Only the visible activity crosses the network; inventory and personal work stay private. */
@@ -10,7 +11,7 @@ export type RoomMessage = { id: number; playerId: string; name: string; text: st
 export type RoomNotification = { id: number; senderId: string; senderName: string; createdAt: number; readAt: number | null };
 export type RoomSession = { code: string; token: string; playerId: string };
 export type RoomSnapshot = {
-  room: { code: string; name: string; capacity: number; hostId: string; expiresAt: number };
+  room: { code: string; name: string; capacity: number; hostId: string; expiresAt: number; bossRank?: JobRank };
   selfId: string;
   players: RoomPlayer[];
   boss: RoomBoss;
@@ -20,8 +21,8 @@ export type RoomSnapshot = {
 };
 export type RoomPlayerUpdate = Pick<RoomPlayer, 'x' | 'z' | 'angle' | 'pose' | 'moving'> & RoomVisualState;
 export type RoomRequest =
-  | { action: 'create'; name: string; roomName: string; capacity: number; avatar?: AvatarStyle }
-  | { action: 'join'; code: string; name: string; avatar?: AvatarStyle }
+  | { action: 'create'; name: string; roomName: string; capacity: number; avatar?: AvatarStyle; rank?: JobRank; bossRank?: JobRank }
+  | { action: 'join'; code: string; name: string; avatar?: AvatarStyle; rank?: JobRank }
   | ({ code: string; token: string } & (
     | { action: 'sync'; player?: RoomPlayerUpdate; boss?: RoomBossUpdate }
     | { action: 'attack'; weapon: Weapon; player?: RoomPlayerUpdate }
