@@ -98,16 +98,16 @@ test('following from the pantry reaches the moving boss instead of oscillating a
 });
 test('boss gives a grace window, work cancels it, and observations have cooldown',()=>{
  const e=enter();arrived(e,'desk');e.dispatch({type:'interact'});e.dispatch({type:'desk',mode:'shopping'});
- for(let i=0;i<1800&&!e.state.warning;i++) e.step(.05);
+ for(let i=0;i<13000&&!e.state.warning;i++) e.step(.05);
  assert.ok(e.state.warning>0);advance(e,1);assert.equal(e.state.scold,0);
  e.dispatch({type:'desk',mode:'work'});assert.equal(e.state.warning,0);
  e.dispatch({type:'desk',mode:'game'});advance(e,15);assert.equal(e.state.warning,0);assert.equal(e.state.scold,0);
- for(let i=0;i<2400&&!e.state.warning;i++)e.step(.05);
+ for(let i=0;i<13000&&!e.state.warning;i++)e.step(.05);
  assert.ok(e.state.warning>0);advance(e,2.1);assert.ok(e.state.scold>0);assert.equal(e.state.event?.kind,'caught');advance(e,3.1);assert.equal(e.state.scold,0);
 });
 test('hits interrupt observations and grant recovery immunity',()=>{
  const e=enter();arrived(e,'desk');e.dispatch({type:'interact'});e.dispatch({type:'desk',mode:'sleep'});
- for(let i=0;i<1800&&!e.state.warning;i++)e.step(.05);
+ for(let i=0;i<13000&&!e.state.warning;i++)e.step(.05);
  assert.ok(e.state.warning>0);e.dispatch({type:'attack'});assert.equal(e.state.warning,0);assert.equal(e.state.scold,0);assert.equal(e.state.bossPhase,'hit');
  advance(e,2.1);assert.notEqual(e.state.bossPhase,'hit');advance(e,9);assert.equal(e.state.warning,0);
 });
@@ -215,20 +215,20 @@ for(const activity of ['spin','eat','drink'] as const) test(`returning to work i
  if(activity==='eat'){arrived(e,'snacks');e.dispatch({type:'take',snack:'cookie'});finishActivity(e);}
  if(activity==='drink'){arrived(e,'coffee');e.dispatch({type:'interact'});finishActivity(e);}
  arrived(e,'desk');e.dispatch({type:'interact'});e.dispatch({type:'desk',mode:'game'});
- for(let i=0;i<1200&&!e.state.warning;i++)e.step(.05);assert.ok(e.state.warning>0);
+ for(let i=0;i<13000&&!e.state.warning;i++)e.step(.05);assert.ok(e.state.warning>0);
  if(activity==='eat')e.dispatch({type:'eat',snack:'cookie'});else e.dispatch({type:activity});
  advance(e,.1);assert.equal(e.state.activity?.kind,activity);
  e.dispatch({type:'desk',mode:'work'});
  assert.equal(e.state.activity,null);assert.equal(e.state.deskMode,'work');assert.equal(e.state.warning,0);assert.equal(e.state.scold,0);
  advance(e,4);assert.equal(e.state.inventory.cookie,activity==='eat'?1:0);assert.equal(e.state.inventory.coffee,activity==='drink'?3:0);assert.notEqual(e.state.event?.kind,'caught');
 });
-test('boss works on the actual chair for 55 seconds and returns after a short patrol',()=>{
+test('boss works for ten minutes, takes one short patrol, and spends over 95 percent of time at the desk',()=>{
  const e=enter(),f=SOLO_OFFICE_PLAN.furniture.bossDesk,home={x:f.x-1.05,z:f.z};
  assert.equal(e.state.boss.pose,'type');assert.deepEqual({x:e.state.boss.x,z:e.state.boss.z},home);assert.equal(e.state.boss.angle,Math.PI/2);
- advance(e,54);assert.equal(e.state.boss.pose,'type');
- let walking=0,working=54,returned=false;
- for(let i=0;i<2400;i++){e.step(.05);clear(e,e.state.boss);if(e.state.boss.moving)walking+=.05;if(e.state.boss.pose==='type'){working+=.05;if(e.state.elapsed>76)returned=true;}}
- assert.ok(walking>0);assert.ok(returned);assert.ok(working/e.state.elapsed>.6);e.dispose();
+ for(let second=0;second<599;second++){advance(e,1);assert.equal(e.state.boss.pose,'type');assert.deepEqual({x:e.state.boss.x,z:e.state.boss.z},home);}
+ let walking=0,working=599,returned=false;
+ for(let i=0;i<2400;i++){e.step(.05);clear(e,e.state.boss);if(e.state.boss.moving)walking+=.05;if(e.state.boss.pose==='type'){working+=.05;if(e.state.elapsed>600)returned=true;}}
+ assert.ok(walking>0);assert.ok(walking<30);assert.ok(returned);assert.ok(working/e.state.elapsed>.95);e.dispose();
 });
 test('an approached working boss stands, reacts to a hit, then returns to work',()=>{
  const e=enter();arrived(e,'boss');assert.equal(e.state.boss.pose,'idle');e.dispatch({type:'attack'});assert.equal(e.state.boss.pose,'hit');
@@ -250,7 +250,7 @@ test('only the host advances the work cycle, including while visiting the roof',
  e.dispatch({type:'enter'});e.state.floor='rooftop';advance(e,70);
  assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.x,home.x);
  e.applyBossState({...e.state.boss,rank:'이사'},'routine',null);authority=true;
- advance(e,54);assert.equal(e.state.boss.pose,'type');advance(e,2);assert.equal(e.state.boss.moving,true);
+ advance(e,599);assert.equal(e.state.boss.pose,'type');advance(e,2);assert.equal(e.state.boss.moving,true);
  advance(e,35);assert.equal(e.state.boss.pose,'type');assert.equal(e.state.boss.name,'이사님');e.dispose();
 });
 

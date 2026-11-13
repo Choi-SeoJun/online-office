@@ -7,6 +7,7 @@ import { bossName, normalizeRank } from './ranks.ts';
 import { SOLO_OFFICE_PLAN } from './office-plan.ts';
 
 const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
+const BOSS_WORK_SECONDS = 10 * 60, BOSS_PATROL_SECONDS = 15;
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
 const face = (actor: Actor, point: Point) => { actor.angle = Math.atan2(point.x - actor.x, point.z - actor.z); };
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
@@ -215,7 +216,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
   let nextObservation = 10, patrolIndex = 0, patrolWait = 0, coworkerPhase = -1, coworkerPath: Point[] = [];
   let observedPeer: string | null = null, peerObservationUntil = 0;
   let patrol = office.patrol;
-  let bossRoutine: 'work' | 'patrol' | 'return' = 'work', routineTime = 55, patrolStops = 0;
+  let bossRoutine: 'work' | 'patrol' | 'return' = 'work', routineTime = BOSS_WORK_SECONDS, patrolStops = 0;
   const notify = () => {
     if (disposed) return;
     snapshot = structuredClone(state); snapshotClock = 0;
@@ -307,7 +308,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     eventId = 0; lastAttack = -Infinity; attackUntil = hitUntil = recoverUntil = immunityUntil = 0;
     nextObservation = 10; patrolIndex = 0; patrolWait = 0; coworkerPhase = -1; followClock = 0; followedBoss = { ...state.boss };
     officeReturn = { ...office.start }; pendingRest = null;
-    bossRoutine = 'work'; routineTime = 55; patrolStops = 0; observedPeer = null;
+    bossRoutine = 'work'; routineTime = BOSS_WORK_SECONDS; patrolStops = 0; observedPeer = null;
   };
   const dispatch = (command: Command) => {
     if (disposed) return;
@@ -468,17 +469,17 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       routineTime -= dt;
       Object.assign(state.boss, bossSeat(), { pose: 'type', moving: false });
       if (routineTime > 0) return;
-      bossRoutine = 'patrol'; routineTime = 20; patrolStops = 0; patrolIndex = 0; patrolWait = 0; bossPath = [];
+      bossRoutine = 'patrol'; routineTime = BOSS_PATROL_SECONDS; patrolStops = 0; patrolIndex = 0; patrolWait = 0; bossPath = [];
     }
     if (bossRoutine === 'patrol') {
       routineTime -= dt;
-      if (routineTime <= 0 || patrolStops >= 2 || !patrol.length) { bossRoutine = 'return'; bossPath = []; }
+      if (routineTime <= 0 || patrolStops >= 1 || !patrol.length) { bossRoutine = 'return'; bossPath = []; }
     }
     if (bossRoutine === 'return') {
       observedPeer = null; state.warning = state.scold = 0; state.bossPhase = 'routine';
       if (distance(state.boss, bossSeat()) < .05) {
         Object.assign(state.boss, bossSeat(), { pose: 'type', moving: false });
-        bossRoutine = 'work'; routineTime = 55; bossPath = []; return;
+        bossRoutine = 'work'; routineTime = BOSS_WORK_SECONDS; bossPath = []; return;
       }
       if (!bossPath.length) bossPath = route(state.boss, bossSeat());
       travel(state.boss, bossPath, 1.65, dt); return;
@@ -638,7 +639,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       state.bossRank = normalizeRank(actor.rank, state.bossRank);
       if (replacePosition) {
         Object.assign(state.boss, actor, { id: 'boss' }); bossPath = [];
-        bossRoutine = actor.pose === 'type' || actor.pose === 'sit' ? 'work' : 'return'; routineTime = 55;
+        bossRoutine = actor.pose === 'type' || actor.pose === 'sit' ? 'work' : 'return'; routineTime = BOSS_WORK_SECONDS;
       }
       state.boss.rank = state.bossRank; state.boss.name = bossName(state.bossRank);
       if (hit) {

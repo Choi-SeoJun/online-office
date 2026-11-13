@@ -276,6 +276,25 @@ function bringToMouth(r: Rig, item: THREE.Object3D, contact: THREE.Vector3, grip
   item.quaternion.copy(item.parent!.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(bodyRotation).multiply(itemRotation));
   item.scale.setScalar(size / reach);
 }
+
+/** Hold the white handle at its grip while orienting the red end along the swing. */
+function holdHammer(r: Rig, grip: THREE.Vector3, pitch: number, forward = new THREE.Vector3(0, 0, 1)) {
+  r.root.updateMatrixWorld(true);
+  const normal = forward.clone().multiplyScalar(Math.cos(pitch)).add(new THREE.Vector3(0, -Math.sin(pitch), 0));
+  const handle = forward.clone().multiplyScalar(Math.sin(pitch)).add(new THREE.Vector3(0, Math.cos(pitch), 0));
+  const rotation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(normal, handle, normal.clone().cross(handle)));
+  const wrist = r.body.worldToLocal(r.root.localToWorld(grip.clone()));
+  const direction = wrist.sub(r.rightArm.position), handVector = r.hand.position.clone();
+  const reach = direction.length() / handVector.length();
+  r.rightArm.scale.setScalar(reach);
+  r.rightArm.quaternion.setFromUnitVectors(handVector.normalize(), direction.normalize());
+  r.root.updateMatrixWorld(true);
+  const hammer = r.weapons.hammer;
+  hammer.position.set(0, 0, 0);
+  hammer.quaternion.copy(r.hand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(r.root.getWorldQuaternion(new THREE.Quaternion())).multiply(rotation));
+  // Cancel the arm's reach scale so the plastic head and handle keep their shape.
+  hammer.scale.setScalar(1 / reach);
+}
 export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   const avatar = a.avatar === 'ponytail' ? 'ponytail' : 'short';
   if (avatar !== r.lastAvatar) {
@@ -303,7 +322,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   Object.values(r.snacks).forEach(item => { item.visible = false; item.position.set(0, 0, 0); item.scale.setScalar(1); item.rotation.set(0, 0, 0); });
   r.candy.visible = r.wrapper.visible = false; r.candy.position.set(0, 0, 0); r.candy.rotation.set(0, 0, 0); r.candy.scale.setScalar(1); r.wrapper.scale.setScalar(1);
   r.mouthCandy.visible = player && state.floor === 'rooftop' && !state.transition && state.candyInMouth && !['drink', 'eat'].includes(a.pose);
-  Object.entries(r.weapons).forEach(([kind, item]) => { item.visible = false; item.rotation.set(0, 0, kind === 'punch' ? 0 : Math.PI); });
+  Object.entries(r.weapons).forEach(([kind, item]) => { item.visible = false; item.rotation.set(0, 0, kind === 'punch' ? 0 : Math.PI); item.scale.setScalar(1); });
   r.paperFlight.group.visible = false;
   r.loosePages.forEach(page => { page.rotation.set(0, 0, 0); });
   r.legs.forEach((leg, i) => { leg.rotation.x = seated ? -1.42 : walk ? wave * .42 * (i ? -1 : 1) : 0; r.calves[i].rotation.x = seated ? 1.44 : 0; });
@@ -410,12 +429,14 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   const presentingTool = player && state.entered && state.floor === 'office' && state.target === 'boss' && state.ready && !state.transition && !state.activity && !seated && !walk && a.pose === 'idle' && state.weapon !== 'punch';
   if (presentingTool) {
     const tool = r.weapons[state.weapon]; tool.visible = true; r.mug.visible = false;
-    r.rightArm.rotation.set(-.65, 0, .45);
-    r.root.updateMatrixWorld(true);
-    // The office camera has this fixed isometric direction. Keep the broad
-    // paper face visible while waiting on either side of the boss.
-    const presentation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(16, 20, 24), new THREE.Vector3(), new THREE.Vector3(0, 1, 0)));
-    tool.quaternion.copy(r.hand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(presentation));
+    if (state.weapon === 'hammer') holdHammer(r, new THREE.Vector3(.36, 1, .36), 0);
+    else {
+      r.rightArm.rotation.set(-.65, 0, .45);
+      r.root.updateMatrixWorld(true);
+      // Keep the broad paper face readable while waiting beside the boss.
+      const presentation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(new THREE.Vector3(16, 20, 24), new THREE.Vector3(), new THREE.Vector3(0, 1, 0)));
+      tool.quaternion.copy(r.hand.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(presentation));
+    }
   }
   const visualHit = r.isBoss ? state.bossHit ?? state.lastHit : state.lastHit;
   const hitAge = visualHit ? state.elapsed - visualHit.at : 10;
@@ -433,12 +454,27 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
       r.body.position.z = THREE.MathUtils.clamp(gap - 1.05, .05, .55) * strike * finish;
       if (!seated) { r.legs[0].rotation.x = -.35 * strike * finish; r.calves[0].rotation.x = .25 * strike * finish; }
     } else if (weapon === 'hammer') {
-      r.rightArm.rotation.set(THREE.MathUtils.lerp(-1.1 - 1.55 * windup, -1.75, strike) * finish, THREE.MathUtils.lerp(-.65 * windup, .25, strike) * finish, THREE.MathUtils.lerp(-.9 * windup, -.06, strike) * finish);
-      r.leftArm.rotation.x = -.8 - .65 * windup * finish;
-      r.body.rotation.x = (reduced ? .04 : .13) * strike * finish;
-      r.body.rotation.y = (.18 * windup - .3 * strike) * finish;
-      // Keep functional reach when reduced motion removes the extra body sway.
-      r.body.position.z = THREE.MathUtils.clamp(gap - 1.2, 0, .3) * strike * finish;
+      const forward = new THREE.Vector3(state.boss.x - a.x, 0, state.boss.z - a.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), -a.angle).normalize();
+      if (!forward.lengthSq()) forward.set(0, 0, 1);
+      const side = new THREE.Vector3(forward.z, 0, -forward.x);
+      const neutral = side.clone().multiplyScalar(.36).addScaledVector(forward, .36); neutral.y = 1;
+      const raised = side.clone().multiplyScalar(reduced ? .44 : .53).addScaledVector(forward, reduced ? .28 : .15); raised.y = reduced ? 1.36 : 1.52;
+      const contactPitch = .4, pullPitch = reduced ? -.45 : -1.05;
+      const normal = forward.clone().multiplyScalar(Math.cos(contactPitch)).add(new THREE.Vector3(0, -Math.sin(contactPitch), 0));
+      const handle = forward.clone().multiplyScalar(Math.sin(contactPitch)).add(new THREE.Vector3(0, Math.cos(contactPitch), 0));
+      // Aim the outer red cap at the upper front of the boss's head. The .3182
+      // offset is the cap tip from the head centre, .43 is handle grip to head.
+      r.root.updateMatrixWorld(true);
+      const contact = r.root.worldToLocal(new THREE.Vector3(state.boss.x, 1.48, state.boss.z));
+      const impactGrip = contact.addScaledVector(normal, -(.30 + .3182)).addScaledVector(handle, -.43);
+      const rebound = THREE.MathUtils.smoothstep(p, WEAPON_IMPACT, .60);
+      const grip = neutral.clone().lerp(raised, windup).lerp(impactGrip, strike);
+      grip.addScaledVector(normal, -.10 * rebound).lerp(neutral, recover);
+      const pitch = THREE.MathUtils.lerp(THREE.MathUtils.lerp(0, pullPitch, windup), contactPitch, strike) * finish - .18 * rebound * finish;
+      r.leftArm.rotation.x = -.8 - .35 * windup * finish;
+      r.body.rotation.y = (reduced ? .03 : .12) * windup * (1 - strike);
+      r.body.position.z = THREE.MathUtils.clamp(gap - 1.05, 0, .45) * strike * finish;
+      holdHammer(r, grip, pitch, forward);
     } else {
       // Pull back, release the bundle, then let the independent sheets carry the motion.
       const pull = THREE.MathUtils.smoothstep(p, 0, .16), release = THREE.MathUtils.smoothstep(p, .16, PAPER_RELEASE);

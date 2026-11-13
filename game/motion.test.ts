@@ -119,6 +119,63 @@ test('the toy hammer crosses sideways into its strike instead of chopping in one
   assert.ok(Math.abs(impact.x - windup.x) > .22, 'hammer needs a readable diagonal side sweep');
 });
 
+test('hammer strikes with a red end face while the white handle stays gripped from windup through recoil', () => {
+  const { state, rig, render } = setup();
+  const bossRig = createActor(new THREE.Group(), 1, state.boss.name);
+  const cap = rig.weapons.hammer.getObjectByName('hammer-head')!.children.find(object => object.name === 'toy-hammer-soft-cap' && object.position.x > 0)!;
+  const skull = bossRig.head.children.find(object => object instanceof THREE.Mesh && object.geometry.type === 'SphereGeometry') as THREE.Mesh<THREE.SphereGeometry>;
+  state.player.x = state.player.z = 0; state.player.pose = 'hit'; state.boss.pose = 'hit';
+  state.lastHit = { id: 1, at: 12, weapon: 'hammer' };
+  for (const reduced of [false, true]) for (const angle of [0, 1.2, Math.PI, 4.2]) for (const gap of [1.25, 1.5]) {
+    state.settings.reducedMotion = reduced; state.player.angle = angle;
+    state.boss.x = Math.sin(angle) * gap; state.boss.z = Math.cos(angle) * gap; state.boss.angle = angle + Math.PI;
+    for (const progress of [0, .1, .23, WEAPON_IMPACT, .55, .8, .99]) {
+      state.elapsed = 12 + WEAPONS.hammer.interval * progress; render();
+      assert.ok(position(rig.weapons.hammer).distanceTo(position(rig.hand)) < 1e-7, 'the handle grip remains in the palm');
+    }
+    state.elapsed = 12 + WEAPONS.hammer.interval * WEAPON_IMPACT; render();
+    animateActor(bossRig, state.boss, state, state.elapsed); bossRig.root.updateMatrixWorld(true);
+    const normal = new THREE.Vector3(1, 0, 0).transformDirection(cap.matrixWorld);
+    const forward = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+    assert.ok(normal.dot(forward) > .88 && normal.y < -.2, 'the round red end leads forward and down, not the barrel or handle');
+    const tip = cap.localToWorld(new THREE.Vector3(.196, 0, 0));
+    assert.ok(skull.worldToLocal(tip.clone()).length() <= skull.geometry.parameters.radius, 'the actual red end cap touches the head at the impact beat');
+    const headCenter = position(cap.parent!);
+    assert.ok(headCenter.clone().sub(position(rig.hand)).y > .30, 'the white handle points up from the hand into the hammer head');
+  }
+});
+
+test('hammer hold joins its swing smoothly and colleagues see the same red cap contact', () => {
+  const { state, rig, render } = setup();
+  Object.assign(state.player, { x: 0, z: 0, angle: 0, pose: 'idle' });
+  Object.assign(state.boss, { x: 0, z: 1.5, angle: Math.PI });
+  state.target = 'boss'; state.ready = true; state.weapon = 'hammer';
+  const head = rig.weapons.hammer.getObjectByName('hammer-head')!;
+  render(); const held = position(head);
+  state.player.pose = 'hit'; state.lastHit = { id: 1, at: 12, weapon: 'hammer' }; render();
+  assert.ok(position(head).distanceTo(held) < 1e-7, 'the hammer must not jump or flip from its held pose');
+  let previous = position(head);
+  for (let sample = 1; sample < 100; sample++) {
+    state.elapsed = 12 + WEAPONS.hammer.interval * sample / 100; render();
+    const current = position(head);
+    assert.ok(current.distanceTo(previous) < .15, 'windup, contact and rebound form one continuous arc');
+    previous = current;
+  }
+  assert.ok(previous.distanceTo(held) < .01, 'recovery returns to the same upright handle grip');
+  const peer: RoomPlayer = { ...state.player, id: 'hammer-peer', seatIndex: 0, lastSeen: 10000, floor: 'office', seat: null,
+    deskMode: null, roofRest: null, roofWallSide: null, candyInMouth: false, activity: null, weapon: 'hammer', elapsed: 12,
+    lastHit: { id: 1, weapon: 'hammer', at: 12 }, carryingCoffee: false };
+  const peerRig = createActor(new THREE.Group(), 0, peer.name);
+  for (const reduced of [false, true]) {
+    state.settings.reducedMotion = reduced;
+    state.elapsed = 12 + WEAPONS.hammer.interval * WEAPON_IMPACT; render();
+    const context = remoteAnimationState(state, peer, 10000 + WEAPONS.hammer.interval * WEAPON_IMPACT * 1000);
+    animateActor(peerRig, context.player, context, context.elapsed); peerRig.root.updateMatrixWorld(true);
+    assert.ok(position(peerRig.weapons.hammer.getObjectByName('hammer-head')!).distanceTo(position(head)) < 1e-7);
+    assert.ok(peerRig.weapons.hammer.getWorldQuaternion(new THREE.Quaternion()).angleTo(rig.weapons.hammer.getWorldQuaternion(new THREE.Quaternion())) < 1e-7);
+  }
+});
+
 test('the paper bundle leaves the hand, flies to the boss and breaks into drifting sheets', () => {
   const { state, rig, render } = setup();
   state.player.x = state.player.z = 0; state.player.angle = 0; state.player.pose = 'hit';

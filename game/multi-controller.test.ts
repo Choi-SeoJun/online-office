@@ -149,9 +149,9 @@ test('room host keeps the shared boss alive from the roof and a guest can approa
   const sync=()=>{const snapshot=roomSnapshot(host,guest,now+=200);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);};sync();
   assert.equal(guest.serializeBoss(),undefined);assert.ok(host.serializeBoss());
   host.engine.dispatch({type:'travel',floor:'rooftop'});advance(host,1.7);
-  const before={x:host.engine.state.boss.x,z:host.engine.state.boss.z};advance(host,50);
+  const before={x:host.engine.state.boss.x,z:host.engine.state.boss.z};advance(host,598);
   assert.deepEqual({x:host.engine.state.boss.x,z:host.engine.state.boss.z},before);assert.equal(host.engine.state.boss.pose,'type');
-  advance(host,7);
+  advance(host,2);
   assert.notDeepEqual({x:host.engine.state.boss.x,z:host.engine.state.boss.z},before);
   sync();guest.engine.dispatch({type:'select',target:'boss'});
   for(let i=0;i<1200&&!guest.engine.state.ready;i++){host.step(.05);guest.step(.05);if(i%13===0)sync();}
@@ -165,10 +165,10 @@ test('slacking guest gets the same private warning and can immediately return to
   const host=createMultiController({...member(8,0),id:'host'},8),guest=createMultiController({...member(8,1),id:'guest'},8);
   arrive(guest,'desk');guest.engine.dispatch({type:'interact'});guest.engine.dispatch({type:'desk',mode:'shopping'});
   let now=1000,snapshot=roomSnapshot(host,guest,now);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);
-  for(let i=0;i<1800&&host.engine.state.bossPhase!=='watch';i++){
+  for(let i=0;i<13000&&host.engine.state.bossPhase!=='watch';i++){
     host.step(.05);guest.step(.05);snapshot=roomSnapshot(host,guest,now+=50);host.applySnapshot(snapshot);guest.applySnapshot(snapshot);
   }
-  assert.ok(host.engine.state.elapsed>=55,'a guest cannot interrupt the initial work period');
+  assert.ok(host.engine.state.elapsed>=600,'a guest cannot interrupt the initial work period');
   assert.equal(host.engine.state.bossPhase,'watch');
   guest.step(.05);assert.equal(guest.engine.state.warning,2);
   guest.engine.dispatch({type:'desk',mode:'work'});assert.equal(guest.engine.state.warning,0);assert.equal(guest.engine.state.scold,0);
