@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Dialog } from 'radix-ui';
 import { ArrowUpRight, Check, Copy, HelpCircle, Monitor, X } from 'lucide-react';
 import './faq-dialog.css';
+import { restoreCollapsedMenuFocus } from './office-dialog-focus';
 
 const CHROME_SYSTEM_ADDRESS = 'chrome://settings/system';
 
@@ -35,7 +36,7 @@ export function FaqDialog({ placement = 'tool', onOpenChange }: {
     </Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="faq-overlay" />
-      <Dialog.Content className="faq-dialog">
+      <Dialog.Content className="faq-dialog" onCloseAutoFocus={restoreCollapsedMenuFocus}>
         <header className="faq-header">
           <div><span className="faq-eyebrow">조금 더 편안한 회사 생활</span><Dialog.Title>자주 들어오는 문의사항</Dialog.Title></div>
           <Dialog.Close asChild><button type="button" className="faq-close" aria-label="문의사항 닫기"><X size={20} /></button></Dialog.Close>

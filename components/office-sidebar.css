@@ -1,16 +1,39 @@
-/* On small screens the existing top actions / bottom place navigation remain. */
-.office-sidebar{display:contents}
+/* Keep dialog components mounted so automatic news and board sync still work
+   while their mobile triggers are collapsed. */
+.office-sidebar,.office-sidebar-content{display:contents}
+.office-sidebar-toggle{display:none}
 
 /* One flow keeps travel, FAQ, social actions and places aligned on both floors.
    A short desktop window scrolls this rail instead of overlapping the controls. */
 @media(min-width:701px) and (min-height:481px){
   .office-app .office-sidebar{position:absolute;z-index:9;top:90px;right:32px;width:140px;max-height:calc(100dvh - 266px);box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:4px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
-  .office-app .office-sidebar>.floor-travel-button,.office-app .office-sidebar>.office-social-tools,.office-app .office-sidebar>.location-nav,.office-app .office-sidebar>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;box-sizing:border-box;margin:0}
-  .office-app .office-sidebar>.camera-controls{align-items:flex-end}
-  .office-app .office-sidebar>.floor-travel-button{justify-content:center}
-  .office-app .office-sidebar>.office-social-tools{display:flex;flex-direction:column;gap:7px}
-  .office-app .office-sidebar>.location-nav{padding:6px;gap:3px;border-radius:14px}
-  .office-app .office-sidebar>.location-nav button{flex-direction:row;justify-content:flex-start;gap:9px;min-width:0;min-height:34px;padding:7px 10px;border-radius:9px}
+  .office-app .office-sidebar-content>.floor-travel-button,.office-app .office-sidebar-content>.office-social-tools,.office-app .office-sidebar-content>.location-nav,.office-app .office-sidebar-content>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;box-sizing:border-box;margin:0}
+  .office-app .office-sidebar-content>.camera-controls{align-items:flex-end}
+  .office-app .office-sidebar-content>.floor-travel-button{justify-content:center}
+  .office-app .office-sidebar-content>.office-social-tools{display:flex;flex-direction:column;gap:7px}
+  .office-app .office-sidebar-content>.location-nav{padding:6px;gap:3px;border-radius:14px}
+  .office-app .office-sidebar-content>.location-nav button{flex-direction:row;justify-content:flex-start;gap:9px;min-width:0;min-height:34px;padding:7px 10px;border-radius:9px}
+}
+
+@media(max-width:700px),(max-height:480px) and (orientation:landscape){
+  .office-app .office-sidebar{position:absolute;z-index:9;top:66px;right:max(14px,env(safe-area-inset-right));width:152px;display:flex;flex-direction:column;align-items:stretch;gap:7px;pointer-events:none}
+  .office-app .office-sidebar-toggle{display:flex;align-self:flex-end;align-items:center;justify-content:center;gap:6px;min-width:80px;min-height:44px;padding:0 13px;border:1px solid #ffffffc7;border-radius:12px;background:#fffdf6f5;color:#506c59;box-shadow:var(--shadow);font:inherit;font-size:11px;cursor:pointer;pointer-events:auto}
+  .office-sidebar-toggle:focus-visible{outline:3px solid #8aa37c;outline-offset:3px}
+  .office-app .office-sidebar-content{display:none}
+  .office-app .office-sidebar.is-open>.office-sidebar-content{display:flex;flex-direction:column;gap:7px;max-height:calc(100dvh - 280px - env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;box-sizing:border-box;padding:6px;border:1px solid #fffdf3;border-radius:15px;background:#fffdf6f5;box-shadow:var(--shadow);pointer-events:auto}
+  .office-app .office-sidebar-content>.floor-travel-button,.office-app .office-sidebar-content>.office-social-tools,.office-app .office-sidebar-content>.location-nav,.office-app .office-sidebar-content>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;max-width:none;box-sizing:border-box;margin:0}
+  .office-app .office-sidebar-content>.floor-travel-button{justify-content:center;min-height:44px;font-size:11px;box-shadow:none}
+  .office-app .office-sidebar-content>.office-social-tools{display:flex;flex-direction:column;gap:4px}
+  .office-app .office-sidebar-content>.office-social-tools button{min-height:44px;font-size:11px;padding:0 6px;box-shadow:none}
+  .office-app .office-sidebar-content>.location-nav{display:flex;flex-direction:column;padding:4px;gap:3px;border-radius:10px;box-shadow:none;background:#edf1e7}
+  .office-app .office-sidebar-content>.location-nav button{flex:none;flex-direction:row;justify-content:flex-start;gap:9px;min-width:0;min-height:44px;padding:7px 10px;font-size:11px;border-radius:8px;white-space:nowrap}
+  .office-app .office-sidebar-content>.location-nav svg{width:17px;height:17px}
+  .office-app .office-sidebar-content>.camera-controls{align-items:center}
+  .office-app .office-sidebar-content .camera-controls .icon-button{width:44px;height:44px}
+}
+@media(max-height:480px) and (orientation:landscape){
+  .office-app .office-sidebar{top:60px}
+  .office-app .office-sidebar.is-open>.office-sidebar-content{max-height:calc(100dvh - 240px - env(safe-area-inset-bottom))}
 }
 
 .rooftop-note{width:230px}

@@ -6,6 +6,7 @@ import { ArrowUpRight, CalendarDays, ChevronDown, Heart, Megaphone, MessageSquar
 import { formatUpdateDate, hasUnreadUpdates, markUpdatesRead, publishedUpdateDays, nextUpdateReleaseTime } from '@/game/updates';
 import type { FeedbackContext } from '@/game/feedback-types';
 import { FeedbackDialog } from './feedback-dialog';
+import { restoreCollapsedMenuFocus } from './office-dialog-focus';
 import './update-news.css';
 
 export function UpdateNews({ context, placement = 'tool', autoOpenReady = true, onOpenChange }: {
@@ -76,7 +77,7 @@ export function UpdateNews({ context, placement = 'tool', autoOpenReady = true, 
     </Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="updates-overlay" />
-      <Dialog.Content className="updates-dialog">
+      <Dialog.Content className="updates-dialog" onCloseAutoFocus={restoreCollapsedMenuFocus}>
         <header className="updates-header"><div><span className="updates-eyebrow">조금씩 좋아지는 우리 회사</span><Dialog.Title>최근 업데이트 소식</Dialog.Title></div><Dialog.Close asChild><button className="updates-close" aria-label="업데이트 소식 닫기"><X size={21} /></button></Dialog.Close></header>
         <Dialog.Description className="updates-intro">새로 생긴 즐거움과 더 편해진 점을 모았어요.<br />새 공지는 매일 오전 4시(한국 시간)에 공개돼요.</Dialog.Description>
         <div className="updates-scroll">

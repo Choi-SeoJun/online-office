@@ -8,6 +8,7 @@ import { BOARD_COLORS, BOARD_MAX_ENTRIES, BOARD_MAX_POINTS, BOARD_MAX_STROKES, B
 import { createBoardEntry, deleteBoardEntry, listBoard, loadLocalBoard, moveBoardEntry, saveLocalBoard } from '@/game/board-client';
 import { BOARD_HEIGHT, BOARD_INK, BOARD_WIDTH, drawBoard, getBoardPaintOrder, getBoardPlacement, isBoardDrawing, newBoardPlacement } from '@/game/board-render';
 import './office-bulletin-board.css';
+import { restoreCollapsedMenuFocus } from './office-dialog-focus';
 
 const colorNames: Record<BoardColor, string> = { yellow: '노랑', pink: '분홍', blue: '파랑', green: '초록', purple: '보라', ink: '먹색' };
 const fullBoard: BoardPlacement = { x: 0, y: 0, width: 1, height: 1, canvasWidth: BOARD_WIDTH };
@@ -189,7 +190,7 @@ export function OfficeBulletinBoard({ name, session, hostId, onOpenChange, openR
     <Dialog.Trigger asChild><button type="button" className="bulletin-trigger" aria-label="게시판 열기"><ClipboardList size={17} /><span>게시판</span></button></Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="bulletin-overlay" />
-      <Dialog.Content className="bulletin-dialog" onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}>
+      <Dialog.Content className="bulletin-dialog" onCloseAutoFocus={restoreCollapsedMenuFocus} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}>
         <header className="bulletin-header"><div><span className="bulletin-eyebrow">우리의 작은 흔적</span><Dialog.Title>{session ? '우리 회사 게시판' : '나만의 게시판'}</Dialog.Title></div><Dialog.Close asChild><button className="bulletin-icon" aria-label="게시판 닫기"><X size={20} /></button></Dialog.Close></header>
         <Dialog.Description className="bulletin-description">{session ? '같은 방의 동료들과 함께 쓰는 벽 게시판이에요. 방이 열려 있는 동안 보관돼요.' : '벽에 메모를 붙이고 자유롭게 그려요. 이 브라우저에 저장해 두고 다시 볼 수 있어요.'}</Dialog.Description>
         <div className="bulletin-toolbar"><span>{entries.length} / {BOARD_MAX_ENTRIES}개</span><div><button className="bulletin-icon" aria-label="게시판 새로고침" disabled={loading || busy} onClick={() => { setError(''); void refresh(); }}><RefreshCw size={16} className={loading ? 'loading-icon' : ''} /></button><button className="bulletin-add" disabled={busy || !loaded || full} aria-expanded={composing} onClick={() => { setComposing(v => !v); setTool('move'); }}><Plus size={16} />{composing ? '작성창 접기' : '메모 붙이기'}</button></div></div>
