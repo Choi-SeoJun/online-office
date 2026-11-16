@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Armchair, ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, Check, ChevronLeft, ChevronRight, Coffee, Cookie, DoorOpen, Files, Gamepad2, Hand, Headphones, HelpCircle, Leaf, LoaderCircle, Monitor, Moon, MousePointer2, PackageOpen, RotateCcw, Settings2, Shirt, ShoppingBag, Sparkles, Volume2, VolumeX, Wind, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -8,6 +8,7 @@ import { isRoofTarget, ROOF_WALLS, SNACKS, TARGETS, WEAPONS } from '@/game/layou
 import type { Command, DeskMode, GameState, Snack, TargetId, Weapon } from '@/game/types';
 import { TodoBoard } from './todo-board';
 import './office-rooftop.css';
+import './office-sidebar.css';
 const targetIcons: Record<TargetId, LucideIcon> = { desk: Monitor, boss: BriefcaseBusiness, coffee: Coffee, snacks: Cookie, lounge: Armchair, copier: PackageOpen, exit: DoorOpen, roofBench: Armchair, roofWall: Building2, roofWallSouth: Building2, roofWallEast: Building2, roofWallWest: Building2 };
 const weaponIcons: Record<Weapon, LucideIcon> = { punch: Hand, hammer: Zap, fan: Files };
 const deskModes: { id: DeskMode; label: string; icon: LucideIcon }[] = [{ id: 'work', label: '일하는 척', icon: Monitor }, { id: 'shopping', label: '쇼핑', icon: ShoppingBag }, { id: 'game', label: '게임', icon: Gamepad2 }, { id: 'sleep', label: '졸기', icon: Moon }];
@@ -17,7 +18,9 @@ function ToolButton({ icon: Icon, label, onClick, active, disabled }: { icon: Lu
 }
 
 export type PlayPanel = 'settings' | 'help' | 'bag' | null;
-export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,showMonitor=true,onMonitorClose,extraActions,boardAction,newsAction,wallpaperAction}:{state:GameState;send:(command:Command)=>void;panel:PlayPanel;setPanel:(panel:PlayPanel)=>void;onExit:()=>void;onType:(key:string)=>void;showMonitor?:boolean;onMonitorClose?:()=>void;extraActions?:ReactNode;boardAction?:ReactNode;newsAction?:ReactNode;wallpaperAction?:ReactNode}) {
+export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,showMonitor=true,onMonitorClose,extraActions,boardAction,newsAction,wallpaperAction,viewAction}:{state:GameState;send:(command:Command)=>void;panel:PlayPanel;setPanel:(panel:PlayPanel)=>void;onExit:()=>void;onType:(key:string)=>void;showMonitor?:boolean;onMonitorClose?:()=>void;extraActions?:ReactNode;boardAction?:ReactNode;newsAction?:ReactNode;wallpaperAction?:ReactNode;viewAction?:ReactNode}) {
+  const [roofNoteHidden, setRoofNoteHidden] = useState(false);
+  const roofNoteId = useId();
   const select=(target:TargetId)=>{setPanel(null);send({type:'select',target});};
   const count = state.inventory.cookie + state.inventory.choco + state.inventory.cracker;
   const target = state.target ? TARGETS[state.target] : null;
@@ -30,10 +33,16 @@ export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,show
   const travelFade = state.transition ? Math.max(0, 1 - Math.abs(travelProgress - .5) / .3) : 0;
 
   return <>
-      <div className="office-social-tools">{newsAction}{boardAction}{!roof && <button type="button" aria-label={state.activity?.kind === 'dance' ? '춤 그만추기' : '춤추기'} aria-pressed={state.activity?.kind === 'dance'} disabled={!!state.transition || (!!state.activity && state.activity.kind !== 'dance')} onClick={() => { setPanel(null); send({ type: state.activity?.kind === 'dance' ? 'cancel' : 'dance' }); }}><Sparkles size={17}/><span>{state.activity?.kind === 'dance' ? '춤 그만추기' : '춤추기'}</span></button>}</div>
+      <div className="office-sidebar">
       <button className="floor-travel-button" disabled={!!state.transition} onClick={() => { setPanel(null); send({type:'travel',floor:roof ? 'office' : 'rooftop'}); }}>{roof ? <Building2 size={17} /> : <Wind size={17} />}<span>{roof ? '사무실로' : '옥상으로'}</span><ArrowRight size={15} /></button>
+      <div className="office-social-tools">{newsAction}{boardAction}{!roof && <button type="button" aria-label={state.activity?.kind === 'dance' ? '춤 그만추기' : '춤추기'} aria-pressed={state.activity?.kind === 'dance'} disabled={!!state.transition || (!!state.activity && state.activity.kind !== 'dance')} onClick={() => { setPanel(null); send({ type: state.activity?.kind === 'dance' ? 'cancel' : 'dance' }); }}><Sparkles size={17}/><span>{state.activity?.kind === 'dance' ? '춤 그만추기' : '춤추기'}</span></button>}</div>
       {!roof && <nav className="location-nav" aria-label="사무실 장소">{(['desk','boss','coffee','snacks','lounge'] as TargetId[]).map(id => { const Icon = targetIcons[id]; return <button key={id} disabled={!!state.transition} className={state.target === id ? 'active' : ''} onClick={() => select(id)} aria-label={`${TARGETS[id].label}로 이동`}><Icon size={17} /><span>{id === 'coffee' ? '커피' : id === 'snacks' ? '과자' : TARGETS[id].label}</span></button>; })}</nav>}
-      {roof && !state.activity && !state.transition && <div className="rooftop-note"><span>ROOFTOP BREAK</span><strong>오늘 삼킨 말은<br />달게 녹여 보내요.</strong><p>{state.settings.sound ? '바람 소리에, 잠깐 멍하니.' : '소리를 켜면 바람이 들려요.'}</p></div>}
+      {viewAction}
+      </div>
+      {roof && !state.activity && !state.transition && <div className={`rooftop-note${roofNoteHidden ? ' is-collapsed' : ''}`}>
+        <div className="rooftop-note-heading"><span hidden={roofNoteHidden}>ROOFTOP BREAK</span><button type="button" className="rooftop-note-toggle" aria-label={roofNoteHidden ? '옥상 안내 보기' : '옥상 안내 숨기기'} aria-expanded={!roofNoteHidden} aria-controls={roofNoteId} onClick={() => setRoofNoteHidden(hidden => !hidden)}>{roofNoteHidden ? <><Wind size={14} />옥상 안내 보기</> : <><X size={13} />숨기기</>}</button></div>
+        <div id={roofNoteId} hidden={roofNoteHidden}><strong>오늘 삼킨 말은<br />달게 녹여 보내요.</strong><p>{state.settings.sound ? '바람 소리에, 잠깐 멍하니.' : '소리를 켜면 바람이 들려요.'}</p></div>
+      </div>}
 
       {state.message && state.elapsed < state.messageUntil && <div className={`game-toast ${state.scold > 0 ? 'scold' : ''}`} role="status"><Sparkles size={16} /><span>{state.message}</span></div>}
       {state.warning > 0 && <div className="boss-warning" role="alert"><span className="warning-dot" /><div><strong>상사가 보고 있어요!</strong><span>지금 업무로 돌아가면 괜찮아요.</span></div><button onClick={() => send({ type: 'desk', mode: 'work' })}>업무로 전환 <kbd>Space</kbd></button><div className="warning-progress" style={{ width: `${state.warning / 2 * 100}%` }} /></div>}

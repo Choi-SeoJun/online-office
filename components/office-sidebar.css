@@ -1,0 +1,30 @@
+/* On small screens the existing top actions / bottom place navigation remain. */
+.office-sidebar{display:contents}
+
+/* One flow keeps travel, FAQ, social actions and places aligned on both floors.
+   A short desktop window scrolls this rail instead of overlapping the controls. */
+@media(min-width:701px) and (min-height:481px){
+  .office-app .office-sidebar{position:absolute;z-index:9;top:90px;right:32px;width:140px;max-height:calc(100dvh - 266px);box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:4px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+  .office-app .office-sidebar>.floor-travel-button,.office-app .office-sidebar>.office-social-tools,.office-app .office-sidebar>.location-nav,.office-app .office-sidebar>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;box-sizing:border-box;margin:0}
+  .office-app .office-sidebar>.camera-controls{align-items:flex-end}
+  .office-app .office-sidebar>.floor-travel-button{justify-content:center}
+  .office-app .office-sidebar>.office-social-tools{display:flex;flex-direction:column;gap:7px}
+  .office-app .office-sidebar>.location-nav{padding:6px;gap:3px;border-radius:14px}
+  .office-app .office-sidebar>.location-nav button{flex-direction:row;justify-content:flex-start;gap:9px;min-width:0;min-height:34px;padding:7px 10px;border-radius:9px}
+}
+
+.rooftop-note{width:230px}
+.rooftop-note-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.rooftop-note-heading>span{font-size:9px;letter-spacing:2px;color:#87958a}
+.rooftop-note-toggle{pointer-events:auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:none;min-height:30px;padding:5px 8px;border:1px solid #ffffffb3;border-radius:9px;background:#fffdf6ed;color:#617a64;font:inherit;font-size:10px;cursor:pointer}
+.rooftop-note-toggle:hover{background:#e8eedf}.rooftop-note-toggle:focus-visible{outline:3px solid #8aa37c;outline-offset:3px}
+.rooftop-note.is-collapsed{width:auto}.rooftop-note.is-collapsed .rooftop-note-heading{margin:0}
+.rooftop-note [hidden]{display:none}
+@media(max-width:700px){
+  .rooftop-note{width:min(215px,calc(100vw - 164px))}
+  .rooftop-note-heading{gap:5px;margin-bottom:8px}
+  .rooftop-note-heading>span{font-size:8px;letter-spacing:1px}
+  .rooftop-note-toggle{min-height:32px;padding:5px 7px}
+  .rooftop-note.is-collapsed .rooftop-note-toggle{font-size:11px;padding:7px 10px}
+  .rooftop-note strong{font-size:19px}
+}

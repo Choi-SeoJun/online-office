@@ -4,6 +4,14 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 // Changes from the previous 04:00 (inclusive) to this 04:00 (exclusive)
 // belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
+  '2026-11-17': {
+    added: [
+      '옥상 안내 배너에 숨기기·다시 보기 버튼을 넣었어요. 모바일에서도 화면을 더 넓게 보며 쉴 수 있어요.',
+    ],
+    fixed: [
+      'PC 사무실과 옥상의 오른쪽 메뉴를 가지런히 정렬했어요. 게임 안에서도 문의사항 버튼으로 크롬 그래픽 가속 안내를 열 수 있어요.',
+    ],
+  },
   '2026-11-14': {
     added: [
       '자주 들어오는 문의사항을 추가했어요. 시작 화면과 게임 안에서 크롬 그래픽 가속 설정 방법을 확인하고 설정 주소를 복사할 수 있어요.',
