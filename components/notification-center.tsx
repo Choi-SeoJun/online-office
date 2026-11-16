@@ -5,6 +5,7 @@ import { Bell, Check, Hand, X } from 'lucide-react';
 import type { RoomNotification } from '@/game/multi-types';
 import { newestNotificationId, pokeMessage, unreadNotifications } from '@/game/notifications';
 import './notification-center.css';
+import { focusOfficeControl } from './office-dialog-focus';
 
 export function NotificationCenter({items,onRead}:{items:RoomNotification[];onRead:(throughId:number)=>Promise<unknown>}) {
   const [open,setOpen]=useState(false),[error,setError]=useState('');
@@ -18,7 +19,7 @@ export function NotificationCenter({items,onRead}:{items:RoomNotification[];onRe
     const focusDialog=()=>dialog.current?.querySelector<HTMLButtonElement>('button')?.focus();
     const containFocus=(event:FocusEvent)=>{if(event.target instanceof Node&&!dialog.current?.contains(event.target))focusDialog();};
     focusDialog();document.addEventListener('focusin',containFocus);
-    return()=>{document.removeEventListener('focusin',containFocus);returnFocus?.focus();};
+    return()=>{document.removeEventListener('focusin',containFocus);focusOfficeControl(returnFocus);};
   },[open]);
   useEffect(()=>{
     if(newest<=dismissedThrough)return;

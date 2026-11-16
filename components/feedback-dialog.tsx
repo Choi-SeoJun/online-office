@@ -7,6 +7,7 @@ import { createFeedbackSender, feedbackMessageLimit } from '@/game/feedback-clie
 import type { FeedbackCategory, FeedbackContext } from '@/game/feedback-types';
 import { feedbackAdminUrl } from '@/game/hosting';
 import './feedback-dialog.css';
+import { restoreCollapsedMenuFocus } from './office-dialog-focus';
 
 export function FeedbackDialog({ context, onOpenChange, trigger }: {
   context: FeedbackContext;
@@ -50,7 +51,7 @@ export function FeedbackDialog({ context, onOpenChange, trigger }: {
     </Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="feedback-overlay" />
-      <Dialog.Content className="feedback-dialog">
+      <Dialog.Content className="feedback-dialog" onCloseAutoFocus={restoreCollapsedMenuFocus}>
         <header>
           <Dialog.Title>건의함</Dialog.Title>
           <Dialog.Close asChild>

@@ -6,3 +6,12 @@ export function restoreCollapsedMenuFocus(event: Event) {
     toggle.focus();
   }
 }
+
+/** Custom dialogs also need a visible target after a responsive layout change. */
+export function focusOfficeControl(control: HTMLElement | null) {
+  if (control?.getClientRects().length) control.focus();
+  else {
+    const toggle = document.querySelector<HTMLButtonElement>('.office-sidebar-toggle');
+    if (toggle?.getClientRects().length) toggle.focus();
+  }
+}

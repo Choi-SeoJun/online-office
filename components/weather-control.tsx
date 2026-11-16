@@ -7,6 +7,7 @@ import { localDate, sunTimes, weatherLabel } from '@/game/environment';
 import { KOREA_PROVINCES, koreaRegionById } from '@/game/korea-regions';
 import type { useLocalWeather } from '@/hooks/use-local-weather';
 import './weather-control.css';
+import { restoreCollapsedMenuFocus } from './office-dialog-focus';
 
 const seasons = { spring: '봄', summer: '여름', autumn: '가을', winter: '겨울' };
 const messages = {
@@ -46,7 +47,7 @@ export function WeatherControl({ weather, onOpenChange }: {
     </Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="weather-overlay"/>
-      <Dialog.Content className="weather-dialog" onKeyDown={event => event.stopPropagation()}>
+      <Dialog.Content className="weather-dialog" onCloseAutoFocus={restoreCollapsedMenuFocus} onKeyDown={event => event.stopPropagation()}>
         <header>
           <Dialog.Title>내 지역의 하늘</Dialog.Title>
           <Dialog.Close asChild><button type="button" className="icon-button" aria-label="날씨 닫기"><X size={18}/></button></Dialog.Close>

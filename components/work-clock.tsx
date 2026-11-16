@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Check, Clock3, Coffee, Pencil, X } from 'lucide-react';
 import { getWorkdayStatus, readWorkday, validWorkday, workdayIsSaved, writeWorkday, type WorkdaySchedule } from '@/game/workday';
 import './work-clock.css';
+import { focusOfficeControl } from './office-dialog-focus';
 
 export function WorkClock() {
   const [open,setOpen]=useState(false),[editing,setEditing]=useState(false),[schedule,setSchedule]=useState<WorkdaySchedule|null>(null);
@@ -18,7 +19,7 @@ export function WorkClock() {
     dialog.current?.querySelector<HTMLElement>(editing?'input':'button')?.focus();
     return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visibility);};
   },[open,editing]);
-  const close=()=>{setOpen(false);button.current?.focus();};
+  const close=()=>{setOpen(false);focusOfficeControl(button.current);};
   const show=()=>{const value=readWorkday();setSchedule(value);setSaved(workdayIsSaved());if(value){setStart(value.start);setEnd(value.end);}setEditing(!value);setError('');setNow(new Date());setOpen(true);};
   const save=(event:React.FormEvent)=>{event.preventDefault();const value={start,end};if(!validWorkday(value)){setError('출근·퇴근 시간을 다르게 입력해 주세요.');return;}setSaved(writeWorkday(value));setSchedule(value);setEditing(false);setError('');setNow(new Date());};
   const status=schedule?getWorkdayStatus(schedule,now):null;

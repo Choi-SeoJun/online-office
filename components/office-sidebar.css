@@ -1,12 +1,23 @@
 /* Keep dialog components mounted so automatic news and board sync still work
    while their mobile triggers are collapsed. */
-.office-sidebar,.office-sidebar-content{display:contents}
+.office-sidebar,.office-sidebar-panel,.office-sidebar-content{display:contents}
 .office-sidebar-toggle{display:none}
+.office-app{--office-header-inset:36px}
+.office-app.multi-room{--office-header-inset:30px}
+.office-header-actions{position:absolute;z-index:10;top:30px;right:36px;pointer-events:auto}
+.multi-room .office-header-actions{top:25px;right:30px}
+@media(min-width:701px) and (max-height:650px){.office-app:not(.multi-room){--office-header-inset:25px}.office-app:not(.multi-room) .office-header-actions{top:19px;right:25px}}
+@media(min-width:701px) and (max-width:760px){.office-app.multi-room{--office-header-inset:14px}.multi-room .office-header-actions{top:14px;right:14px}}
+@media(min-width:761px) and (max-height:600px){.multi-room .office-header-actions{top:14px}}
 
 /* One flow keeps travel, FAQ, social actions and places aligned on both floors.
    A short desktop window scrolls this rail instead of overlapping the controls. */
 @media(min-width:701px) and (min-height:481px){
-  .office-app .office-sidebar{position:absolute;z-index:9;top:90px;right:32px;width:140px;max-height:calc(100dvh - 266px);box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:4px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+  .office-app.is-playing :is(.app-header,.room-header){right:calc(var(--office-header-inset) + var(--office-header-actions-width,360px) + 16px)}
+  .office-app.is-playing :is(.brand,.brand>div,.room-title,.room-title>div){min-width:0;max-width:100%}
+  .office-app.is-playing .brand-mark{flex-shrink:0}
+  .office-app.is-playing :is(.brand h1,.room-title h1){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .office-app .office-sidebar-content{position:absolute;z-index:9;top:90px;right:32px;width:140px;max-height:calc(100dvh - 266px);box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:4px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
   .office-app .office-sidebar-content>.floor-travel-button,.office-app .office-sidebar-content>.office-social-tools,.office-app .office-sidebar-content>.location-nav,.office-app .office-sidebar-content>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;box-sizing:border-box;margin:0}
   .office-app .office-sidebar-content>.camera-controls{align-items:flex-end}
   .office-app .office-sidebar-content>.floor-travel-button{justify-content:center}
@@ -16,11 +27,25 @@
 }
 
 @media(max-width:700px),(max-height:480px) and (orientation:landscape){
-  .office-app .office-sidebar{position:absolute;z-index:9;top:66px;right:max(14px,env(safe-area-inset-right));width:152px;display:flex;flex-direction:column;align-items:stretch;gap:7px;pointer-events:none}
+  .office-app .office-sidebar{position:absolute;z-index:11;top:max(16px,env(safe-area-inset-top));right:max(14px,env(safe-area-inset-right));width:min(230px,calc(100vw - 28px));display:flex;flex-direction:column;align-items:stretch;gap:7px;pointer-events:none}
   .office-app .office-sidebar-toggle{display:flex;align-self:flex-end;align-items:center;justify-content:center;gap:6px;min-width:80px;min-height:44px;padding:0 13px;border:1px solid #ffffffc7;border-radius:12px;background:#fffdf6f5;color:#506c59;box-shadow:var(--shadow);font:inherit;font-size:11px;cursor:pointer;pointer-events:auto}
   .office-sidebar-toggle:focus-visible{outline:3px solid #8aa37c;outline-offset:3px}
-  .office-app .office-sidebar-content{display:none}
-  .office-app .office-sidebar.is-open>.office-sidebar-content{display:flex;flex-direction:column;gap:7px;max-height:calc(100dvh - 280px - env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;box-sizing:border-box;padding:6px;border:1px solid #fffdf3;border-radius:15px;background:#fffdf6f5;box-shadow:var(--shadow);pointer-events:auto}
+  .office-app .office-sidebar-panel{display:none}
+  .office-app .office-sidebar.is-open>.office-sidebar-panel{display:flex;flex-direction:column;gap:9px;max-height:calc(100dvh - 230px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;box-sizing:border-box;padding:9px;border:1px solid #fffdf3;border-radius:15px;background:#fffdf6f5;box-shadow:var(--shadow);pointer-events:auto}
+  .office-app .office-sidebar-content{display:flex;flex-direction:column;gap:7px}
+  .office-app.is-playing :is(.app-header,.room-header){top:max(16px,env(safe-area-inset-top));left:max(19px,env(safe-area-inset-left));right:110px;min-height:44px;pointer-events:none}
+  .office-app.is-playing :is(.brand,.room-title){min-width:0;max-width:100%;min-height:44px;padding:0 12px;box-sizing:border-box;border-radius:12px;background:#fffdf6e6;pointer-events:none}
+  .office-app.is-playing :is(.brand,.room-title)>div{min-width:0}
+  .office-app.is-playing :is(.brand h1,.room-title h1){font-size:16px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0}
+  .office-app.is-playing :is(.brand-mark,.brand p,.room-title>svg,.room-title>div>span){display:none}
+  .office-app .office-sidebar-panel>:is(.employee-card,.room-self){position:static;inset:auto;transform:none;display:flex;flex-wrap:wrap;gap:6px;padding:6px 4px;font-size:10px}
+  .office-app .office-sidebar-panel>:is(.employee-card,.room-self)>span:last-child{font-size:9px;padding-left:0;border:0}
+  .office-app .office-header-actions{position:static;inset:auto;padding-bottom:9px;border-bottom:1px solid #e3e8d9}
+  .office-app .office-header-actions>:is(.header-tools,.room-header-actions){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+  .office-app .office-header-actions>:is(.header-tools,.room-header-actions)>button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;height:auto;min-height:58px;padding:7px 4px;border-radius:10px;background:#edf1e7;color:#506c59;font-size:0;white-space:normal}
+  .office-app .office-header-actions>:is(.header-tools,.room-header-actions)>button::after{content:attr(aria-label);font:inherit;font-size:10px;line-height:1.4}
+  .office-app .office-header-actions>:is(.header-tools,.room-header-actions)>button>span{display:none}
+  .office-app .office-header-actions>:is(.header-tools,.room-header-actions)>button>svg{width:18px;height:18px;flex:none}
   .office-app .office-sidebar-content>.floor-travel-button,.office-app .office-sidebar-content>.office-social-tools,.office-app .office-sidebar-content>.location-nav,.office-app .office-sidebar-content>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;max-width:none;box-sizing:border-box;margin:0}
   .office-app .office-sidebar-content>.floor-travel-button{justify-content:center;min-height:44px;font-size:11px;box-shadow:none}
   .office-app .office-sidebar-content>.office-social-tools{display:flex;flex-direction:column;gap:4px}
@@ -32,8 +57,7 @@
   .office-app .office-sidebar-content .camera-controls .icon-button{width:44px;height:44px}
 }
 @media(max-height:480px) and (orientation:landscape){
-  .office-app .office-sidebar{top:60px}
-  .office-app .office-sidebar.is-open>.office-sidebar-content{max-height:calc(100dvh - 240px - env(safe-area-inset-bottom))}
+  .office-app .office-sidebar.is-open>.office-sidebar-panel{max-height:calc(100dvh - 195px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
 }
 
 .rooftop-note{width:230px}

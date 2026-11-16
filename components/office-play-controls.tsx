@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Armchair, ArrowLeft, ArrowRight, BriefcaseBusiness, Building2, Check, ChevronLeft, ChevronRight, Coffee, Cookie, DoorOpen, Files, Gamepad2, Hand, Headphones, HelpCircle, Leaf, LoaderCircle, Menu, Monitor, Moon, MousePointer2, PackageOpen, RotateCcw, Settings2, Shirt, ShoppingBag, Sparkles, Volume2, VolumeX, Wind, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -18,7 +18,21 @@ function ToolButton({ icon: Icon, label, onClick, active, disabled }: { icon: Lu
 }
 
 export type PlayPanel = 'settings' | 'help' | 'bag' | null;
-export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,showMonitor=true,onMonitorClose,extraActions,boardAction,newsAction,wallpaperAction,viewAction}:{state:GameState;send:(command:Command)=>void;panel:PlayPanel;setPanel:(panel:PlayPanel)=>void;onExit:()=>void;onType:(key:string)=>void;showMonitor?:boolean;onMonitorClose?:()=>void;extraActions?:ReactNode;boardAction?:ReactNode;newsAction?:ReactNode;wallpaperAction?:ReactNode;viewAction?:ReactNode}) {
+function HeaderActions({children}:{children:ReactNode}) {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = host.current, app = element?.closest<HTMLElement>('.office-app');
+    if (!element || !app) return;
+    const measure = () => app.style.setProperty('--office-header-actions-width', `${element.getBoundingClientRect().width}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => { observer.disconnect(); app.style.removeProperty('--office-header-actions-width'); };
+  }, []);
+  return <div ref={host} className="office-header-actions">{children}</div>;
+}
+
+export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,showMonitor=true,onMonitorClose,extraActions,boardAction,newsAction,wallpaperAction,viewAction,headerActions,playerInfo}:{state:GameState;send:(command:Command)=>void;panel:PlayPanel;setPanel:(panel:PlayPanel)=>void;onExit:()=>void;onType:(key:string)=>void;showMonitor?:boolean;onMonitorClose?:()=>void;extraActions?:ReactNode;boardAction?:ReactNode;newsAction?:ReactNode;wallpaperAction?:ReactNode;viewAction?:ReactNode;headerActions?:ReactNode;playerInfo?:ReactNode}) {
   const [roofNoteHidden, setRoofNoteHidden] = useState(false);
   const roofNoteId = useId();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -46,11 +60,15 @@ export function OfficePlayControls({state,send,panel,setPanel,onExit,onType,show
         }
       }}>
       <button ref={mobileMenuToggle} type="button" className="office-sidebar-toggle" aria-label={mobileMenuOpen ? '게임 메뉴 접기' : '게임 메뉴 펼치기'} aria-expanded={mobileMenuOpen} aria-controls={mobileMenuId} onClick={() => setMobileMenuOpen(open => !open)}>{mobileMenuOpen ? <X size={17} /> : <Menu size={17} />}<span>{mobileMenuOpen ? '접기' : '메뉴'}</span></button>
-      <div id={mobileMenuId} className="office-sidebar-content">
+      <div id={mobileMenuId} className="office-sidebar-panel">
+      {playerInfo}
+      {headerActions && <HeaderActions>{headerActions}</HeaderActions>}
+      <div className="office-sidebar-content">
       <button className="floor-travel-button" disabled={!!state.transition} onClick={() => { closeMobileMenu(); setPanel(null); send({type:'travel',floor:roof ? 'office' : 'rooftop'}); }}>{roof ? <Building2 size={17} /> : <Wind size={17} />}<span>{roof ? '사무실로' : '옥상으로'}</span><ArrowRight size={15} /></button>
       <div className="office-social-tools">{newsAction}{boardAction}{!roof && <button type="button" aria-label={state.activity?.kind === 'dance' ? '춤 그만추기' : '춤추기'} aria-pressed={state.activity?.kind === 'dance'} disabled={!!state.transition || (!!state.activity && state.activity.kind !== 'dance')} onClick={() => { closeMobileMenu(); setPanel(null); send({ type: state.activity?.kind === 'dance' ? 'cancel' : 'dance' }); }}><Sparkles size={17}/><span>{state.activity?.kind === 'dance' ? '춤 그만추기' : '춤추기'}</span></button>}</div>
       {!roof && <nav className="location-nav" aria-label="사무실 장소">{(['desk','boss','coffee','snacks','lounge'] as TargetId[]).map(id => { const Icon = targetIcons[id]; return <button key={id} disabled={!!state.transition} className={state.target === id ? 'active' : ''} onClick={() => select(id)} aria-label={`${TARGETS[id].label}로 이동`}><Icon size={17} /><span>{id === 'coffee' ? '커피' : id === 'snacks' ? '과자' : TARGETS[id].label}</span></button>; })}</nav>}
       {viewAction}
+      </div>
       </div>
       </div>
       {roof && !state.activity && !state.transition && <div className={`rooftop-note${roofNoteHidden ? ' is-collapsed' : ''}`}>
