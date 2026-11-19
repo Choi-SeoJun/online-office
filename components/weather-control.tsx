@@ -1,10 +1,10 @@
 'use client';
 
 import { CloudSun, LocateFixed, RefreshCw, Sunrise, Sunset, X } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Dialog } from 'radix-ui';
 import { localDate, sunTimes, forecastLabel } from '@/game/environment';
-import { KOREA_PROVINCES, koreaRegionById, koreaRegionPath, koreaRegionChildren, koreaChildLabel } from '@/game/korea-regions';
+import { KOREA_PROVINCES, koreaRegionById, koreaRegionPath, koreaRegionOptions, koreaChildLabel, searchKoreaRegions } from '@/game/korea-regions';
 import type { useLocalWeather } from '@/hooks/use-local-weather';
 import './weather-control.css';
 import { restoreCollapsedMenuFocus } from './office-dialog-focus';
@@ -24,6 +24,9 @@ export function WeatherControl({ weather, onOpenChange }: {
   const { frame, region, forecast, status, error, locating, selectRegion, useCurrentLocation, refresh } = weather;
   const applied = koreaRegionById(region.id) ?? KOREA_PROVINCES[0].regions[0];
   const path = koreaRegionPath(applied.id);
+  const [query, setQuery] = useState('');
+  const searchInput = useRef<HTMLInputElement>(null);
+  const results = useMemo(() => searchKoreaRegions(query), [query]);
   const showForecast = forecast && (status === 'live' || status === 'cached');
   const timezone = forecast?.timezone ?? region.timezone;
   const { date, clock } = useMemo(() => ({
@@ -67,6 +70,21 @@ export function WeatherControl({ weather, onOpenChange }: {
         {showForecast && <p className="weather-note">날씨 자료 기준 · {date.format(forecast.observedAt)} {clock.format(forecast.observedAt)}<br/>마지막 확인 · {clock.format(forecast.fetchedAt)}</p>}
         <p className="weather-note">약 5분마다 새 날씨를 확인해요. 비·눈과 빗소리도 자동으로 바뀌어요.</p>
         <div className="weather-settings">
+          <div className="weather-search">
+            <label>동네 이름 검색
+              <input ref={searchInput} type="search" value={query} maxLength={100} placeholder="두정동, 천안 두정동…" autoComplete="off"
+                onChange={event => setQuery(event.currentTarget.value)} aria-describedby="weather-search-help"/>
+            </label>
+            <p id="weather-search-help" className="weather-note">주소에 쓰는 동 이름과 행정동 이름 모두 찾을 수 있어요. 같은 동이 여러 관할에 걸치면 해당 관할을 골라 주세요.</p>
+            {query.trim() && <>
+              <p className="weather-note" role="status">{results.total ? `${results.total}개 지역${results.total > results.items.length ? ' · 앞의 40개 표시, 시·군 이름을 함께 입력해 보세요.' : ''}` : '찾는 지역이 없어요. 시·군 이름과 동 이름을 다시 확인해 주세요.'}</p>
+              <ul className="weather-search-results" aria-label="동네 검색 결과">
+                {results.items.map(item => <li key={item.id}><button type="button" onClick={() => { selectRegion(item); setQuery(''); searchInput.current?.focus(); }}>
+                  <strong>{item.label}</strong><span>{koreaRegionPath(item.parentId ?? item.id).map(part => part.label).join(' ')}</span>
+                </button></li>)}
+              </ul>
+            </>}
+          </div>
           <div className="weather-region-fields">
           <label>시·도
             <select value={applied.provinceId} onChange={event => {
@@ -77,7 +95,7 @@ export function WeatherControl({ weather, onOpenChange }: {
             </select>
           </label>
           {path.map((parent, index) => {
-            const options = koreaRegionChildren(parent.id);
+            const options = koreaRegionOptions(parent.id);
             if (!options.length) return null;
             return <label key={parent.id}>{koreaChildLabel(options)}
               <select value={path[index + 1]?.id ?? ''} onChange={event => {
@@ -85,11 +103,14 @@ export function WeatherControl({ weather, onOpenChange }: {
                 if (next) selectRegion(next);
               }}>
                 <option value="">{parent.label} 대표 지점</option>
+                {path[index + 1]?.retired && <option value={path[index + 1].id} disabled>{path[index + 1].label} (이전 설정)</option>}
                 {options.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
               </select>
             </label>;
           })}
           </div>
+          {applied.retired && <p className="weather-note">행정구역이 변경된 이전 설정이에요. 고덕1동 또는 고덕2동을 다시 골라 주세요.</p>}
+          {applied.representativePoint && <p className="weather-note">이 지역의 별도 기상청 지점이 아직 없어 {applied.representativePoint} 대표 지점의 날씨를 사용해요.</p>}
           <button type="button" className="weather-action" disabled={locating} onClick={useCurrentLocation}>
             <LocateFixed size={16}/>{locating ? '위치 확인 중…' : '현재 위치 사용'}
           </button>
@@ -100,7 +121,7 @@ export function WeatherControl({ weather, onOpenChange }: {
         <p className="weather-note">현재 위치를 사용하면 가장 가까운 읍·면·동 지점의 기상청 격자 날씨를 적용해요. 약 5km 격자라 이웃 동네는 같은 날씨일 수 있어요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
         {error && <p className="weather-error" role="alert">{error}</p>}
         <footer>
-          <div className="weather-sources"><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">날씨·지역 · 기상청</a>{forecast?.source !== 'kma' && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">보조 예보 · Open-Meteo</a>}</div>
+          <div className="weather-sources"><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">날씨·지점 · 기상청</a><a href="https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=131063" target="_blank" rel="noreferrer">주소·행정구역 · 행정안전부 (2026.11.11)</a>{forecast?.source !== 'kma' && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">보조 예보 · Open-Meteo</a>}</div>
           <button type="button" className="weather-action" disabled={status === 'loading'} onClick={refresh}><RefreshCw size={14}/>새로고침</button>
         </footer>
       </Dialog.Content>

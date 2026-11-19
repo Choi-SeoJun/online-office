@@ -141,6 +141,7 @@
 }
 
 .weather-settings select,
+.weather-search input,
 .weather-action {
   min-height: 36px;
   padding: 4px 8px;
@@ -149,6 +150,13 @@
   background: #f5f7ee;
   color: inherit;
 }
+
+.weather-search input { width: 100%; min-width: 0; font: inherit; font-size: 16px; min-height: 42px; }
+.weather-search-results { list-style: none; margin: 0; padding: 3px; max-height: 210px; overflow-y: auto; overscroll-behavior: contain; }
+.weather-search-results button { display: block; width: 100%; text-align: left; padding: 10px; margin-bottom: 5px; border: 1px solid #d6e0d2; border-radius: 9px; background: #f5f7ee; color: inherit; font: inherit; overflow-wrap: anywhere; }
+.weather-search-results button:hover { background: #e8efdf; }
+.weather-search-results strong { display: block; font-size: 14px; }
+.weather-search-results span { display: block; margin-top: 4px; font-size: 12px; color: #526a58; }
 
 .weather-settings select {
   width: 100%;

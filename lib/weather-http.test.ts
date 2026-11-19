@@ -25,10 +25,27 @@ test('known neighborhood IDs select their official grid and share upstream grid 
 test('unknown, duplicate and mixed region selectors cannot spend the private key quota', async () => {
   let calls = 0;
   const handle = createWeatherHandler({ fetcher: async () => { calls++; return Response.json(payload); } });
-  for (const query of ['region=unknown', 'region=4413356700&region=4413356600', 'region=4413356700&latitude=37.56&longitude=126.98']) {
+  for (const query of ['region=unknown', 'region=address:4413310400:1168000000', 'region=4413356700&region=4413356600', 'region=4413356700&latitude=37.56&longitude=126.98']) {
     assert.equal((await handle(request(query))).status, 400);
   }
   assert.equal(calls, 0);
+});
+
+test('legal address IDs resolve only to their authorized KMA point and share grid requests', async () => {
+  const urls: URL[] = [];
+  const handle = createWeatherHandler({ now: () => Date.parse('2026-11-19T09:47:00Z'), getApiKey: () => 'test-key', fetcher: async input => {
+    const url = new URL(input); urls.push(url);
+    const base = { baseDate: url.searchParams.get('base_date'), baseTime: url.searchParams.get('base_time'), nx: 63, ny: 111 };
+    const item = url.pathname.endsWith('getUltraSrtFcst')
+      ? [{ ...base, category: 'SKY', fcstDate: '20261119', fcstTime: '1900', fcstValue: '4' }]
+      : Object.entries({ PTY: 3, T1H: -1, WSD: 2 }).map(([category, obsrValue]) => ({ ...base, category, obsrValue: String(obsrValue) }));
+    return Response.json({ response: { header: { resultCode: '00' }, body: { items: { item } } } });
+  } });
+  const results = await Promise.all(['address:4413310400:4413358000', 'address:4413310400:4413359000', '4413358000'].map(id => handle(request(`region=${encodeURIComponent(id)}`))));
+  assert.ok(results.every(r => r.status === 200));
+  assert.equal((await results[0].json() as { current: { weather_code: number } }).current.weather_code, 73);
+  assert.equal(urls.length, 2);
+  assert.ok(urls.every(u => u.searchParams.get('nx') === '63' && u.searchParams.get('ny') === '111'));
 });
 test('weather uses a fixed upstream, rounded coordinates and only known parameters', async () => {
   let target = '';

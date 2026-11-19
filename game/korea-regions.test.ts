@@ -39,7 +39,7 @@ test('Cheonan neighborhoods preserve the official district path and grid', () =>
 
 test('every official neighborhood can be reached through the selectable hierarchy', () => {
   const leaves = KOREA_REGIONS.filter(r => r.level === 'neighborhood');
-  assert.equal(leaves.length, 3565);
+  assert.equal(leaves.length, 3632); // current MOIS entries plus KMA's Dokdo point
   for (const leaf of leaves) {
     const path = koreaRegionPath(leaf.id);
     assert.equal(path[0].id, leaf.provinceId, leaf.name);
