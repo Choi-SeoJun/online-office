@@ -42,7 +42,7 @@ for (const failure of ['network', 'unavailable', 'invalid', 'stale'] as const) {
       return Response.json({ ...payload, current: { ...payload.current, time: now / 1000 - 3 * 3600 } });
     });
     assert.equal((await requestForecast(DEFAULT_REGION, new AbortController().signal)).code, 51);
-    assert.equal(calls[0].href, 'https://office.test/api/weather?latitude=37.56&longitude=126.98');
+    assert.equal(calls[0].href, 'https://office.test/api/weather?region=1100000000');
     assert.equal(calls[1].origin, 'https://api.open-meteo.com');
     assert.equal(calls.length, 2);
   });

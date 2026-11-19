@@ -122,7 +122,7 @@ export function createKmaWeather({ fetcher = fetch, now = Date.now }: { fetcher?
   return async function load(region: WeatherRegion, serviceKey: string) {
     if (!serviceKey.trim()) throw new Error('KMA not configured');
     if (activeKey !== serviceKey) { cache.clear(); activeKey = serviceKey; }
-    const time = now(), grid = kmaGrid(region.latitude, region.longitude);
+    const time = now(), grid = region.grid ?? kmaGrid(region.latitude, region.longitude);
     const currentCycle = kmaCycle(time, 'observation'), skyCycle = kmaCycle(time, 'sky');
     const obsJob = (async () => {
       let cycle = currentCycle, items = await query('getUltraSrtNcst', cycle, grid, serviceKey);

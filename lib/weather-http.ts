@@ -1,9 +1,9 @@
 import { weatherProviderUrl } from '../game/weather-request.ts';
 import { WEATHER_REFRESH_INTERVAL } from '../game/weather-refresh.ts';
-import { KOREA_REGIONS } from '../game/korea-regions.ts';
+import { KOREA_LEGACY_REGIONS, koreaRegionById } from '../game/korea-regions.ts';
 import { createKmaWeather } from './kma-weather.ts';
 
-// Fixed upstream: clients can choose approximate coordinates, never a URL or API key.
+// Fixed upstream: known region IDs (or legacy city coordinates), never a URL or API key.
 const TTL = WEATHER_REFRESH_INTERVAL;
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 type WeatherFailure = { stage: 'fetch' | 'response' | 'decode' | 'kma'; status: number | null };
@@ -26,11 +26,14 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, getApiKe
       const value = Number(values[0]);
       return Number.isFinite(value) && Math.abs(value) <= limit ? Math.round(value * 100) / 100 : null;
     };
-    const latitude = coordinate('latitude', 90), longitude = coordinate('longitude', 180);
-    if (latitude === null || longitude === null) return fail(400);
-    const region = KOREA_REGIONS.find(region => region.latitude === latitude && region.longitude === longitude);
+    const ids = url.searchParams.getAll('region');
+    if (ids.length > 1 || (ids.length && (url.searchParams.has('latitude') || url.searchParams.has('longitude')))) return fail(400);
+    const oldLatitude = coordinate('latitude', 90), oldLongitude = coordinate('longitude', 180);
+    const oldRegion = ids.length ? null : KOREA_LEGACY_REGIONS.find(region => region.latitude === oldLatitude && region.longitude === oldLongitude);
+    const region = koreaRegionById(ids.length ? ids[0] : oldRegion?.id);
     if (!region) return fail(400);
-    const key = `${latitude},${longitude}`;
+    const { latitude, longitude } = region;
+    const key = region.id;
     if ((failedUntil.get(key) ?? 0) > now()) return fail(503);
     failedUntil.delete(key);
     try {

@@ -44,9 +44,9 @@ test('KMA attribution requires valid metadata and does not describe unknown sky 
 
 test('location is converted to a domestic representative point before reuse', () => {
   const region = normalizeRegion({ ...DEFAULT_REGION, id: undefined, source: 'location', latitude: 36.7891234, longitude: 127.0045678 });
-  assert.equal(region?.name, '충청남도 아산시');
-  assert.equal(region?.latitude, 36.79);
-  assert.equal(region?.longitude, 127.00);
+  assert.equal(region?.name, '충청남도 아산시 온양1동');
+  assert.equal(region?.latitude, 36.784239);
+  assert.equal(region?.longitude, 127.001575);
   assert.equal(normalizeRegion({ ...DEFAULT_REGION, latitude: 90.001 }), null);
 });
 
@@ -82,7 +82,7 @@ test('browser cache is bounded, matches the region and stores rounded coordinate
   assert.equal(readForecast(DEFAULT_REGION, noon), null);
 });
 
-test('weather requests transmit rounded coordinates and omit credentials and referrer', async (t) => {
+test('weather requests transmit only the nearest neighborhood ID and omit credentials and referrer', async (t) => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { href: 'https://example.com/a' } } });
   t.after(() => {
@@ -94,8 +94,9 @@ test('weather requests transmit rounded coordinates and omit credentials and ref
   t.mock.method(globalThis, 'fetch', async (url: URL, options: RequestInit) => {
     assert.equal(url.origin, 'https://example.com');
     assert.equal(url.pathname, '/api/weather');
-    assert.equal(url.searchParams.get('latitude'), '36.79');
-    assert.equal(url.searchParams.get('longitude'), '127.00');
+    assert.equal(url.searchParams.get('region'), '4420057000');
+    assert.equal(url.searchParams.has('latitude'), false);
+    assert.equal(url.searchParams.has('longitude'), false);
     assert.equal(url.searchParams.has('serviceKey'), false);
     assert.equal(options.signal?.aborted, false);
     assert.equal(options.credentials, 'omit');
@@ -104,6 +105,22 @@ test('weather requests transmit rounded coordinates and omit credentials and ref
   });
   const forecast = await requestForecast({ ...DEFAULT_REGION, id: undefined, source: 'location', latitude: 36.7891234, longitude: 127.0045678 }, controller.signal);
   assert.equal(forecast.code, 61);
+});
+
+test('offline upgrades migrate only matching legacy city forecasts and reject expired cache', t => {
+  const forecast = parseWeatherForecast(raw, noon)!;
+  let stored = JSON.stringify({ region: '37.56,126.98', forecast });
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: () => stored, setItem: (_key: string, value: string) => { stored = value; },
+  } });
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'localStorage', previous); else Reflect.deleteProperty(globalThis, 'localStorage'); });
+  assert.deepEqual(readForecast(DEFAULT_REGION, noon), forecast);
+  assert.equal(JSON.parse(stored).region, 'region:1100000000');
+  stored = JSON.stringify({ region: '37.56,126.98', forecast });
+  assert.equal(readForecast({ ...DEFAULT_REGION, id: '1114052000' }, noon), null); // A neighborhood must never inherit a city cache, even at the same coordinates.
+  assert.equal(readForecast(DEFAULT_REGION, noon + 121 * 60000), null);
+  assert.equal(JSON.parse(stored).region, '37.56,126.98');
 });
 
 test('season and solar events follow the region across a local date boundary', () => {

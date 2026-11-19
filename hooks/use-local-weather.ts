@@ -109,7 +109,7 @@ export function useLocalWeather() {
       const next = nearestKoreaRegion(coords.latitude, coords.longitude);
       if (next) selectRegion({ ...next, source: 'location' });
       else { setLocating(false); setLocationError('가까운 대한민국 지역을 찾지 못했어요. 시·도를 직접 선택해 주세요.'); }
-    }, fail, { enableHighAccuracy: false, timeout: 10000, maximumAge: 0 });
+    }, fail, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
   }, [selectRegion]);
 
   const refresh = useCallback(() => { void load(selected.current, true); }, [load]);

@@ -1,7 +1,7 @@
 import { boundedNumber, DEFAULT_REGION, MAX_FORECAST_AGE, parseWeatherForecast, validTimezone, validWeatherCode, WEATHER_REGIONS } from './environment.ts';
 import type { WeatherForecast, WeatherRegion } from './environment-types.ts';
 import { roomEndpoint } from './hosting.ts';
-import { koreaRegionById, legacyKoreaRegion, nearestKoreaRegion } from './korea-regions.ts';
+import { KOREA_LEGACY_REGIONS, koreaRegionById, legacyKoreaRegion, nearestKoreaRegion } from './korea-regions.ts';
 import { weatherProviderUrl } from './weather-request.ts';
 import { WEATHER_REFRESH_INTERVAL } from './weather-refresh.ts';
 
@@ -40,14 +40,16 @@ export function saveRegion(region: WeatherRegion) {
   if (normalized) write(REGION_KEY, normalized);
 }
 
-export const regionKey = (region: WeatherRegion) => [region.latitude.toFixed(2), region.longitude.toFixed(2)].join(',');
+export const regionKey = (region: WeatherRegion) => region.id ? `region:${region.id}` : [region.latitude.toFixed(6), region.longitude.toFixed(6)].join(',');
 
 export function readForecast(region: WeatherRegion, now: number) {
   const cached = read(CACHE_KEY) as { region?: unknown; forecast?: Partial<WeatherForecast> } | null;
   const forecast = cached?.forecast;
+  const legacy = KOREA_LEGACY_REGIONS.find(item => item.id === region.id && item.latitude === region.latitude && item.longitude === region.longitude);
+  const legacyMatch = legacy && cached?.region === `${legacy.latitude.toFixed(2)},${legacy.longitude.toFixed(2)}`;
   if (forecast?.source !== undefined && forecast.source !== 'kma' && forecast.source !== 'open-meteo') return null;
   if (forecast?.source === 'kma' && (!boundedNumber(forecast.kmaPty, 0, 7) || !Number.isInteger(forecast.kmaPty) || typeof forecast.skyKnown !== 'boolean')) return null;
-  if (cached?.region !== regionKey(region) || !forecast ||
+  if ((!legacyMatch && cached?.region !== regionKey(region)) || !forecast ||
       !boundedNumber(forecast.fetchedAt, 0, now) || !boundedNumber(forecast.observedAt, 0, now + 30 * 60000) ||
       !boundedNumber(forecast.temperature, -150, 100) || !boundedNumber(forecast.code, 0, 99) || !validWeatherCode(forecast.code) ||
       !boundedNumber(forecast.cloud, 0, 100) || !boundedNumber(forecast.wind, 0, 500) || !validTimezone(forecast.timezone) ||
@@ -55,7 +57,9 @@ export function readForecast(region: WeatherRegion, now: number) {
       !forecast.days.every(day => day && typeof day.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day.date) &&
         (day.sunrise === null || boundedNumber(day.sunrise, 0, 8.64e15)) &&
         (day.sunset === null || boundedNumber(day.sunset, 0, 8.64e15)))) return null;
-  return usableForecast(forecast as WeatherForecast, now);
+  const usable = usableForecast(forecast as WeatherForecast, now);
+  if (usable && legacyMatch) saveForecast(region, usable);
+  return usable;
 }
 
 export function saveForecast(region: WeatherRegion, forecast: WeatherForecast) {
@@ -94,8 +98,7 @@ export async function requestForecast(region: WeatherRegion, signal: AbortSignal
   if (!normalized) throw new Error('Invalid weather region');
   // KMA observations must win over model weather. Its key stays on the Worker.
   const url = new URL('/api/weather', new URL(roomEndpoint(), window.location.href));
-  url.searchParams.set('latitude', normalized.latitude.toFixed(2));
-  url.searchParams.set('longitude', normalized.longitude.toFixed(2));
+  url.searchParams.set('region', normalized.id!);
   try {
     return await fetchForecast(url, signal, 8500);
   } catch (error) {

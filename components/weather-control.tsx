@@ -1,10 +1,10 @@
 'use client';
 
 import { CloudSun, LocateFixed, RefreshCw, Sunrise, Sunset, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Dialog } from 'radix-ui';
 import { localDate, sunTimes, forecastLabel } from '@/game/environment';
-import { KOREA_PROVINCES, koreaRegionById } from '@/game/korea-regions';
+import { KOREA_PROVINCES, koreaRegionById, koreaRegionPath, koreaRegionChildren, koreaChildLabel } from '@/game/korea-regions';
 import type { useLocalWeather } from '@/hooks/use-local-weather';
 import './weather-control.css';
 import { restoreCollapsedMenuFocus } from './office-dialog-focus';
@@ -21,13 +21,9 @@ export function WeatherControl({ weather, onOpenChange }: {
   weather: ReturnType<typeof useLocalWeather>;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { frame, region, forecast, status, error, locating, selectRegion, useCurrentLocation, cancelLocation, refresh } = weather;
-  const [draft, setDraft] = useState<{ provinceId: string; regionId: string | undefined } | null>(null);
+  const { frame, region, forecast, status, error, locating, selectRegion, useCurrentLocation, refresh } = weather;
   const applied = koreaRegionById(region.id) ?? KOREA_PROVINCES[0].regions[0];
-  const provinceId = draft && draft.regionId === region.id ? draft.provinceId : applied.provinceId;
-  const province = KOREA_PROVINCES.find(item => item.id === provinceId) ?? KOREA_PROVINCES[0];
-  const needsDistrict = province.regions.length > 1;
-  const districtValue = applied.provinceId === province.id ? applied.id : '';
+  const path = koreaRegionPath(applied.id);
   const showForecast = forecast && (status === 'live' || status === 'cached');
   const timezone = forecast?.timezone ?? region.timezone;
   const { date, clock } = useMemo(() => ({
@@ -39,7 +35,7 @@ export function WeatherControl({ weather, onOpenChange }: {
     return forecast?.days.find(day => day.date === dateKey) ?? sunTimes({ ...region, timezone }, frame.now);
   }, [forecast, frame.now, region, timezone]);
 
-  return <Dialog.Root onOpenChange={open => { setDraft(null); onOpenChange(open); }}>
+  return <Dialog.Root onOpenChange={onOpenChange}>
     <Dialog.Trigger asChild>
       <button type="button" className="icon-button weather-trigger" aria-label="지역 시간과 날씨" title="지역 시간과 날씨">
         <CloudSun size={19}/>
@@ -73,35 +69,35 @@ export function WeatherControl({ weather, onOpenChange }: {
         <div className="weather-settings">
           <div className="weather-region-fields">
           <label>시·도
-            <select value={province.id} onChange={event => {
-              cancelLocation();
-              const next = KOREA_PROVINCES.find(option => option.id === event.currentTarget.value);
-              if (!next) return;
-              if (next.direct) { setDraft(null); selectRegion(next.regions[0]); }
-              else setDraft({ provinceId: next.id, regionId: region.id });
+            <select value={applied.provinceId} onChange={event => {
+              const next = koreaRegionById(event.currentTarget.value);
+              if (next) selectRegion(next);
             }}>
               {KOREA_PROVINCES.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
-          {needsDistrict && <label>{province.direct ? '시·군·구 (선택)' : '시·군'}
-            <select value={districtValue} onChange={event => {
-              const next = province.regions.find(item => item.id === event.currentTarget.value);
-              if (next) { setDraft(null); selectRegion(next); }
-            }}>
-              <option value="" disabled>시·군을 선택해 주세요</option>
-              {province.regions.map(item => <option key={item.id} value={item.id}>{item.district ?? '대표 지역'}</option>)}
-            </select>
-          </label>}
+          {path.map((parent, index) => {
+            const options = koreaRegionChildren(parent.id);
+            if (!options.length) return null;
+            return <label key={parent.id}>{koreaChildLabel(options)}
+              <select value={path[index + 1]?.id ?? ''} onChange={event => {
+                const next = koreaRegionById(event.currentTarget.value || parent.id);
+                if (next) selectRegion(next);
+              }}>
+                <option value="">{parent.label} 대표 지점</option>
+                {options.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </label>;
+          })}
           </div>
-          <button type="button" className="weather-action" disabled={locating} onClick={() => { setDraft(null); useCurrentLocation(); }}>
+          <button type="button" className="weather-action" disabled={locating} onClick={useCurrentLocation}>
             <LocateFixed size={16}/>{locating ? '위치 확인 중…' : '현재 위치 사용'}
           </button>
         </div>
-        {needsDistrict && !districtValue && <p className="weather-note" role="status">시·군을 선택하면 날씨가 적용돼요.</p>}
         <p className="weather-note">{forecast?.source === 'kma'
           ? `비·눈과 기온은 기상청 관측 자료예요. ${forecast.skyKnown ? '구름 상태는 초단기예보로 보완해요.' : '구름 상태는 잠시 확인할 수 없어요.'} 관측·발표 시차와 동네별 차이가 있을 수 있어요.`
           : '기상청 연결이 어려우면 보조 예보를 표시해요. 예보 모델 자료라 실제 동네의 비·눈과 차이가 날 수 있어요.'}</p>
-        <p className="weather-note">현재 위치는 가까운 국내 지역의 대표 지점으로 연결돼요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
+        <p className="weather-note">현재 위치를 사용하면 가장 가까운 읍·면·동 지점의 기상청 격자 날씨를 적용해요. 약 5km 격자라 이웃 동네는 같은 날씨일 수 있어요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
         {error && <p className="weather-error" role="alert">{error}</p>}
         <footer>
           <div className="weather-sources"><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">날씨·지역 · 기상청</a>{forecast?.source !== 'kma' && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">보조 예보 · Open-Meteo</a>}</div>
