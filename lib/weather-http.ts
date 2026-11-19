@@ -1,7 +1,8 @@
 // Fixed upstream: clients can choose approximate coordinates, never a URL or API key.
 const TTL = 15 * 60_000;
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
-export function createWeatherHandler({ fetcher = fetch, now = Date.now }: { fetcher?: Fetcher; now?: () => number } = {}) {
+type WeatherFailure = { stage: 'fetch' | 'response' | 'decode'; status: number | null };
+export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFailure = failure => console.error('weather_fetch_failed', failure) }: { fetcher?: Fetcher; now?: () => number; reportFailure?: (failure: WeatherFailure) => void } = {}) {
   const cache = new Map<string, { until: number; body: string }>();
   const pending = new Map<string, Promise<string>>();
   return async function handleWeather(request: Request): Promise<Response> {
@@ -31,9 +32,13 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now }: { fetc
           const upstream = new URL('https://api.open-meteo.com/v1/forecast');
           upstream.search = new URLSearchParams({ latitude: String(latitude), longitude: String(longitude), current: 'temperature_2m,weather_code,cloud_cover,wind_speed_10m,is_day', daily: 'sunrise,sunset', timezone: 'auto', timeformat: 'unixtime', forecast_days: '2', wind_speed_unit: 'ms' }).toString();
           job = (async () => {
+            const failure: WeatherFailure = { stage: 'fetch', status: null };
+            try {
             const options: RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } } = { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cf: { cacheTtl: 900, cacheEverything: true } };
             const response = await fetcher(upstream.toString(), options);
+            failure.stage = 'response'; failure.status = response.status;
             if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error('Weather unavailable'); }
+            failure.stage = 'decode';
             const reader = response.body.getReader(); let size = 0, text = ''; const decoder = new TextDecoder();
             try {
               while (true) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > 64_000) throw new Error('Oversize weather'); text += decoder.decode(value, { stream: true }); }
@@ -46,6 +51,11 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now }: { fetc
             if (cache.size >= 256) cache.delete(cache.keys().next().value!);
             cache.set(key, { until: now() + TTL, body: result });
             return result;
+            } catch (error) {
+              // Never log coordinates, request headers or provider response bodies.
+              reportFailure(failure);
+              throw error;
+            }
           })();
           pending.set(key, job);
           void job.finally(() => pending.delete(key)).catch(() => {});

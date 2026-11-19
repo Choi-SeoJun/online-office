@@ -39,6 +39,15 @@ test('provider failure is not cached or exposed as invented weather', async () =
   assert.equal(response.status, 503); assert.equal((await response.text()).includes('private debug'), false);
   await handle(request()); assert.equal(calls, 2);
 });
+test('provider failures report their stage and status without private response data', async () => {
+  const failures: unknown[] = [];
+  const handle = createWeatherHandler({
+    fetcher: async () => new Response('private provider diagnostics', { status: 429 }),
+    reportFailure: failure => failures.push(failure),
+  });
+  assert.equal((await handle(request())).status, 503);
+  assert.deepEqual(failures, [{ stage: 'response', status: 429 }]);
+});
 test('weather endpoint accepts same origin and rejects unsupported methods', async () => {
   const handle = createWeatherHandler({ fetcher: async () => Response.json(payload) });
   assert.equal((await handle(request(undefined, 'https://office.test'))).status, 200);
