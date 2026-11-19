@@ -5,6 +5,9 @@ import { prepareCameraCutaways } from './camera-cutaway.ts';
 import { createEnvironmentScene, createOfficeWeather, outdoorParticleCount } from './environment-scene.ts';
 import type { EnvironmentFrame } from './environment-types.ts';
 import { batchArchitecture, isPointerEligible } from './scene.ts';
+import { DEFAULT_REGION, environmentFrame } from './environment.ts';
+import { requestForecast } from './weather-client.ts';
+import { watchLocalWeather } from './weather-refresh.ts';
 
 test('precipitation is bounded outdoors and honors graphics and motion settings', () => {
   assert.equal(outdoorParticleCount('rain', false, 'high', false), 0);
@@ -141,4 +144,52 @@ test('window weather freezes for reduced motion and throttles low quality while 
   assert.equal(texture.version, version, 'reduced motion retains a still weather image');
   weather.update({ ...night, precipitation: 'rain' }, { ...settings, reducedMotion: true }, 0);
   assert.ok(texture.version > version, 'weather changes do not wait for an animation tick');
+});
+
+test('automatic forecast refreshes start and stop office and roof precipitation without recreating either scene', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse('2026-11-19T03:00:00Z') });
+  stubCanvas();
+  const codes = [0, 61, 0, 71, 0];
+  let code = 0, calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    const time = Date.now() / 1000;
+    return Response.json({ timezone: 'Asia/Seoul',
+      current: { time, temperature_2m: 2, cloud_cover: code ? 90 : 10, wind_speed_10m: 2, weather_code: code, is_day: 1 },
+      daily: { time: [time], sunrise: [time - 20_000], sunset: [time + 20_000] },
+    });
+  });
+  const scene = new THREE.Scene(), roof = new THREE.Group(), office = new THREE.Group();
+  const outdoors = createEnvironmentScene(scene, roof, new THREE.HemisphereLight(), new THREE.DirectionalLight(), new THREE.Color(), new THREE.Color());
+  const indoors = createOfficeWeather();
+  indoors.addWindow(office, 0, 2, -5.875, 2.52, 1.5);
+  const pane = office.children[0] as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+  const texture = pane.material.map!;
+  const [rain, snow] = roof.children as [THREE.LineSegments, THREE.Points];
+  const settings = { quality: 'low' as const, reducedMotion: false, sound: false, volume: 0 };
+  const attempt = { lastAttempt: Date.now(), failures: 0, inFlight: false };
+  const window = Object.assign(new EventTarget(), { navigator: { onLine: true } });
+  const document = Object.assign(new EventTarget(), { hidden: false });
+  let pending = Promise.resolve();
+  const stop = watchLocalWeather({ window, document, getAttempt: () => attempt, onTick() {}, onRefresh() {
+    attempt.inFlight = true;
+    pending = requestForecast(DEFAULT_REGION, new AbortController().signal).then(forecast => {
+      attempt.lastAttempt = Date.now();
+      const frame = environmentFrame(DEFAULT_REGION, forecast, Date.now());
+      indoors.update(frame, settings, .05);
+      outdoors.update(frame, true, settings, .05);
+    }).finally(() => { attempt.inFlight = false; });
+  } });
+  t.after(() => { stop(); texture.dispose(); outdoors.dispose(); });
+  for (const next of codes) {
+    code = next;
+    const version = texture.version;
+    t.mock.timers.tick(5 * 60_000);
+    await pending;
+    assert.equal(rain.visible, code === 61);
+    assert.equal(snow.visible, code === 71);
+    assert.ok(texture.version > version, 'the existing office pane receives each new forecast');
+    assert.equal(pane.material.map, texture, 'weather changes reuse the scene texture');
+  }
+  assert.equal(calls, 5, 'the running game fetches automatically once per interval');
 });

@@ -68,6 +68,7 @@ export function WeatherControl({ weather, onOpenChange }: {
           <div><dt><Sunset size={16}/>일몰</dt><dd>{today.sunset === null ? '오늘 없음' : clock.format(today.sunset)}</dd></div>
         </dl>
         {showForecast && <p className="weather-note">날씨 업데이트 · {date.format(forecast.fetchedAt)} {clock.format(forecast.fetchedAt)}</p>}
+        <p className="weather-note">약 5분마다 새 날씨를 확인해요. 비·눈과 빗소리도 자동으로 바뀌어요.</p>
         <div className="weather-settings">
           <div className="weather-region-fields">
           <label>시·도

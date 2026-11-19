@@ -5,6 +5,7 @@ import { DEFAULT_REGION, environmentFrame } from '../game/environment.ts';
 import { nearestKoreaRegion } from '../game/korea-regions.ts';
 import type { WeatherForecast, WeatherRegion, WeatherStatus } from '../game/environment-types.ts';
 import { normalizeRegion, readForecast, readRegion, regionKey, requestForecast, saveForecast, saveRegion, usableForecast, WEATHER_CACHE_AGE } from '../game/weather-client.ts';
+import { watchLocalWeather } from '../game/weather-refresh.ts';
 
 const WEATHER_ERROR = '날씨 정보를 가져오지 못했어요. 잠시 후 다시 시도해 주세요.';
 const LOCATION_ERROR = '현재 위치를 확인할 수 없어요. 지역을 직접 선택해 주세요.';
@@ -19,6 +20,7 @@ export function useLocalWeather() {
   const selected = useRef(DEFAULT_REGION);
   const active = useRef<AbortController | null>(null);
   const lastAttempt = useRef(0);
+  const failures = useRef(0);
   const locationChoice = useRef(0);
   const lastForecast = useRef<{ region: string; forecast: WeatherForecast } | null>(null);
 
@@ -41,6 +43,7 @@ export function useLocalWeather() {
     if (cached) resolveTimezone(cached);
     if (!force && cached && timestamp - cached.fetchedAt < WEATHER_CACHE_AGE) {
       lastAttempt.current = cached.fetchedAt;
+      failures.current = 0;
       setWeather(previous => previous.forecast === cached && previous.status === 'live' ? previous : { forecast: cached, status: 'cached' });
       return;
     }
@@ -56,10 +59,13 @@ export function useLocalWeather() {
       resolveTimezone(forecast);
       lastForecast.current = { region: key, forecast };
       saveForecast(next, forecast);
+      failures.current = 0;
+      lastAttempt.current = forecast.fetchedAt;
       setWeather({ forecast, status: 'live' });
       setNow(Date.now());
     } catch {
       if (active.current !== controller) return;
+      failures.current++;
       const timestamp = Date.now();
       const fallback = usableForecast(cached, timestamp);
       setWeather({ forecast: fallback, status: fallback ? 'cached' : 'unavailable' });
@@ -78,6 +84,7 @@ export function useLocalWeather() {
     setLocating(false);
     setLocationError('');
     selected.current = next;
+    failures.current = 0;
     setRegion(next);
     saveRegion(next);
     void load(next);
@@ -115,28 +122,14 @@ export function useLocalWeather() {
     saveRegion(initial);
     void load(initial);
 
-    function tick() {
-      const timestamp = Date.now();
-      setNow(timestamp);
-      if (!document.hidden && timestamp - lastAttempt.current >= WEATHER_CACHE_AGE && !active.current) {
-        void load(selected.current);
-      }
-    }
-    function onOnline() {
-      void load(selected.current, true);
-    }
-    function onVisibility() {
-      if (document.hidden) return;
-      tick();
-      if (!active.current && Date.now() - lastAttempt.current >= 60000 && !readForecast(selected.current, Date.now())) onOnline();
-    }
-    const timer = window.setInterval(tick, 30000);
-    window.addEventListener('online', onOnline);
-    document.addEventListener('visibilitychange', onVisibility);
+    const stopWatching = watchLocalWeather({
+      window, document,
+      getAttempt: () => ({ lastAttempt: lastAttempt.current, failures: failures.current, inFlight: active.current !== null }),
+      onTick: setNow,
+      onRefresh: () => { void load(selected.current, true); },
+    });
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('online', onOnline);
-      document.removeEventListener('visibilitychange', onVisibility);
+      stopWatching();
       locationChoice.current++;
       const request = active.current;
       active.current = null;

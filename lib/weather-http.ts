@@ -1,7 +1,8 @@
 import { weatherProviderUrl } from '../game/weather-request.ts';
+import { WEATHER_REFRESH_INTERVAL } from '../game/weather-refresh.ts';
 
 // Fixed upstream: clients can choose approximate coordinates, never a URL or API key.
-const TTL = 15 * 60_000;
+const TTL = WEATHER_REFRESH_INTERVAL;
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 type WeatherFailure = { stage: 'fetch' | 'response' | 'decode'; status: number | null };
 export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFailure = failure => console.error('weather_fetch_failed', failure) }: { fetcher?: Fetcher; now?: () => number; reportFailure?: (failure: WeatherFailure) => void } = {}) {
@@ -35,7 +36,7 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFa
           job = (async () => {
             const failure: WeatherFailure = { stage: 'fetch', status: null };
             try {
-              const options: RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } } = { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cf: { cacheTtl: 900, cacheEverything: true } };
+              const options: RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } } = { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cf: { cacheTtl: TTL / 1000, cacheEverything: true } };
               const response = await fetcher(upstream.toString(), options);
               failure.stage = 'response'; failure.status = response.status;
               if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error('Weather unavailable'); }

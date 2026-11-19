@@ -24,13 +24,13 @@ test('invalid coordinates and foreign origins never reach upstream', async () =>
   assert.equal((await handle(request(undefined, 'https://evil.test'))).status, 403);
   assert.equal(calls, 0);
 });
-test('identical concurrent queries share an upstream request and expire after fifteen minutes', async () => {
+test('identical concurrent queries share an upstream request and expire after five minutes', async () => {
   let now = 1000, calls = 0;
   const handle = createWeatherHandler({ now: () => now, fetcher: async () => { calls++; return Response.json(payload); } });
   const results = await Promise.all([handle(request()), handle(request())]);
   assert.ok(results.every(r => r.status === 200)); assert.equal(calls, 1);
   await handle(request()); assert.equal(calls, 1);
-  now += 900001; await handle(request()); assert.equal(calls, 2);
+  now += 300001; await handle(request()); assert.equal(calls, 2);
 });
 test('provider failure is not cached or exposed as invented weather', async () => {
   let calls = 0;

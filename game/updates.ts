@@ -5,7 +5,9 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 // belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
   '2026-11-20': {
-    added: [],
+    added: [
+      '게임을 켜두면 약 5분마다 날씨를 확인해 사무실 창밖과 옥상의 비·눈, 빗소리를 자동으로 바꿔요. 다른 탭에서 돌아오거나 인터넷 연결이 복구돼도 새로고침 없이 이어져요.',
+    ],
     fixed: [
       '날씨를 계속 불러오지 못하던 문제를 고쳤어요. 날씨 연결 경로를 개선하고, 일시적인 연결 실패에는 다른 경로로 한 번 더 확인해요.',
     ],

@@ -3,8 +3,9 @@ import type { WeatherForecast, WeatherRegion } from './environment-types.ts';
 import { roomEndpoint } from './hosting.ts';
 import { koreaRegionById, legacyKoreaRegion, nearestKoreaRegion } from './korea-regions.ts';
 import { weatherProviderUrl } from './weather-request.ts';
+import { WEATHER_REFRESH_INTERVAL } from './weather-refresh.ts';
 
-export const WEATHER_CACHE_AGE = 15 * 60000;
+export const WEATHER_CACHE_AGE = WEATHER_REFRESH_INTERVAL;
 const REGION_KEY = 'office-weather-region-v1';
 const CACHE_KEY = 'office-weather-forecast-v1';
 
