@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_REGION, environmentFrame, parseWeatherForecast, sunTimes } from './environment.ts';
+import { DEFAULT_REGION, environmentFrame, forecastLabel, parseWeatherForecast, sunTimes } from './environment.ts';
 import { normalizeRegion, readForecast, requestForecast, saveForecast, saveRegion, usableForecast } from './weather-client.ts';
 
 const noon = Date.parse('2026-06-21T03:00:00Z');
@@ -29,6 +29,16 @@ test('parses Unix timestamps and rejects invalid current weather', () => {
   assert.equal(parseWeatherForecast({ ...raw, daily: { ...raw.daily, sunset: [null] } }, noon)?.days[0].sunset, null);
   assert.equal(usableForecast(forecast, noon + 121 * 60000), null);
   assert.equal(usableForecast({ ...forecast, fetchedAt: noon + 1 }, noon), null);
+});
+
+test('KMA attribution requires valid metadata and does not describe unknown sky as clear', () => {
+  const kma = { ...raw, source: 'kma', kmaPty: 0, skyKnown: false };
+  assert.equal(forecastLabel(parseWeatherForecast(kma, noon)!), '강수 없음');
+  assert.equal(forecastLabel(parseWeatherForecast({ ...kma, kmaPty: 2 }, noon)!), '비·눈');
+  for (const altered of [{ source: 'other' }, { kmaPty: null }, { kmaPty: 8 }, { kmaPty: 1.5 }, { skyKnown: null }]) {
+    assert.equal(parseWeatherForecast({ ...kma, ...altered }, noon), null);
+  }
+  assert.equal(parseWeatherForecast(raw, noon)?.source, 'open-meteo');
 });
 
 test('location is converted to a domestic representative point before reuse', () => {
@@ -62,6 +72,13 @@ test('browser cache is bounded, matches the region and stores rounded coordinate
   assert.equal(readForecast(chosen, noon), null);
   assert.deepEqual(readForecast(DEFAULT_REGION, noon), forecast);
   assert.equal(readForecast(DEFAULT_REGION, noon + 121 * 60000), null);
+  const observed = parseWeatherForecast({ ...raw, source: 'kma', kmaPty: 3, skyKnown: true, current: { ...raw.current, weather_code: 73 } }, noon)!;
+  saveForecast(DEFAULT_REGION, observed);
+  const restored = readForecast(DEFAULT_REGION, noon)!;
+  assert.equal(restored.source, 'kma'); assert.equal(restored.kmaPty, 3);
+  assert.equal(environmentFrame(DEFAULT_REGION, restored, noon).precipitation, 'snow');
+  saveForecast(DEFAULT_REGION, { ...observed, kmaPty: 99 });
+  assert.equal(readForecast(DEFAULT_REGION, noon), null);
 });
 
 test('weather requests transmit rounded coordinates and omit credentials and referrer', async (t) => {
@@ -74,12 +91,11 @@ test('weather requests transmit rounded coordinates and omit credentials and ref
   t.mock.method(Date, 'now', () => noon);
   const controller = new AbortController();
   t.mock.method(globalThis, 'fetch', async (url: URL, options: RequestInit) => {
-    assert.equal(url.origin, 'https://api.open-meteo.com');
-    assert.equal(url.pathname, '/v1/forecast');
+    assert.equal(url.origin, 'https://example.com');
+    assert.equal(url.pathname, '/api/weather');
     assert.equal(url.searchParams.get('latitude'), '36.79');
-    assert.equal(url.searchParams.get('longitude'), '127');
-    assert.equal(url.searchParams.get('timeformat'), 'unixtime');
-    assert.equal(url.searchParams.get('wind_speed_unit'), 'ms');
+    assert.equal(url.searchParams.get('longitude'), '127.00');
+    assert.equal(url.searchParams.has('serviceKey'), false);
     assert.equal(options.signal?.aborted, false);
     assert.equal(options.credentials, 'omit');
     assert.equal(options.referrerPolicy, 'no-referrer');

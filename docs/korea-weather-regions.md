@@ -2,7 +2,7 @@
 
 Source: Korea Meteorological Administration (기상청), **기상청41_단기예보 조회서비스_오픈API활용가이드_격자_위경도(2610).xlsx**, sheet `최종 업데이트 파일_20260930`, downloaded 2026-11-13 from the [official public data portal](https://www.data.go.kr/data/15084084/openapi.do). Portal attachment `FILE_000000007732424`, detail `1`, ZIP SHA-256 `9dfd7dc2d422318154d3484fb00142afa3c5271fc14d079adf997043a14b86ba`.
 
-The portal permits reuse with source attribution (Public Nuri Type 1, as indicated on its listing). Visible attribution is included in the weather panel. These are **region representative points**, not surveyed boundaries or exact local observations. Actual weather continues to use Open-Meteo's model data.
+The portal permits reuse with source attribution (Public Nuri Type 1, as indicated on its listing). Visible attribution is included in the weather panel. These are **region representative points**, not surveyed boundaries or exact local observations. Current precipitation now uses KMA observations; see [KMA weather](kma-weather.md). Open-Meteo is the explicitly labelled fallback.
 
 The generated `game/korea-region-points.ts` selects `kor` rows, omits marine-only Ieodo, and uses province and second-level administrative rows. A city split into non-autonomous districts is combined into a single city; its coordinate is the arithmetic mean of those district representative points. Coordinates are rounded to two decimals. Seoul and ordinary metropolitan cities, plus Sejong, are direct choices. Jeju provides Jeju-si and Seogwipo-si.
 

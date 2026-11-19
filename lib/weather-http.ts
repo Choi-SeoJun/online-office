@@ -1,13 +1,17 @@
 import { weatherProviderUrl } from '../game/weather-request.ts';
 import { WEATHER_REFRESH_INTERVAL } from '../game/weather-refresh.ts';
+import { KOREA_REGIONS } from '../game/korea-regions.ts';
+import { createKmaWeather } from './kma-weather.ts';
 
 // Fixed upstream: clients can choose approximate coordinates, never a URL or API key.
 const TTL = WEATHER_REFRESH_INTERVAL;
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
-type WeatherFailure = { stage: 'fetch' | 'response' | 'decode'; status: number | null };
-export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFailure = failure => console.error('weather_fetch_failed', failure) }: { fetcher?: Fetcher; now?: () => number; reportFailure?: (failure: WeatherFailure) => void } = {}) {
+type WeatherFailure = { stage: 'fetch' | 'response' | 'decode' | 'kma'; status: number | null };
+export function createWeatherHandler({ fetcher = fetch, now = Date.now, getApiKey = () => undefined, reportFailure = failure => console.error('weather_fetch_failed', failure) }: { fetcher?: Fetcher; now?: () => number; getApiKey?: () => string | undefined; reportFailure?: (failure: WeatherFailure) => void } = {}) {
   const cache = new Map<string, { until: number; body: string }>();
   const pending = new Map<string, Promise<string>>();
+  const failedUntil = new Map<string, number>();
+  const loadKma = createKmaWeather({ fetcher, now });
   return async function handleWeather(request: Request): Promise<Response> {
     const url = new URL(request.url), origin = request.headers.get('origin');
     const allowed = origin === null || origin === url.origin || origin === 'https://choi-seojun.github.io';
@@ -24,7 +28,11 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFa
     };
     const latitude = coordinate('latitude', 90), longitude = coordinate('longitude', 180);
     if (latitude === null || longitude === null) return fail(400);
+    const region = KOREA_REGIONS.find(region => region.latitude === latitude && region.longitude === longitude);
+    if (!region) return fail(400);
     const key = `${latitude},${longitude}`;
+    if ((failedUntil.get(key) ?? 0) > now()) return fail(503);
+    failedUntil.delete(key);
     try {
       let body = cache.get(key);
       if (body && body.until <= now()) { cache.delete(key); body = undefined; }
@@ -36,6 +44,14 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFa
           job = (async () => {
             const failure: WeatherFailure = { stage: 'fetch', status: null };
             try {
+              const apiKey = getApiKey()?.trim();
+              if (apiKey) {
+                failure.stage = 'kma';
+                const result = JSON.stringify(await loadKma(region, apiKey));
+                if (cache.size >= 256) cache.delete(cache.keys().next().value!);
+                cache.set(key, { until: now() + TTL, body: result });
+                return result;
+              }
               const options: RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } } = { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cf: { cacheTtl: TTL / 1000, cacheEverything: true } };
               const response = await fetcher(upstream.toString(), options);
               failure.stage = 'response'; failure.status = response.status;
@@ -49,13 +65,15 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFa
               const data = JSON.parse(text);
               if (!data || typeof data !== 'object' || !data.current || !data.daily || typeof data.timezone !== 'string') throw new Error('Invalid weather');
               // No coordinates or provider diagnostics need to be returned to the UI.
-              const result = JSON.stringify({ timezone: data.timezone, current: data.current, daily: data.daily });
+              const result = JSON.stringify({ source: 'open-meteo', timezone: data.timezone, current: data.current, daily: data.daily });
               if (cache.size >= 256) cache.delete(cache.keys().next().value!);
               cache.set(key, { until: now() + TTL, body: result });
               return result;
             } catch (error) {
               // Never log coordinates, request headers or provider response bodies.
               reportFailure(failure);
+              if (failedUntil.size >= 256) failedUntil.delete(failedUntil.keys().next().value!);
+              failedUntil.set(key, now() + 30000);
               throw error;
             }
           })();
@@ -70,4 +88,3 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFa
     } catch { return fail(503); }
   };
 }
-export const handleWeatherRequest = createWeatherHandler();

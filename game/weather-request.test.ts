@@ -16,19 +16,19 @@ function setup(t: TestContext) {
   t.after(() => { if (previous) Object.defineProperty(globalThis, 'window', previous); else Reflect.deleteProperty(globalThis, 'window'); });
 }
 
-test('working public API does not depend on a rate-limited hosting server', async t => {
+test('KMA server is preferred so model cloud cannot override observed snow', async t => {
   setup(t);
   const calls: string[] = [];
   t.mock.method(globalThis, 'fetch', async (url: URL) => {
     calls.push(url.origin);
-    return url.origin === 'https://api.open-meteo.com' ? Response.json(payload) : new Response(null, { status: 503 });
+    return Response.json({ ...payload, source: 'kma', kmaPty: 3, skyKnown: true, current: { ...payload.current, weather_code: 73 } });
   });
   assert.equal((await requestForecast(DEFAULT_REGION, new AbortController().signal)).temperature, 4.6);
-  assert.deepEqual(calls, ['https://api.open-meteo.com']);
+  assert.deepEqual(calls, ['https://office.test']);
 });
 
 for (const failure of ['network', 'unavailable', 'invalid', 'stale'] as const) {
-  test(`${failure} direct response falls back to the existing server once`, async t => {
+  test(`${failure} KMA response falls back to the model once with source attribution`, async t => {
     setup(t);
     const calls: URL[] = [];
     t.mock.method(globalThis, 'fetch', async (url: URL, options: RequestInit) => {
@@ -42,13 +42,13 @@ for (const failure of ['network', 'unavailable', 'invalid', 'stale'] as const) {
       return Response.json({ ...payload, current: { ...payload.current, time: now / 1000 - 3 * 3600 } });
     });
     assert.equal((await requestForecast(DEFAULT_REGION, new AbortController().signal)).code, 51);
-    assert.equal(calls[0].origin, 'https://api.open-meteo.com');
-    assert.equal(calls[1].href, 'https://office.test/api/weather?latitude=37.56&longitude=126.98');
+    assert.equal(calls[0].href, 'https://office.test/api/weather?latitude=37.56&longitude=126.98');
+    assert.equal(calls[1].origin, 'https://api.open-meteo.com');
     assert.equal(calls.length, 2);
   });
 }
 
-test('direct request timeout leaves time for the server fallback', async t => {
+test('KMA timeout leaves time for the public model fallback', async t => {
   setup(t);
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let calls = 0;
@@ -57,7 +57,7 @@ test('direct request timeout leaves time for the server fallback', async t => {
     return new Promise<Response>((_resolve, reject) => options.signal!.addEventListener('abort', () => reject(options.signal!.reason), { once: true }));
   });
   const job = requestForecast(DEFAULT_REGION, new AbortController().signal);
-  t.mock.timers.tick(6000);
+  t.mock.timers.tick(8500);
   assert.equal((await job).temperature, 4.6);
   assert.equal(calls, 2);
 });

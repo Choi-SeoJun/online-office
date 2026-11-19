@@ -154,7 +154,7 @@ test('automatic forecast refreshes start and stop office and roof precipitation 
   t.mock.method(globalThis, 'fetch', async () => {
     calls++;
     const time = Date.now() / 1000;
-    return Response.json({ timezone: 'Asia/Seoul',
+    return Response.json({ source: 'kma', kmaPty: code === 61 ? 1 : code === 71 ? 7 : 0, skyKnown: true, timezone: 'Asia/Seoul',
       current: { time, temperature_2m: 2, cloud_cover: code ? 90 : 10, wind_speed_10m: 2, weather_code: code, is_day: 1 },
       daily: { time: [time], sunrise: [time - 20_000], sunset: [time + 20_000] },
     });
@@ -168,7 +168,10 @@ test('automatic forecast refreshes start and stop office and roof precipitation 
   const [rain, snow] = roof.children as [THREE.LineSegments, THREE.Points];
   const settings = { quality: 'low' as const, reducedMotion: false, sound: false, volume: 0 };
   const attempt = { lastAttempt: Date.now(), failures: 0, inFlight: false };
-  const window = Object.assign(new EventTarget(), { navigator: { onLine: true } });
+  const window = Object.assign(new EventTarget(), { navigator: { onLine: true }, location: { href: 'https://office.test/' } });
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: window });
+  t.after(() => { if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow); else Reflect.deleteProperty(globalThis, 'window'); });
   const document = Object.assign(new EventTarget(), { hidden: false });
   let pending = Promise.resolve();
   const stop = watchLocalWeather({ window, document, getAttempt: () => attempt, onTick() {}, onRefresh() {

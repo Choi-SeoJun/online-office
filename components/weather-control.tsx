@@ -3,7 +3,7 @@
 import { CloudSun, LocateFixed, RefreshCw, Sunrise, Sunset, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Dialog } from 'radix-ui';
-import { localDate, sunTimes, weatherLabel } from '@/game/environment';
+import { localDate, sunTimes, forecastLabel } from '@/game/environment';
 import { KOREA_PROVINCES, koreaRegionById } from '@/game/korea-regions';
 import type { useLocalWeather } from '@/hooks/use-local-weather';
 import './weather-control.css';
@@ -59,7 +59,8 @@ export function WeatherControl({ weather, onOpenChange }: {
           <CloudSun size={30} aria-hidden="true"/>
           <div>
             <strong>{region.name}{region.source === 'default' && ' (기본)'}</strong>
-            {showForecast && <span>{weatherLabel(forecast.code)} · {Math.round(forecast.temperature)}°C</span>}
+            {showForecast && <span>{forecastLabel(forecast)} · {Math.round(forecast.temperature)}°C</span>}
+            {showForecast && <span>{forecast.source === 'kma' ? '기상청 초단기실황' : '보조 예보 · Open-Meteo'}</span>}
             {messages[status] && <span role="status">{messages[status]}</span>}
           </div>
         </div>
@@ -97,10 +98,13 @@ export function WeatherControl({ weather, onOpenChange }: {
           </button>
         </div>
         {needsDistrict && !districtValue && <p className="weather-note" role="status">시·군을 선택하면 날씨가 적용돼요.</p>}
-        <p className="weather-note">지역 대표 지점의 예보 모델 자료예요. 실제 동네의 비·눈과 차이가 날 수 있어요. 현재 위치도 가까운 국내 지역의 대표 지점으로 연결돼요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
+        <p className="weather-note">{forecast?.source === 'kma'
+          ? `비·눈과 기온은 기상청 관측 자료예요. ${forecast.skyKnown ? '구름 상태는 초단기예보로 보완해요.' : '구름 상태는 잠시 확인할 수 없어요.'} 관측·발표 시차와 동네별 차이가 있을 수 있어요.`
+          : '기상청 연결이 어려우면 보조 예보를 표시해요. 예보 모델 자료라 실제 동네의 비·눈과 차이가 날 수 있어요.'}</p>
+        <p className="weather-note">현재 위치는 가까운 국내 지역의 대표 지점으로 연결돼요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
         {error && <p className="weather-error" role="alert">{error}</p>}
         <footer>
-          <div className="weather-sources"><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">날씨 · Open-Meteo</a><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">지역 자료 · 기상청</a></div>
+          <div className="weather-sources"><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">날씨·지역 · 기상청</a>{forecast?.source !== 'kma' && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">보조 예보 · Open-Meteo</a>}</div>
           <button type="button" className="weather-action" disabled={status === 'loading'} onClick={refresh}><RefreshCw size={14}/>새로고침</button>
         </footer>
       </Dialog.Content>

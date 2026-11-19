@@ -45,6 +45,8 @@ export const regionKey = (region: WeatherRegion) => [region.latitude.toFixed(2),
 export function readForecast(region: WeatherRegion, now: number) {
   const cached = read(CACHE_KEY) as { region?: unknown; forecast?: Partial<WeatherForecast> } | null;
   const forecast = cached?.forecast;
+  if (forecast?.source !== undefined && forecast.source !== 'kma' && forecast.source !== 'open-meteo') return null;
+  if (forecast?.source === 'kma' && (!boundedNumber(forecast.kmaPty, 0, 7) || !Number.isInteger(forecast.kmaPty) || typeof forecast.skyKnown !== 'boolean')) return null;
   if (cached?.region !== regionKey(region) || !forecast ||
       !boundedNumber(forecast.fetchedAt, 0, now) || !boundedNumber(forecast.observedAt, 0, now + 30 * 60000) ||
       !boundedNumber(forecast.temperature, -150, 100) || !boundedNumber(forecast.code, 0, 99) || !validWeatherCode(forecast.code) ||
@@ -90,17 +92,16 @@ async function fetchForecast(url: URL, signal: AbortSignal, timeout: number) {
 export async function requestForecast(region: WeatherRegion, signal: AbortSignal) {
   const normalized = normalizeRegion(region);
   if (!normalized) throw new Error('Invalid weather region');
-  // The hosted Worker shares provider quotas with other hosted traffic. Prefer
-  // the public CORS API so a hosting-side 429 cannot break everyone's weather.
+  // KMA observations must win over model weather. Its key stays on the Worker.
+  const url = new URL('/api/weather', new URL(roomEndpoint(), window.location.href));
+  url.searchParams.set('latitude', normalized.latitude.toFixed(2));
+  url.searchParams.set('longitude', normalized.longitude.toFixed(2));
   try {
-    return await fetchForecast(weatherProviderUrl(normalized.latitude, normalized.longitude), signal, 6000);
+    return await fetchForecast(url, signal, 8500);
   } catch (error) {
     signal.throwIfAborted();
-    // Respect the visitor's provider limit; don't retry it via another route.
+    // Respect a server rate limit; ordinary upstream failures are returned as 503.
     if (error instanceof WeatherRateLimitError) throw error;
-    const url = new URL('/api/weather', new URL(roomEndpoint(), window.location.href));
-    url.searchParams.set('latitude', normalized.latitude.toFixed(2));
-    url.searchParams.set('longitude', normalized.longitude.toFixed(2));
-    return fetchForecast(url, signal, 7000);
+    return fetchForecast(weatherProviderUrl(normalized.latitude, normalized.longitude), signal, 6000);
   }
 }

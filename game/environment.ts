@@ -17,6 +17,13 @@ const labels: ReadonlyMap<number, string> = new Map([
 const snow = new Set([71, 73, 75, 77, 85, 86]);
 const rain = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
 export const weatherLabel = (code: number) => labels.get(code) ?? '알 수 없음';
+export function forecastLabel(forecast: WeatherForecast) {
+  if (forecast.source === 'kma') {
+    if (forecast.kmaPty === 0) return forecast.skyKnown ? weatherLabel(forecast.code) : '강수 없음';
+    return ['강수 없음', '비', '비·눈', '눈', '소나기', '빗방울', '빗방울·눈날림', '눈날림'][forecast.kmaPty ?? -1] ?? weatherLabel(forecast.code);
+  }
+  return weatherLabel(forecast.code);
+}
 export const validWeatherCode = (code: number) => labels.has(code);
 export const MAX_FORECAST_AGE = 2 * 3600000;
 
@@ -85,7 +92,9 @@ export const boundedNumber = (value: unknown, min: number, max: number): value i
 const unix = (value: unknown): value is number => boundedNumber(value, 0, 8.64e12) && Number.isInteger(value);
 
 export function parseWeatherForecast(raw: unknown, now = Date.now()): WeatherForecast | null {
-  const { timezone, current, daily } = record(raw);
+  const { timezone, current, daily, source, kmaPty, skyKnown } = record(raw);
+  if (source !== undefined && source !== 'kma' && source !== 'open-meteo') return null;
+  if (source === 'kma' && (!boundedNumber(kmaPty, 0, 7) || !Number.isInteger(kmaPty) || typeof skyKnown !== 'boolean')) return null;
   const { time: observed, temperature_2m: temperature, weather_code: code, cloud_cover: cloud, wind_speed_10m: wind, is_day: isDay } = record(current);
   const { time, sunrise, sunset } = record(daily);
   if (!validTimezone(timezone) || !unix(observed) || observed * 1000 > now + 30 * 60000 ||
@@ -104,5 +113,6 @@ export function parseWeatherForecast(raw: unknown, now = Date.now()): WeatherFor
         (index > 0 && days[index - 1].date >= date)) return null;
     days.push({ date, sunrise: rise === null ? null : rise * 1000, sunset: set === null ? null : set * 1000 });
   }
-  return { fetchedAt: now, observedAt: observed * 1000, temperature, code, cloud, wind, timezone, days };
+  return { fetchedAt: now, observedAt: observed * 1000, temperature, code, cloud, wind, timezone, days,
+    source: source === 'kma' ? 'kma' : 'open-meteo', ...(source === 'kma' ? { kmaPty: kmaPty as number, skyKnown: skyKnown as boolean } : {}) };
 }
