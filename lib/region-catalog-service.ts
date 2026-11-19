@@ -8,6 +8,7 @@ export type RegionBucket = {
 export type CatalogStatus = { catalog:RegionCatalog; checkedAt:number; lastSuccessAt:number; nextCheckAt:number; status:'bundled'|'current'|'stale' };
 const STORAGE_KEY='public-weather/regions-v1.json';
 const day=86400000;
+const retryAt=(status:CatalogStatus)=>status.status==='stale' && !status.lastSuccessAt ? Math.min(status.nextCheckAt,status.checkedAt+300000) : status.nextCheckAt;
 function nextCheck(now:number) { const offset=6*3600000; return Math.floor((now+offset)/day)*day+day-offset; } // next 03:00 KST
 
 export function createRegionCatalogService({bucket,now=Date.now,fetchCatalog}:{bucket:RegionBucket;now?:()=>number;fetchCatalog:(previous:RegionCatalog,now:number)=>Promise<RegionCatalog>}) {
@@ -29,6 +30,7 @@ export function createRegionCatalogService({bucket,now=Date.now,fetchCatalog}:{b
         }
       } catch { /* A storage outage must not remove the working catalog. */ }
       memory ??= {catalog:regionCatalogSnapshot(),checkedAt:0,lastSuccessAt:0,nextCheckAt:0,status:'bundled'};
+      memory.nextCheckAt=retryAt(memory);
       loadedAt=now(); return memory;
     })();
     try{return await reading;}finally{reading=null;}
@@ -44,7 +46,7 @@ export function createRegionCatalogService({bucket,now=Date.now,fetchCatalog}:{b
         if(!next || next.sourceDate<previous.catalog.sourceDate)throw Error('Invalid revision');
         result={catalog:next,checkedAt:timestamp,lastSuccessAt:timestamp,nextCheckAt:nextCheck(timestamp),status:'current'};
       }catch{
-        result={...previous,checkedAt:timestamp,nextCheckAt:timestamp+3600000,status:'stale'};
+        result={...previous,checkedAt:timestamp,nextCheckAt:timestamp+(previous.lastSuccessAt?3600000:300000),status:'stale'};
       }
       try{
         // Compare-and-swap prevents a slower isolate from replacing newer data,

@@ -58,3 +58,14 @@ test('an older failing isolate cannot overwrite a newer successful catalog betwe
   assert.equal(final.catalog.sourceDate,'2026-11-20');
   assert.equal(final.status,'current');
 });
+
+test('a first unsuccessful bootstrap recovers after five minutes without bypassing a successful daily check',async()=>{
+  let now=Date.parse('2026-11-20T10:00:00Z'),calls=0;
+  const catalog=regionCatalogSnapshot();
+  const {bucket}=memoryBucket(JSON.stringify({catalog,checkedAt:now,lastSuccessAt:0,nextCheckAt:now+3600000,status:'stale'}));
+  const service=createRegionCatalogService({bucket,now:()=>now,fetchCatalog:async(previous)=>{calls++;return previous;}});
+  assert.equal((await service.read()).nextCheckAt,now+300000);
+  await service.refresh();assert.equal(calls,0);
+  now+=300001;assert.equal((await service.refresh()).status,'current');assert.equal(calls,1);
+  now+=300001;await service.refresh();assert.equal(calls,1);
+});
