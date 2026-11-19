@@ -67,7 +67,7 @@ export function WeatherControl({ weather, onOpenChange }: {
           <div><dt><Sunrise size={16}/>일출</dt><dd>{today.sunrise === null ? '오늘 없음' : clock.format(today.sunrise)}</dd></div>
           <div><dt><Sunset size={16}/>일몰</dt><dd>{today.sunset === null ? '오늘 없음' : clock.format(today.sunset)}</dd></div>
         </dl>
-        {showForecast && <p className="weather-note">날씨 업데이트 · {date.format(forecast.fetchedAt)} {clock.format(forecast.fetchedAt)}</p>}
+        {showForecast && <p className="weather-note">날씨 자료 기준 · {date.format(forecast.observedAt)} {clock.format(forecast.observedAt)}<br/>마지막 확인 · {clock.format(forecast.fetchedAt)}</p>}
         <p className="weather-note">약 5분마다 새 날씨를 확인해요. 비·눈과 빗소리도 자동으로 바뀌어요.</p>
         <div className="weather-settings">
           <div className="weather-region-fields">
@@ -97,7 +97,7 @@ export function WeatherControl({ weather, onOpenChange }: {
           </button>
         </div>
         {needsDistrict && !districtValue && <p className="weather-note" role="status">시·군을 선택하면 날씨가 적용돼요.</p>}
-        <p className="weather-note">선택한 지역의 대표 지점 날씨예요. 현재 위치를 사용하면 가까운 국내 지역을 찾아요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
+        <p className="weather-note">지역 대표 지점의 예보 모델 자료예요. 실제 동네의 비·눈과 차이가 날 수 있어요. 현재 위치도 가까운 국내 지역의 대표 지점으로 연결돼요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
         {error && <p className="weather-error" role="alert">{error}</p>}
         <footer>
           <div className="weather-sources"><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">날씨 · Open-Meteo</a><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">지역 자료 · 기상청</a></div>

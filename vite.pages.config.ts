@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { appVersionPlugin } from './scripts/vite/app-version-plugin';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 
@@ -8,7 +9,7 @@ export default defineConfig({
   root: fileURLToPath(new URL('./web', import.meta.url)),
   base: '/online-office/',
   publicDir: fileURLToPath(new URL('./public', import.meta.url)),
-  plugins: [react()],
+  plugins: [react(), appVersionPlugin()],
   resolve: { alias: { '@': root } },
   css: { postcss: root },
   define: {

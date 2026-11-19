@@ -20,7 +20,15 @@ Pages HTML과 Sites 루트 metadata 모두 manifest와 Apple touch icon을 연�
 
 참고: [Chrome 설치 조건](https://web.dev/articles/install-criteria), [MDN start_url](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/start_url), [Apple 홈 화면 추가](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/ios).
 
-## 검증
+## 앱 업데이트
+
+재설치는 필요 없습니다. 빌드마다 클라이언트와 `app-version.json`에 같은 버전 ID를 넣습니다. 실행 시, 사용 중 5분마다, 앱으로 복귀하거나 인터넷이 복구될 때(1분 중복 방지) 캐시를 우회해 확인합니다. 앱을 처음 열고 아직 조작하지 않았다면 오래된 페이지를 한 번 새로 불러옵니다. 이미 사용 중이면 내용을 잃지 않도록 **업데이트 적용** 안내를 표시합니다. 안내를 접어도 작은 **새 버전** 버튼으로 다시 열 수 있습니다.
+
+적용할 때 현재 URL의 방 코드·모드를 보존하고 버전 쿼리로 HTML 캐시를 우회합니다. 새 코드가 실행되면 임시 버전 쿼리를 지웁니다. CDN이 오래된 페이지를 돌려줘도 같은 버전으로 자동 재시작을 반복하지 않습니다. 네트워크 오류는 조용히 재시도하며 게임을 막지 않습니다. 앱 이름·아이콘 메타데이터의 OS 반영 시점은 브라우저가 관리합니다.
+
+이번 버전 이전에 이미 켜둔 화면에는 아직 버전 확인 코드가 없으므로 한 번 새로 열어야 합니다. 그 뒤의 배포부터 위 동작이 적용됩니다.
+
+## 설치 흐름 검증
 
 `node --test game/app-install.test.ts game/app-manifest.test.ts`는 플랫폼 판별, 일회성 설치 이벤트, 취소·오류·중복 클릭, 설치/standalone 상태, 정리, 배포별 URL과 PNG 크기를 검사합니다.
 
