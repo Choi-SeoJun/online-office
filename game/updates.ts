@@ -6,6 +6,7 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
   '2026-11-20': {
     added: [
+      '온라인 회사를 홈 화면에 설치해 앱처럼 열 수 있어요. 시작 화면과 게임 메뉴의 앱 설치 버튼을 이용해 보세요. 아이폰에는 홈 화면에 추가하는 방법을 안내해 드려요.',
       '게임을 켜두면 약 5분마다 날씨를 확인해 사무실 창밖과 옥상의 비·눈, 빗소리를 자동으로 바꿔요. 다른 탭에서 돌아오거나 인터넷 연결이 복구돼도 새로고침 없이 이어져요.',
     ],
     fixed: [

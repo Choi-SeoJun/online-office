@@ -1,0 +1,18 @@
+.install-trigger{display:flex;align-items:center;gap:7px;font:inherit;color:#58755e;background:transparent;white-space:nowrap;cursor:pointer}
+.install-trigger.placement-card{width:100%;min-height:44px;padding:8px 0;margin-top:5px;font-size:14px;text-align:left}
+.install-trigger:disabled{opacity:.65;cursor:wait}
+.install-overlay{position:fixed;inset:0;z-index:440;background:#263d345e;backdrop-filter:blur(5px)}
+.install-dialog{box-sizing:border-box;position:fixed;z-index:441;left:50%;top:50%;transform:translate(-50%,-50%);width:min(480px,calc(100vw - 24px));max-height:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;border-radius:22px;border:1px solid #fffdf3;background:#fbfaf3;color:#345144;box-shadow:0 24px 90px #223e3533;font-family:inherit;outline:none}
+.install-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 24px 14px;flex:none;border-bottom:1px solid #e4e8da}
+.install-header h2{margin:0;font-size:23px;font-weight:750;letter-spacing:-.6px}
+.install-close{width:44px;height:44px;display:grid;place-items:center;flex:none;border-radius:12px;background:#eaf0e4;color:#42644e;cursor:pointer}
+.install-body{min-height:0;padding:24px;overflow-y:auto;overscroll-behavior:contain;font-size:16px;line-height:1.7;word-break:keep-all}
+.install-identity{display:flex;align-items:center;gap:14px;margin-bottom:20px}
+.install-identity img{flex:none;border-radius:15px}.install-identity strong{display:block;font-size:20px}.install-identity span{display:block;color:#65795b;font-size:14px;margin-top:2px}
+.install-description{margin:0 0 20px;color:#536d54;font-size:16px}
+.install-primary{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-height:48px;padding:11px 15px;border-radius:12px;background:#426f62;color:#fffdf3;font:inherit;font-size:16px;cursor:pointer}
+.install-primary:disabled{opacity:.7;cursor:wait}.install-status:empty{display:none}.install-status{font-size:14px;color:#4e6a4e;background:#edf2e6;padding:12px;border-radius:10px;margin:15px 0}
+.install-steps{padding:18px;background:#eef2e7;border-radius:14px;margin:18px 0}.install-steps h3{font-size:16px;margin:0 0 12px;font-weight:700}.install-steps ol{padding-left:22px;margin:0;list-style:decimal;display:grid;gap:12px}.install-steps li{padding-left:3px}.install-steps li::marker{font-weight:700;color:#426f62}.install-steps li svg{display:inline;vertical-align:-2px}.install-steps p{margin:0}.install-steps .install-hint{font-size:14px;color:#65795b;margin-top:16px}
+.install-copy{font-size:14px}.install-copy label{display:block;margin-bottom:7px;font-weight:600}.install-copy>div{display:flex;gap:6px;padding:5px;background:#fffef8;border:1px solid #d8e1cc;border-radius:10px}.install-copy input{min-width:0;flex:1;width:100%;font:inherit;font-size:14px;padding:8px;background:transparent;color:#345144;border:0}.install-copy button{display:flex;align-items:center;justify-content:center;gap:5px;flex:none;min-height:44px;padding:8px 10px;background:#e6edde;border-radius:8px;color:#42644e;font:inherit;cursor:pointer}.install-copy>span{display:block;color:#65795b;margin-top:5px}
+.install-footnote{font-size:14px;color:#65795b;margin:18px 0 0}.install-dialog :is(button,input):focus-visible,.install-trigger:focus-visible{outline:3px solid #8aa37c;outline-offset:3px}
+@media(max-width:420px){.install-header{padding:14px 18px 10px}.install-body{padding:18px}.install-header h2{font-size:21px}.install-copy>div{flex-wrap:wrap}.install-copy input{flex-basis:100%}.install-copy button{width:100%}}

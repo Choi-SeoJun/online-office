@@ -1,0 +1,17 @@
+{
+  "name": "온라인 회사 · 오늘도 적당히",
+  "short_name": "온라인 회사",
+  "description": "출근은 했고, 일은 모르겠고. 동료들과 잠깐 쉬어 가는 작은 3D 회사.",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#e7eae0",
+  "theme_color": "#426f62",
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "icons/office-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/office-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/office-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
