@@ -29,7 +29,8 @@ test('observed snow overrides cloudy sky and zero hourly precipitation without e
   const calls: URL[] = [];
   const load = createKmaWeather({ now: () => now, fetcher: async (url, options) => {
     calls.push(new URL(url));
-    assert.equal(options?.redirect, 'error');
+    // Workers reject redirect:error before making any network request.
+    assert.equal(options?.redirect, 'manual');
     return Response.json(payload(new URL(url)));
   } });
   const raw = await load(region, key);
@@ -41,6 +42,16 @@ test('observed snow overrides cloudy sky and zero hourly precipitation without e
   assert.ok(forecast.days[0].sunrise! < forecast.days[0].sunset!);
   assert.equal(JSON.stringify(raw).includes('secret'), false);
   assert.ok(calls.every(u => u.origin === 'https://apis.data.go.kr' && u.searchParams.get('serviceKey') === key));
+});
+test('KMA redirects are refused without following a key-bearing request', async () => {
+  let calls = 0;
+  const load = createKmaWeather({ now: () => now, fetcher: async (_input, options) => {
+    calls++;
+    assert.equal(options?.redirect, 'manual');
+    return new Response(null, { status: 302, headers: { Location: 'https://unexpected.test/' } });
+  } });
+  await assert.rejects(load(region, key));
+  assert.equal(calls, 2); // Only the original observation and forecast requests.
 });
 test('PTY maps rain, mixed precipitation, snow and cessation from observations', async () => {
   for (const [pty, expected] of [[0,'none'],[1,'rain'],[2,'snow'],[3,'snow'],[4,'rain'],[5,'rain'],[6,'snow'],[7,'snow']] as const) {

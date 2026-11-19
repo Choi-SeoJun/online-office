@@ -10,6 +10,7 @@ The server uses the public data portal's [기상청_단기예보 조회서비스
 - KMA observation source, PTY, sky availability and observation time survive local caching. Solar times use the existing local SunCalc calculation; KMA availability does not control day/night or seasons.
 - Clients check approximately every five minutes and prefer the server. If it fails, use the existing public Open-Meteo model endpoint once, explicitly labelled **보조 예보 · Open-Meteo**. A server rate limit is respected. A successful response does not mean minute-by-minute exact weather at a user's address.
 - Server results cache for five minutes; KMA calls also cache by operation/grid/base cycle and share in-flight requests. Bound all caches, concurrency, response size (64 KB) and upstream time (four seconds/call). Failures back off thirty seconds. Key-bearing redirects are refused; public errors/logs never include provider URLs, response bodies or keys.
+- Cloudflare Workers does not support `redirect: 'error'`; use `manual` and reject all non-2xx responses before parsing. This keeps the key on the fixed provider origin without a runtime `TypeError`. See [Workers Request API](https://developers.cloudflare.com/workers/runtime-apis/request/).
 
 ## Verification
 

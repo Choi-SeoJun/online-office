@@ -109,7 +109,7 @@ export function createKmaWeather({ fetcher = fetch, now = Date.now }: { fetcher?
         base_date: cycle.date, base_time: cycle.time, nx: String(grid.nx), ny: String(grid.ny) }).toString();
       try {
         const raw = await boundedJson(await fetcher(url.toString(), { headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(4000), redirect: 'error' }));
+          signal: AbortSignal.timeout(4000), redirect: 'manual' }));
         const data = rows(raw, cycle, grid, operation === 'getUltraSrtFcst');
         if (cache.size >= 512) cache.delete(cache.keys().next().value!);
         cache.set(id, { data, until: now() + (data ? 70 * MINUTE : 2 * MINUTE) });
