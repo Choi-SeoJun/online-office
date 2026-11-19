@@ -4,6 +4,12 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 // Changes from the previous 04:00 (inclusive) to this 04:00 (exclusive)
 // belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
+  '2026-11-20': {
+    added: [],
+    fixed: [
+      '날씨를 계속 불러오지 못하던 문제를 고쳤어요. 날씨 연결 경로를 개선하고, 일시적인 연결 실패에는 다른 경로로 한 번 더 확인해요.',
+    ],
+  },
   '2026-11-17': {
     added: [
       '옥상 안내 배너에 숨기기·다시 보기 버튼을 넣었어요. 모바일에서도 화면을 더 넓게 보며 쉴 수 있어요.',

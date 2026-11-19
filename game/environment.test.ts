@@ -74,8 +74,13 @@ test('weather requests transmit rounded coordinates and omit credentials and ref
   t.mock.method(Date, 'now', () => noon);
   const controller = new AbortController();
   t.mock.method(globalThis, 'fetch', async (url: URL, options: RequestInit) => {
-    assert.equal(url.href, 'https://example.com/api/weather?latitude=36.79&longitude=127.00');
-    assert.equal(options.signal, controller.signal);
+    assert.equal(url.origin, 'https://api.open-meteo.com');
+    assert.equal(url.pathname, '/v1/forecast');
+    assert.equal(url.searchParams.get('latitude'), '36.79');
+    assert.equal(url.searchParams.get('longitude'), '127');
+    assert.equal(url.searchParams.get('timeformat'), 'unixtime');
+    assert.equal(url.searchParams.get('wind_speed_unit'), 'ms');
+    assert.equal(options.signal?.aborted, false);
     assert.equal(options.credentials, 'omit');
     assert.equal(options.referrerPolicy, 'no-referrer');
     return Response.json(raw);

@@ -2,6 +2,7 @@ import { boundedNumber, DEFAULT_REGION, MAX_FORECAST_AGE, parseWeatherForecast, 
 import type { WeatherForecast, WeatherRegion } from './environment-types.ts';
 import { roomEndpoint } from './hosting.ts';
 import { koreaRegionById, legacyKoreaRegion, nearestKoreaRegion } from './korea-regions.ts';
+import { weatherProviderUrl } from './weather-request.ts';
 
 export const WEATHER_CACHE_AGE = 15 * 60000;
 const REGION_KEY = 'office-weather-region-v1';
@@ -58,16 +59,47 @@ export function saveForecast(region: WeatherRegion, forecast: WeatherForecast) {
   write(CACHE_KEY, { region: regionKey(region), forecast });
 }
 
+class WeatherRateLimitError extends Error {}
+
+async function fetchForecast(url: URL, signal: AbortSignal, timeout: number) {
+  signal.throwIfAborted();
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  signal.addEventListener('abort', cancel, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error('Weather request timed out')), timeout);
+  try {
+    const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      if (response.status === 429) throw new WeatherRateLimitError('Weather rate limit');
+      throw new Error('Weather request failed');
+    }
+    const data: unknown = await response.json();
+    controller.signal.throwIfAborted();
+    const now = Date.now();
+    const forecast = usableForecast(parseWeatherForecast(data, now), now);
+    if (!forecast) throw new Error('Invalid or expired weather');
+    return forecast;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', cancel);
+  }
+}
+
 export async function requestForecast(region: WeatherRegion, signal: AbortSignal) {
   const normalized = normalizeRegion(region);
   if (!normalized) throw new Error('Invalid weather region');
-  const url = new URL('/api/weather', new URL(roomEndpoint(), window.location.href));
-  url.searchParams.set('latitude', normalized.latitude.toFixed(2));
-  url.searchParams.set('longitude', normalized.longitude.toFixed(2));
-  const response = await fetch(url, { signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
-  if (!response.ok) throw new Error('Weather request failed');
-  const now = Date.now();
-  const forecast = usableForecast(parseWeatherForecast(await response.json(), now), now);
-  if (!forecast) throw new Error('Invalid or expired weather');
-  return forecast;
+  // The hosted Worker shares provider quotas with other hosted traffic. Prefer
+  // the public CORS API so a hosting-side 429 cannot break everyone's weather.
+  try {
+    return await fetchForecast(weatherProviderUrl(normalized.latitude, normalized.longitude), signal, 6000);
+  } catch (error) {
+    signal.throwIfAborted();
+    // Respect the visitor's provider limit; don't retry it via another route.
+    if (error instanceof WeatherRateLimitError) throw error;
+    const url = new URL('/api/weather', new URL(roomEndpoint(), window.location.href));
+    url.searchParams.set('latitude', normalized.latitude.toFixed(2));
+    url.searchParams.set('longitude', normalized.longitude.toFixed(2));
+    return fetchForecast(url, signal, 7000);
+  }
 }

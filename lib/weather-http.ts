@@ -1,3 +1,5 @@
+import { weatherProviderUrl } from '../game/weather-request.ts';
+
 // Fixed upstream: clients can choose approximate coordinates, never a URL or API key.
 const TTL = 15 * 60_000;
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
@@ -29,28 +31,27 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, reportFa
         let job = pending.get(key);
         if (!job) {
           if (pending.size >= 20) return fail(503);
-          const upstream = new URL('https://api.open-meteo.com/v1/forecast');
-          upstream.search = new URLSearchParams({ latitude: String(latitude), longitude: String(longitude), current: 'temperature_2m,weather_code,cloud_cover,wind_speed_10m,is_day', daily: 'sunrise,sunset', timezone: 'auto', timeformat: 'unixtime', forecast_days: '2', wind_speed_unit: 'ms' }).toString();
+          const upstream = weatherProviderUrl(latitude, longitude);
           job = (async () => {
             const failure: WeatherFailure = { stage: 'fetch', status: null };
             try {
-            const options: RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } } = { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cf: { cacheTtl: 900, cacheEverything: true } };
-            const response = await fetcher(upstream.toString(), options);
-            failure.stage = 'response'; failure.status = response.status;
-            if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error('Weather unavailable'); }
-            failure.stage = 'decode';
-            const reader = response.body.getReader(); let size = 0, text = ''; const decoder = new TextDecoder();
-            try {
-              while (true) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > 64_000) throw new Error('Oversize weather'); text += decoder.decode(value, { stream: true }); }
-              text += decoder.decode();
-            } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-            const data = JSON.parse(text);
-            if (!data || typeof data !== 'object' || !data.current || !data.daily || typeof data.timezone !== 'string') throw new Error('Invalid weather');
-            // No coordinates or provider diagnostics need to be returned to the UI.
-            const result = JSON.stringify({ timezone: data.timezone, current: data.current, daily: data.daily });
-            if (cache.size >= 256) cache.delete(cache.keys().next().value!);
-            cache.set(key, { until: now() + TTL, body: result });
-            return result;
+              const options: RequestInit & { cf: { cacheTtl: number; cacheEverything: boolean } } = { signal: AbortSignal.timeout(10_000), headers: { Accept: 'application/json' }, cf: { cacheTtl: 900, cacheEverything: true } };
+              const response = await fetcher(upstream.toString(), options);
+              failure.stage = 'response'; failure.status = response.status;
+              if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error('Weather unavailable'); }
+              failure.stage = 'decode';
+              const reader = response.body.getReader(); let size = 0, text = ''; const decoder = new TextDecoder();
+              try {
+                while (true) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > 64_000) throw new Error('Oversize weather'); text += decoder.decode(value, { stream: true }); }
+                text += decoder.decode();
+              } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+              const data = JSON.parse(text);
+              if (!data || typeof data !== 'object' || !data.current || !data.daily || typeof data.timezone !== 'string') throw new Error('Invalid weather');
+              // No coordinates or provider diagnostics need to be returned to the UI.
+              const result = JSON.stringify({ timezone: data.timezone, current: data.current, daily: data.daily });
+              if (cache.size >= 256) cache.delete(cache.keys().next().value!);
+              cache.set(key, { until: now() + TTL, body: result });
+              return result;
             } catch (error) {
               // Never log coordinates, request headers or provider response bodies.
               reportFailure(failure);
