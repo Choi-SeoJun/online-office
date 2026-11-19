@@ -20,19 +20,19 @@
 
 ## Task 1 — Installation lifecycle and metadata
 
-- [ ] Write and run failing `game/app-install.test.ts` lifecycle tests (native prompt, cancellation, error, repeated clicks, standalone, iPad, cleanup).
-- [ ] Implement `game/app-install.ts`: platform detection and an event-driven install controller, with synchronous prompt invocation from a click.
-- [ ] Add `public/manifest.webmanifest`, PNG icons from the existing favicon, Pages HTML links and Sites metadata. Test relative asset/start URLs and PNG dimensions.
+- [x] Write and run failing `game/app-install.test.ts` lifecycle tests (native prompt, cancellation, error, repeated clicks, standalone, iPad, cleanup).
+- [x] Implement `game/app-install.ts`: platform detection and an event-driven install controller, with synchronous prompt invocation from a click.
+- [x] Add `public/manifest.webmanifest`, PNG icons from the existing favicon, Pages HTML links and Sites metadata. Test relative asset/start URLs and PNG dimensions.
 
 ## Task 2 — Shared user interface
 
-- [ ] Add `components/app-install.tsx` and CSS: root provider and dialog/trigger. Native install when available; manual Android instructions otherwise; iPhone Share → Add to Home Screen → Open as Web App; copy address for in-app browsers.
-- [ ] Wrap `OfficeEntry` once; integrate `OfficeSupport` with dialog-open pause/auto-news guards.
-- [ ] Add release note. Verify desktop/mobile entry and in-game menu via local preview; validate iOS/native lifecycle using controlled inputs without claiming a physical-phone install.
+- [x] Add `components/app-install.tsx` and CSS: root provider and dialog/trigger. Native install when available; manual Android instructions otherwise; iPhone Share → Add to Home Screen → Open as Web App; copy address for in-app browsers.
+- [x] Wrap `OfficeEntry` once; integrate `OfficeSupport` with dialog-open pause/auto-news guards.
+- [x] Add release note. Verify desktop/mobile entry and in-game menu via local preview; validate iOS/native lifecycle using controlled inputs without claiming a physical-phone install.
 
 ## Task 3 — Verify and deploy
 
-- [ ] Run TypeScript, full Node suite, Pages and Sites builds.
-- [ ] Fresh read-only code review; resolve material findings.
+- [x] Run TypeScript, full Node suite, Pages and Sites builds.
+- [x] Fresh read-only code review; resolve material findings.
 - [ ] Commit, fast-forward main, push same source to GitHub and Sites; verify Pages Action and Sites deployment.
 - [ ] Check public manifest/icons and install UI; report physical-device verification limit.

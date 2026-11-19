@@ -22,7 +22,7 @@ export function AppInstallProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const next = createAppInstallController({
       events: window,
-      display: window.matchMedia('(display-mode: standalone), (display-mode: minimal-ui), (display-mode: fullscreen)'),
+      display: window.matchMedia('(display-mode: standalone), (display-mode: minimal-ui)'),
       navigator,
     });
     setController(next);
