@@ -7,6 +7,7 @@ import { batchArchitecture, createPantryDivider, isPointerEligible, targetSelect
 import { createEnvironmentScene, createOfficeWeather } from './environment-scene.ts';
 import type { EnvironmentFrame } from './environment-types.ts';
 import { animateRooftop, createRooftop, transitionOrbit } from './rooftop.ts';
+import { createWeatherPlayScene } from './weather-play-scene.ts';
 import { ROOF_BOUNDS, isRoofTarget, roofWallForTarget } from './layout.ts';
 import { remoteAnimationState } from './multi-animation.ts';
 import { chairSpinAngle } from './expression.ts';
@@ -174,6 +175,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   const initial = callbacks.getState(); let architecture = createMultiArchitecture(initial.layout, !!callbacks.getEnvironment); world.add(architecture.group);
   const wallBoard = createWallBoard(architecture.group, initial.layout.bounds);
   const roof = createRooftop(world, !!callbacks.getEnvironment), roofCutaways = prepareCameraCutaways(roof); batchArchitecture(roof); roof.visible = false;
+  const weatherPlay = createWeatherPlayScene(roof);
   const weather = callbacks.getEnvironment ? createEnvironmentScene(world, roof, ambient, sun, officeColor, roofColor) : undefined;
   let capacity = initial.layout.capacity, width = 1, height = 1, zoomLevel = 1, orbit = 0, userOrbit = 0, desiredOrbit = 0, pitch = CAMERA_BASE_PITCH, desiredPitch = CAMERA_BASE_PITCH, elapsed = 0, lastTime = 0, frame = 0, dead = false, lastFloor = initial.game.floor;
   const qualityControl = createAdaptiveQuality(), applyQuality = createQualityApplicator(renderer, sun);
@@ -279,6 +281,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
         return { actor: context.player, context, floor: player.floor, boss: false };
       }),
     ];
+    weatherPlay.update(members.filter(member => !member.boss).map(member => member.context), effectSettings);
     const ids = new Set(members.map(({ actor }) => actor.id));
     for (const [id, entry] of rigs) if (!ids.has(id)) { entry.rig.root.removeFromParent(); retired.push(entry.rig.root); rigs.delete(id); bubbles.get(id)?.remove(); bubbles.delete(id); }
     members.forEach(({ actor, context, floor, boss }) => {
@@ -331,7 +334,7 @@ export function createMultiScene(host: HTMLElement, callbacks: MultiSceneCallbac
   try { render(performance.now()); callbacks.onReady(); } catch (error) { callbacks.onError(error instanceof Error ? error.message : '회사를 불러오지 못했어요.'); }
   return { zoom, rotate, tilt, resetView, screenToWorld: point => screenAxisToWorld(point, orbit), dispose() {
     dead = true; cancelAnimationFrame(frame); observer.disconnect();
-    weather?.dispose(); wallBoard.dispose();
+    weather?.dispose(); weatherPlay.dispose(); wallBoard.dispose();
     renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointermove', pointerMove); renderer.domElement.removeEventListener('pointerup', pointerUp); renderer.domElement.removeEventListener('pointercancel', pointerCancel); renderer.domElement.removeEventListener('lostpointercapture', pointerCancel); renderer.domElement.removeEventListener('wheel', wheel); renderer.domElement.removeEventListener('webglcontextlost', contextLoss); document.removeEventListener('visibilitychange', visibility);
     architecture.release(); retired.forEach(object => world.add(object)); rigs.forEach(({ rig }) => { if (!rig.root.parent) world.add(rig.root); });
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();

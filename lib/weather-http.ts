@@ -2,12 +2,13 @@ import { weatherProviderUrl } from '../game/weather-request.ts';
 import { WEATHER_REFRESH_INTERVAL } from '../game/weather-refresh.ts';
 import { KOREA_LEGACY_REGIONS, koreaRegionById } from '../game/korea-regions.ts';
 import { createKmaWeather } from './kma-weather.ts';
+import type { WeatherRegion } from '../game/environment-types.ts';
 
 // Fixed upstream: known region IDs (or legacy city coordinates), never a URL or API key.
 const TTL = WEATHER_REFRESH_INTERVAL;
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 type WeatherFailure = { stage: 'fetch' | 'response' | 'decode' | 'kma'; status: number | null };
-export function createWeatherHandler({ fetcher = fetch, now = Date.now, getApiKey = () => undefined, reportFailure = failure => console.error('weather_fetch_failed', failure) }: { fetcher?: Fetcher; now?: () => number; getApiKey?: () => string | undefined; reportFailure?: (failure: WeatherFailure) => void } = {}) {
+export function createWeatherHandler({ fetcher = fetch, now = Date.now, getApiKey = () => undefined, resolveRegion = async id => koreaRegionById(id), reportFailure = failure => console.error('weather_fetch_failed', failure) }: { fetcher?: Fetcher; now?: () => number; getApiKey?: () => string | undefined; resolveRegion?: (id:unknown)=>Promise<WeatherRegion|null>; reportFailure?: (failure: WeatherFailure) => void } = {}) {
   const cache = new Map<string, { until: number; body: string }>();
   const pending = new Map<string, Promise<string>>();
   const failedUntil = new Map<string, number>();
@@ -30,10 +31,10 @@ export function createWeatherHandler({ fetcher = fetch, now = Date.now, getApiKe
     if (ids.length > 1 || (ids.length && (url.searchParams.has('latitude') || url.searchParams.has('longitude')))) return fail(400);
     const oldLatitude = coordinate('latitude', 90), oldLongitude = coordinate('longitude', 180);
     const oldRegion = ids.length ? null : KOREA_LEGACY_REGIONS.find(region => region.latitude === oldLatitude && region.longitude === oldLongitude);
-    const region = koreaRegionById(ids.length ? ids[0] : oldRegion?.id);
+    const region = await resolveRegion(ids.length ? ids[0] : oldRegion?.id);
     if (!region) return fail(400);
     const { latitude, longitude } = region;
-    const key = region.id;
+    const key = `${region.id}:${region.grid?.nx ?? region.latitude}:${region.grid?.ny ?? region.longitude}`;
     if ((failedUntil.get(key) ?? 0) > now()) return fail(503);
     failedUntil.delete(key);
     try {

@@ -11,6 +11,18 @@ const advance = (kind: 'none' | 'rain' | 'snow', seconds: number, state = { snow
   return state;
 };
 
+test('first snowy or rainy frame already has visible cosmetic coverage', () => {
+  for (const kind of ['snow', 'rain'] as const) {
+    const roof = new THREE.Group(), effect = createRoofSurfaceWeather(roof);
+    effect.update('none', true, settings, 0);
+    effect.update(kind, true, settings, 0);
+    const mesh = roof.getObjectByName(kind === 'snow' ? 'roof-snow-floor' : 'roof-puddles') as THREE.Mesh;
+    assert.equal(mesh.visible, true);
+    assert.ok((mesh.material as THREE.MeshStandardMaterial).opacity > .2);
+    effect.dispose();
+  }
+});
+
 test('snow and rain build gradually, stay shallow, and recover after weather clears', () => {
   const first = advance('snow', 5), later = advance('snow', 50);
   assert.ok(first.snow > 0 && first.snow < later.snow && later.snow < 1);

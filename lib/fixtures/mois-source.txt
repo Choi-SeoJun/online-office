@@ -1,0 +1,6 @@
+MOIS official public administrative-code fixture, dated 2026-11-11.
+https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=131063
+Original ZIP SHA-256: 5b4493acbb3d2a130ffc5a9d8fc2b2e860d1386156a7faef918b065fef91dcde
+mois-20261111.zip contains the three original CP949 text members, byte-for-byte,
+recompressed with spreadsheet duplicates omitted. No player information.
+Source-link HTML in mois-regions.test.ts minimizes the observed official layout.

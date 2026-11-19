@@ -31,7 +31,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
   };
   const engine = createGameEngine(saved, {
     getOffice: office, coworkers: false, bossAuthority: () => hostAuthority, continueBossOnRoof: true,
-    getPeers: () => latestSnapshot?.players.filter(p => p.id !== initial.id).map(actor => ({ actor, floor: actor.floor, seat: actor.seat, restSeatId: actor.restSeatId, deskMode: actor.deskMode })) ?? [],
+    getPeers: () => latestSnapshot?.players.filter(p => p.id !== initial.id).map(actor => ({ actor, floor: actor.floor, seat: actor.seat, restSeatId: actor.restSeatId, deskMode: actor.deskMode, weatherCreations: actor.weatherCreations, activity: actor.activity })) ?? [],
   });
   const state = engine.state;
   Object.assign(state.player, { id: initial.id, name: initial.name, rank: normalizeRank(initial.rank), avatar: initial.avatar ?? saved?.avatar ?? 'short', x: initial.x, z: initial.z, angle: initial.angle, pose: 'idle', moving: false });
@@ -66,7 +66,8 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
   const serializePlayer = (): RoomPlayerUpdate => ({
     x: player.x, z: player.z, angle: player.angle, pose: player.pose, moving: player.moving,
     floor: state.floor, seat: state.seat, restSeatId: state.restSeatId ?? null, deskMode: state.deskMode, roofRest: state.roofRest, roofWallSide: state.roofWallSide,
-    candyInMouth: state.candyInMouth, activity: state.activity ? { ...state.activity } : null, weapon: state.weapon,
+    candyInMouth: state.candyInMouth, activity: state.activity ? { ...state.activity, ...(state.activity.craftPoint ? { craftPoint: { ...state.activity.craftPoint } } : {}) } : null, weapon: state.weapon,
+    weatherCreations: state.weatherCreations.map(creation => ({ ...creation })), weatherEffect: state.weatherEffect ? { ...state.weatherEffect } : null,
     elapsed: state.elapsed, lastHit: state.lastHit ? { ...state.lastHit } : null, carryingCoffee: state.inventory.coffee > 0,
   });
   const dispatch = (command: Command) => { autoInteract = null; engine.dispatch(command); };

@@ -1,5 +1,6 @@
 import type { BoardEntry } from './board-types.ts';
 import type { JobRank } from './ranks.ts';
+import type { Precipitation } from './environment-types.ts';
 
 export type Point = { x: number; z: number };
 export type Floor = 'office' | 'rooftop';
@@ -8,12 +9,15 @@ export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copie
 export type Weapon = 'punch' | 'hammer' | 'fan';
 export type Snack = 'cookie' | 'choco' | 'cracker';
 export type DeskMode = 'work' | 'shopping' | 'game' | 'sleep';
-export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'wallLean' | 'hit' | 'watch' | 'scold' | 'candy' | 'dance';
+export type WeatherPlayKind = 'snowman' | 'snowduck' | 'snowball' | 'splash';
+export type WeatherCreation = Point & { id: number; kind: 'snowman' | 'snowduck'; angle: number; remaining: number };
+export type WeatherEffect = Point & { id: number; kind: 'snowball' | 'splash'; angle: number; remaining: number; duration: number };
+export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'wallLean' | 'hit' | 'watch' | 'scold' | 'candy' | 'dance' | WeatherPlayKind;
 export type AvatarStyle = 'short' | 'ponytail';
 export type Actor = Point & { id: string; name: string; angle: number; pose: Pose; moving: boolean; avatar?: AvatarStyle; rank?: JobRank };
 export type Settings = { sound: boolean; volume: number; reducedMotion: boolean; quality: 'auto' | 'low' | 'high' };
 export type Inventory = Record<Snack, number> & { coffee: number };
-export type Activity = { kind: 'brew' | 'take' | 'eat' | 'drink' | 'spin' | 'candy' | 'dance'; remaining: number; duration: number; snack?: Snack };
+export type Activity = { kind: 'brew' | 'take' | 'eat' | 'drink' | 'spin' | 'candy' | 'dance' | WeatherPlayKind; remaining: number; duration: number; snack?: Snack; craftPoint?: Point };
 export type GameEvent = { id: number; kind: 'notice' | 'step' | 'type' | 'coffee' | 'snack' | 'sip' | 'punch' | 'hammer' | 'fan' | 'caught'; text: string; at: number };
 export type GameState = {
   entered: boolean; paused: boolean; elapsed: number; name: string; rank: JobRank; bossRank: JobRank; companyName: string;
@@ -23,6 +27,7 @@ export type GameState = {
   seat: 'desk' | 'lounge' | 'roof-bench' | null; restSeatId?: string | null; deskMode: DeskMode | null;
   roofRest: 'bench' | 'wall' | null; roofWallSide: RoofWallSide | null; roofLeanPoint: Point | null; candyInMouth: boolean;
   activity: Activity | null; inventory: Inventory; weapon: Weapon; settings: Settings;
+  weatherKind: Precipitation; weatherCreations: WeatherCreation[]; weatherEffect: WeatherEffect | null;
   warning: number; scold: number; bossPhase: 'routine' | 'watch' | 'scold' | 'hit' | 'recover';
   lastHit: { id: number; weapon: Weapon; at: number } | null;
   bossHit?: { id: number; weapon: Weapon; at: number } | null;
@@ -34,6 +39,7 @@ export type Command =
   | { type: 'select'; target: TargetId; point?: Point; restSeatId?: string } | { type: 'move'; point: Point } | { type: 'axis'; x: number; z: number }
   | { type: 'interact' } | { type: 'stand' } | { type: 'cancel' }
   | { type: 'travel'; floor: Floor } | { type: 'candy' } | { type: 'rest'; place: 'bench' | 'wall'; wall?: RoofWallSide; restSeatId?: string }
+  | { type: 'weather'; precipitation: Precipitation } | { type: 'weather-play'; kind: WeatherPlayKind }
   | { type: 'desk'; mode: DeskMode } | { type: 'spin' } | { type: 'dance' }
   | { type: 'weapon'; weapon: Weapon } | { type: 'attack' }
   | { type: 'take'; snack: Snack } | { type: 'eat'; snack: Snack } | { type: 'drink' }

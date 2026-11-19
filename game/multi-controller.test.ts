@@ -59,6 +59,33 @@ const roomSnapshot = (host: ReturnType<typeof createMultiController>, guest?: Re
   players:[sharedPlayer(host),...(guest?[sharedPlayer(guest)]:[])],messages:[],notifications:[],serverTime:now,
   boss:{actor:{...host.engine.state.boss},phase:host.engine.state.bossPhase,lastHit:null,updatedAt:now},
 });
+test('two rooftop visitors keep completed and previewed snow crafts on separate patches', () => {
+  const host = createMultiController({ ...member(4, 0), id: 'a-host' }, 4);
+  const guest = createMultiController({ ...member(4, 1), id: 'b-guest' }, 4);
+  for (const c of [host, guest]) { c.engine.dispatch({ type: 'travel', floor: 'rooftop' }); c.step(2); c.engine.dispatch({ type: 'weather', precipitation: 'snow' }); }
+  host.engine.dispatch({ type: 'weather-play', kind: 'snowman' }); host.step(4);
+  guest.applySnapshot(roomSnapshot(host, guest));
+  guest.engine.dispatch({ type: 'weather-play', kind: 'snowduck' });
+  const preview = guest.engine.state.activity?.craftPoint;
+  guest.step(3);
+  const a = host.engine.state.weatherCreations[0], b = guest.engine.state.weatherCreations[0];
+  assert.ok(Math.hypot(a.x - b.x, a.z - b.z) >= .75, 'a peer creation must reserve its visible footprint');
+  assert.deepEqual({ x: b.x, z: b.z }, preview, 'preview and completion use the same reserved point');
+});
+
+test('simultaneous snowcraft starts resolve a shared preview using stable participant priority', () => {
+  const host = createMultiController({ ...member(4, 0), id: 'a-host' }, 4);
+  const guest = createMultiController({ ...member(4, 1), id: 'b-guest' }, 4);
+  for (const c of [host, guest]) { c.engine.dispatch({ type: 'travel', floor: 'rooftop' }); c.step(2); c.engine.dispatch({ type: 'weather', precipitation: 'snow' }); c.engine.dispatch({ type: 'weather-play', kind: 'snowman' }); }
+  const snapshot = roomSnapshot(host, guest); host.applySnapshot(snapshot); guest.applySnapshot(snapshot);
+  host.step(.1); guest.step(.1);
+  const a = host.engine.state.activity?.craftPoint, b = guest.engine.state.activity?.craftPoint;
+  assert.ok(a && b); assert.ok(Math.hypot(a.x - b.x, a.z - b.z) >= .75);
+  const refreshed = roomSnapshot(host, guest, 1100); host.applySnapshot(refreshed); guest.applySnapshot(refreshed);
+  host.step(3.2); guest.step(3.2);
+  assert.deepEqual({ x: host.engine.state.weatherCreations[0].x, z: host.engine.state.weatherCreations[0].z }, a);
+  assert.deepEqual({ x: guest.engine.state.weatherCreations[0].x, z: guest.engine.state.weatherCreations[0].z }, b);
+});
 test('a corrected snapshot repairs only an obstructed local player and preserves responsive valid movement',()=>{
  const c=createMultiController(member(4,0),4),snapshot=roomSnapshot(c);
  const valid={x:c.layout.spawn.x,z:c.layout.spawn.z-.5};

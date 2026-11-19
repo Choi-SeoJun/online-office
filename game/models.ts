@@ -126,7 +126,7 @@ export function desk(parent: THREE.Object3D, x: number, z: number, index: number
   return { group: g, chair: ch, screen };
 }
 
-type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; paperFlight: PaperFlight; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; dance: DanceEffects; isBoss: boolean; lastName: string };
+type Rig = { root: THREE.Group; body: THREE.Group; head: THREE.Group; hairStyles: Record<AvatarStyle, THREE.Group>; ponytail: THREE.Group; lastAvatar: AvatarStyle; mouth: THREE.Object3D; leftArm: THREE.Group; rightArm: THREE.Group; legs: THREE.Group[]; calves: THREE.Group[]; hand: THREE.Group; weapons: Record<Weapon, THREE.Group>; loosePages: THREE.Group[]; paperFlight: PaperFlight; snacks: Record<Snack, THREE.Group>; candy: THREE.Group; wrapper: THREE.Group; mouthCandy: THREE.Group; heldSnowball: THREE.Mesh; snowDuckMold: THREE.Group; mug: THREE.Group; steam: THREE.Group; crumbs: THREE.Group; label: THREE.Sprite; effect: THREE.Group; stars: THREE.Mesh[]; dance: DanceEffects; isBoss: boolean; lastName: string };
 export function createActor(parent: THREE.Object3D, role: number, name: string, avatar: AvatarStyle = 'short'): Rig {
   const root = new THREE.Group(); parent.add(root); const body = new THREE.Group(); root.add(body);
   const boss = role === 1; const shirt = ['#4e8a7e', '#2f4355', '#c48d6b', '#7e8da5', '#bbab78'][role] ?? '#9fa8b4'; const skin = ['#f0c5a2', '#e7ba94', '#eec09c', '#e5b692', '#f0cbad'][role] ?? '#edc3a0';
@@ -222,6 +222,12 @@ export function createActor(parent: THREE.Object3D, role: number, name: string, 
   box(snacks.cracker, .23, .23, .045, '#e2c183', 0, 0, 0, .023);
   for (const x of [-.055, .055]) for (const y of [-.055, .055]) sphere(snacks.cracker, .012, '#ad8b50', x, y, .024, 1, 1, .25);
   const candy = new THREE.Group(); candy.name = 'held-candy'; candy.visible = false; hand.add(candy);
+  const heldSnowball = sphere(hand, .14, '#f6fbff', 0, .02, .04); heldSnowball.name = 'held-snowball'; heldSnowball.visible = false;
+  const snowDuckMold = new THREE.Group(); snowDuckMold.name = 'snow-duck-mold'; snowDuckMold.visible = false; hand.add(snowDuckMold);
+  for (const side of [-1, 1]) {
+    const handle = box(snowDuckMold, .035, .38, .04, '#59aab1', side * .07, -.1, 0, .01); handle.rotation.z = side * .18;
+    sphere(snowDuckMold, .115, '#76cbd0', side * .065, -.3, .015, .55, .7, 1);
+  }
   cylinder(candy, .010, .010, .32, '#fff8e9', 0, -.005);
   const sweet = sphere(candy, .075, '#e2a16e', 0, .16, 0, 1, 1, .94); sweet.name = 'candy-sweet';
   sweet.material = material('#e2a16e', .13);
@@ -249,7 +255,7 @@ export function createActor(parent: THREE.Object3D, role: number, name: string, 
   for (let i = 0; i < 7; i++) { const star = box(effect, .13, .13, .035, i % 2 ? '#f5c35a' : '#fff5cf', 0, 0, 0, .01); star.rotation.z = Math.PI / 4; stars.push(star); }
   effect.visible = false;
   const dance = createDanceEffects(root);
-  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, paperFlight, snacks, candy, wrapper, mouthCandy, mug: actorMug, steam, crumbs, label, effect, stars, dance, isBoss: boss, lastName: name };
+  return { root, body, head, hairStyles, ponytail, lastAvatar: avatar, mouth, leftArm: arms[0], rightArm: arms[1], legs, calves, hand, weapons, loosePages, paperFlight, snacks, candy, wrapper, mouthCandy, heldSnowball, snowDuckMold, mug: actorMug, steam, crumbs, label, effect, stars, dance, isBoss: boss, lastName: name };
 }
 
 // Aim the wrist at the prop's grip and its actual rim/bite edge at the lips.
@@ -321,6 +327,7 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
   r.mug.position.set(0, -.33, .10); r.mug.rotation.set(0, 0, 0); r.mug.scale.setScalar(1.2); r.steam.visible = r.crumbs.visible = false;
   Object.values(r.snacks).forEach(item => { item.visible = false; item.position.set(0, 0, 0); item.scale.setScalar(1); item.rotation.set(0, 0, 0); });
   r.candy.visible = r.wrapper.visible = false; r.candy.position.set(0, 0, 0); r.candy.rotation.set(0, 0, 0); r.candy.scale.setScalar(1); r.wrapper.scale.setScalar(1);
+  r.heldSnowball.visible = r.snowDuckMold.visible = false;
   r.mouthCandy.visible = player && state.floor === 'rooftop' && !state.transition && state.candyInMouth && !['drink', 'eat'].includes(a.pose);
   Object.entries(r.weapons).forEach(([kind, item]) => { item.visible = false; item.rotation.set(0, 0, kind === 'punch' ? 0 : Math.PI); item.scale.setScalar(1); });
   r.paperFlight.group.visible = false;
@@ -365,6 +372,30 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
     r.legs[0].rotation.x = .12 + beat * .24; r.legs[1].rotation.x = .12 - beat * .24;
     r.calves[0].rotation.x = .18 + Math.max(0, beat) * .30;
     r.calves[1].rotation.x = .18 + Math.max(0, -beat) * .30;
+  }
+  if (activity && state.floor === 'rooftop' && !walk && !state.transition) {
+    if (a.pose === 'snowman') {
+      const roll = reduced ? 0 : Math.sin(progress * Math.PI * 8), crouch = reduced ? .6 : Math.sin(progress * Math.PI);
+      r.body.position.y = -.22 * crouch; r.body.rotation.x = .3 * crouch; r.head.rotation.x = .16;
+      r.leftArm.rotation.set(-.75 + roll * .18, -.12, .25); r.rightArm.rotation.set(-.75 - roll * .18, .12, -.25);
+      r.legs.forEach((leg, i) => { leg.rotation.x = -.4 * crouch; r.calves[i].rotation.x = .7 * crouch; });
+    } else if (a.pose === 'snowduck') {
+      const press = reduced ? .65 : Math.sin(progress * Math.PI * 3) ** 2;
+      r.snowDuckMold.visible = true; r.body.position.y = -.12; r.body.rotation.x = .18 + press * .1;
+      r.rightArm.rotation.set(-.7 - press * .25, .12, -.1); r.leftArm.rotation.set(-.85, -.25, .25);
+      r.head.rotation.x = .25; r.legs.forEach((leg, i) => { leg.rotation.x = -.25; r.calves[i].rotation.x = .45; });
+    } else if (a.pose === 'snowball') {
+      const throwPhase = reduced ? .5 : ease(.38, .65);
+      r.heldSnowball.visible = progress < .55;
+      r.body.rotation.y = reduced ? 0 : -.28 + throwPhase * .55;
+      r.rightArm.rotation.set(-2.6 + throwPhase * 1.55, -.22, -.25);
+      r.leftArm.rotation.set(-.6, .1, .3); r.head.rotation.x = -.06;
+    } else if (a.pose === 'splash') {
+      const lift = reduced ? .2 : Math.sin(Math.min(1, progress / .35) * Math.PI);
+      r.legs[1].rotation.x = -.65 * lift; r.calves[1].rotation.x = .85 * lift;
+      r.body.position.y = reduced ? 0 : Math.sin(progress * Math.PI * 2) * .035;
+      r.leftArm.rotation.z = .4; r.rightArm.rotation.z = -.4; r.head.rotation.x = .2;
+    }
   }
   const carryingCoffee = player && !state.candyInMouth && state.inventory.coffee > 0 && ['idle', 'walk', 'sit', 'lean'].includes(a.pose);
   r.mug.visible = carryingCoffee || a.pose === 'drink';

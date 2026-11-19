@@ -27,6 +27,26 @@ function activity(state: GameState, kind: Activity['kind'], progress: number, sn
 }
 function position(object: THREE.Object3D) { return object.getWorldPosition(new THREE.Vector3()); }
 
+test('weather play has distinct craft, mold, throw and stomp poses and resets held props', () => {
+  const { state, rig, render } = setup(); state.floor = 'rooftop';
+  activity(state, 'snowman', .5); render();
+  assert.ok(rig.body.position.y < -.1); assert.ok(rig.body.rotation.x > .15);
+  activity(state, 'snowduck', .5); render();
+  assert.equal(rig.root.getObjectByName('snow-duck-mold')?.visible, true);
+  activity(state, 'snowball', .2); render();
+  assert.equal(rig.root.getObjectByName('held-snowball')?.visible, true);
+  const windup = rig.rightArm.rotation.x;
+  activity(state, 'snowball', .7); render();
+  assert.equal(rig.root.getObjectByName('held-snowball')?.visible, false);
+  assert.ok(Math.abs(rig.rightArm.rotation.x - windup) > .6);
+  activity(state, 'splash', .2); render(); assert.ok(Math.abs(rig.legs[1].rotation.x) > .2);
+  state.settings.reducedMotion = true; activity(state, 'snowman', .5); render();
+  const before = rig.body.position.clone(); state.elapsed += 1; render(); assert.deepEqual(rig.body.position, before);
+  state.activity = null; state.player.pose = 'idle'; render();
+  assert.equal(rig.body.position.y, 0); assert.equal(rig.root.getObjectByName('snow-duck-mold')?.visible, false);
+  assert.equal(rig.root.getObjectByName('held-snowball')?.visible, false);
+});
+
 test('leaning in the pantry keeps seated legs and visibly reclines instead of standing through the chair', () => {
   const { state, rig, render } = setup();
   state.seat = 'lounge'; state.player.pose = 'sit'; render();

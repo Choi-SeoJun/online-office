@@ -1,5 +1,6 @@
 import { createMultiLayout, isMultiWalkable } from '../game/multi-layout.ts';
 import type { RoomBoss, RoomBossUpdate, RoomError, RoomPlayerUpdate, RoomPose, RoomResponse, RoomSession, RoomSnapshot, RoomVisualState } from '../game/multi-types.ts';
+import { isWeatherPlay, isWeatherPlayPoint, WEATHER_CREATION_LIMIT, WEATHER_CREATION_LIFETIME } from '../game/weather-play.ts';
 import type { AvatarStyle, Floor, GameState, Point, Weapon } from '../game/types.ts';
 import { ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST, WEAPONS } from '../game/layout.ts';
 import { getRoofLean } from '../game/roof-rest.ts';
@@ -84,7 +85,7 @@ const safeRestRenewal = `x = CASE WHEN ${sharedSeatConflict} THEN ${releasedRest
   moving = CASE WHEN ${sharedSeatConflict} THEN 0 ELSE moving END,
   visual = CASE WHEN ${sharedSeatConflict} THEN ${releasedRestVisual} ELSE visual END`;
 const restRenewalCutoffs = (now: number) => Array<number>(5).fill(now - ROOM_SEAT_LEASE_MS);
-const visualDefaults = (floor: Floor = 'office'): RoomVisualState => ({ floor, seat: null, restSeatId: null, deskMode: null, roofRest: null, roofWallSide: null, candyInMouth: false, activity: null, weapon: 'punch', elapsed: 0, lastHit: null, carryingCoffee: false });
+const visualDefaults = (floor: Floor = 'office'): RoomVisualState => ({ floor, seat: null, restSeatId: null, deskMode: null, roofRest: null, roofWallSide: null, candyInMouth: false, activity: null, weapon: 'punch', elapsed: 0, lastHit: null, carryingCoffee: false, weatherCreations: [], weatherEffect: null });
 function memberVisual(member: MemberRow): RoomVisualState {
   if (member.visual) {
     const visual = { ...visualDefaults(member.floor), ...JSON.parse(member.visual), floor: member.floor } as RoomVisualState;
@@ -104,8 +105,8 @@ function memberVisual(member: MemberRow): RoomVisualState {
   return value;
 }
 function visualOnly(player: RoomPlayerUpdate): RoomVisualState {
-  const { floor, seat, restSeatId, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee } = player;
-  return { floor, seat, restSeatId: restSeatId ?? null, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee };
+  const { floor, seat, restSeatId, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee, weatherCreations, weatherEffect } = player;
+  return { floor, seat, restSeatId: restSeatId ?? null, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee, weatherCreations: weatherCreations ?? [], weatherEffect: weatherEffect ?? null };
 }
 function sharedBoss(room: RoomRow, now: number): RoomBoss {
   const layout = createMultiLayout(room.capacity), point = layout.boss;
@@ -201,7 +202,7 @@ async function authenticate(db: RoomDatabase, input: Record<string, unknown>, no
 }
 function playerValue(input: unknown, room: RoomRow, member: MemberRow): RoomPlayerUpdate {
   const value = object(input), { x, z, angle, pose, moving } = value;
-  if (typeof x !== 'number' || typeof z !== 'number' || typeof angle !== 'number' || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(angle) || typeof moving !== 'boolean' || !['idle', 'walk', 'sit', 'type', 'sleep', 'drink', 'eat', 'brew', 'take', 'spin', 'lean', 'wallLean', 'hit', 'watch', 'scold', 'candy', 'dance'].includes(String(pose))) fail(400, 'INVALID_REQUEST', '캐릭터 위치를 확인해 주세요.');
+  if (typeof x !== 'number' || typeof z !== 'number' || typeof angle !== 'number' || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(angle) || typeof moving !== 'boolean' || !['idle', 'walk', 'sit', 'type', 'sleep', 'drink', 'eat', 'brew', 'take', 'spin', 'lean', 'wallLean', 'hit', 'watch', 'scold', 'candy', 'dance', 'snowman', 'snowduck', 'snowball', 'splash'].includes(String(pose))) fail(400, 'INVALID_REQUEST', '캐릭터 위치를 확인해 주세요.');
   const choice = <T extends string | null>(key: string, options: readonly T[], fallback: T): T => {
     if (value[key] === undefined) return fallback;
     if (!options.includes(value[key] as T)) fail(400, 'INVALID_REQUEST', '캐릭터 동작을 확인해 주세요.');
@@ -220,14 +221,43 @@ function playerValue(input: unknown, room: RoomRow, member: MemberRow): RoomPlay
   let activity: GameState['activity'] = null, lastHit: GameState['lastHit'] = null;
   if (value.activity != null) {
     const a = object(value.activity);
-    if (!['brew', 'take', 'eat', 'drink', 'spin', 'candy', 'dance'].includes(String(a.kind)) || typeof a.duration !== 'number' || !Number.isFinite(a.duration) || a.duration < .1 || a.duration > 10 || typeof a.remaining !== 'number' || !Number.isFinite(a.remaining) || a.remaining < 0 || a.remaining > a.duration || (a.snack !== undefined && !['cookie', 'choco', 'cracker'].includes(String(a.snack)))) fail(400, 'INVALID_REQUEST', '동작 시간을 확인해 주세요.');
+    if (!['brew', 'take', 'eat', 'drink', 'spin', 'candy', 'dance', 'snowman', 'snowduck', 'snowball', 'splash'].includes(String(a.kind)) || typeof a.duration !== 'number' || !Number.isFinite(a.duration) || a.duration < .1 || a.duration > 10 || typeof a.remaining !== 'number' || !Number.isFinite(a.remaining) || a.remaining < 0 || a.remaining > a.duration || (a.snack !== undefined && !['cookie', 'choco', 'cracker'].includes(String(a.snack)))) fail(400, 'INVALID_REQUEST', '동작 시간을 확인해 주세요.');
     activity = { kind: a.kind as NonNullable<GameState['activity']>['kind'], duration: a.duration, remaining: a.remaining, ...(a.snack === undefined ? {} : { snack: a.snack as 'cookie' | 'choco' | 'cracker' }) };
+    if (a.craftPoint !== undefined) {
+      const point = object(a.craftPoint);
+      if ((activity.kind !== 'snowman' && activity.kind !== 'snowduck') || typeof point.x !== 'number' || typeof point.z !== 'number'
+        || !isWeatherPlayPoint({ x: point.x, z: point.z }) || Math.hypot(point.x - x, point.z - z) > 2.6) fail(400, 'INVALID_REQUEST', '눈 작품 위치를 확인해 주세요.');
+      activity.craftPoint = { x: point.x, z: point.z };
+    }
     if (pose !== activity.kind || (['take', 'eat'].includes(activity.kind) && !activity.snack)) fail(400, 'INVALID_REQUEST', '캐릭터 동작을 확인해 주세요.');
   }
   if (value.lastHit != null) {
     const hit = object(value.lastHit);
     if (typeof hit.id !== 'number' || !Number.isSafeInteger(hit.id) || hit.id < 1 || !['punch', 'hammer', 'fan'].includes(String(hit.weapon)) || typeof hit.at !== 'number' || !Number.isFinite(hit.at) || hit.at < 0 || hit.at > elapsed) fail(400, 'INVALID_REQUEST', '장난 동작을 확인해 주세요.');
     lastHit = { id: hit.id, weapon: hit.weapon as Weapon, at: hit.at };
+  }
+  const weatherCreations: GameState['weatherCreations'] = [];
+  let weatherEffect: GameState['weatherEffect'] = null;
+  const visualPoint = (v: Record<string, unknown>) => {
+    if (typeof v.id !== 'number' || !Number.isSafeInteger(v.id) || v.id < 1 || typeof v.x !== 'number' || typeof v.z !== 'number'
+      || !Number.isFinite(v.x) || !Number.isFinite(v.z) || typeof v.angle !== 'number' || !Number.isFinite(v.angle)
+      || typeof v.remaining !== 'number' || !Number.isFinite(v.remaining) || v.remaining <= 0
+      || v.x < ROOF_BOUNDS.minX + .22 || v.x > ROOF_BOUNDS.maxX - .22 || v.z < ROOF_BOUNDS.minZ + .22 || v.z > ROOF_BOUNDS.maxZ - .22) fail(400, 'INVALID_REQUEST', '날씨 놀이를 확인해 주세요.');
+    return { id: v.id, x: v.x, z: v.z, angle: Math.atan2(Math.sin(v.angle), Math.cos(v.angle)), remaining: v.remaining };
+  };
+  if (value.weatherCreations != null) {
+    if (!Array.isArray(value.weatherCreations) || value.weatherCreations.length > WEATHER_CREATION_LIMIT) fail(400, 'INVALID_REQUEST', '눈 작품 수를 확인해 주세요.');
+    for (const input of value.weatherCreations) {
+      const item = object(input), point = visualPoint(item);
+      if ((item.kind !== 'snowman' && item.kind !== 'snowduck') || point.remaining > WEATHER_CREATION_LIFETIME || !isWeatherPlayPoint(point) || weatherCreations.some(creation => creation.id === point.id)) fail(400, 'INVALID_REQUEST', '눈 작품을 확인해 주세요.');
+      weatherCreations.push({ ...point, kind: item.kind });
+    }
+  }
+  if (value.weatherEffect != null) {
+    const item = object(value.weatherEffect), point = visualPoint(item);
+    if ((item.kind !== 'snowball' && item.kind !== 'splash') || typeof item.duration !== 'number' || !Number.isFinite(item.duration) || item.duration < .1 || item.duration > 2 || point.remaining > item.duration
+      || floor !== 'rooftop' || seat !== null || roofRest !== null || moving) fail(400, 'INVALID_REQUEST', '날씨 놀이를 확인해 주세요.');
+    weatherEffect = { ...point, kind: item.kind, duration: item.duration };
   }
   const layout = createMultiLayout(room.capacity);
   const sharedSeat = seat === 'lounge' || seat === 'roof-bench';
@@ -237,7 +267,7 @@ function playerValue(input: unknown, room: RoomRow, member: MemberRow): RoomPlay
   const restSeatId = restSeat?.id ?? null;
   if (floor === 'office') {
     if (!isMultiWalkable(layout, { x, z })) fail(400, 'INVALID_REQUEST', '걸어갈 수 있는 곳을 골라 주세요.');
-    if (roofRest || roofWallSide || seat === 'roof-bench' || candyInMouth || pose === 'candy' || pose === 'wallLean') fail(400, 'INVALID_REQUEST', '옥상에서 할 수 있는 동작이에요.');
+    if (roofRest || roofWallSide || seat === 'roof-bench' || candyInMouth || pose === 'candy' || pose === 'wallLean' || isWeatherPlay(pose)) fail(400, 'INVALID_REQUEST', '옥상에서 할 수 있는 동작이에요.');
     if (seat === 'desk' && (moving || gap({ x, z }, layout.desks[member.seat_index].seat) > .12)) fail(400, 'INVALID_REQUEST', '내 자리에 앉아 주세요.');
     if (pose === 'brew' && gap({ x, z }, layout.coffee) > 1.25 || pose === 'take' && gap({ x, z }, layout.snacks) > 1.25) fail(400, 'INVALID_REQUEST', '탕비실 가까이 가 주세요.');
   } else {
@@ -254,7 +284,8 @@ function playerValue(input: unknown, room: RoomRow, member: MemberRow): RoomPlay
   }
   if (deskMode !== null && seat !== 'desk' || ['type', 'sleep', 'spin'].includes(String(pose)) && seat !== 'desk' || ['sit', 'lean'].includes(String(pose)) && seat === null) fail(400, 'INVALID_REQUEST', '먼저 자리에 앉아 주세요.');
   if (pose === 'dance' && (seat !== null || moving || !activity || activity.kind !== 'dance')) fail(400, 'INVALID_REQUEST', '일어서서 잠깐 춤춰 주세요.');
-  return { x, z, angle: Math.atan2(Math.sin(angle), Math.cos(angle)), pose: pose as RoomPose, moving, floor, seat, restSeatId, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee };
+  if (isWeatherPlay(pose) && (seat !== null || roofRest !== null || moving || activity?.kind !== pose)) fail(400, 'INVALID_REQUEST', '일어서서 날씨 놀이를 해 주세요.');
+  return { x, z, angle: Math.atan2(Math.sin(angle), Math.cos(angle)), pose: pose as RoomPose, moving, floor, seat, restSeatId, deskMode, roofRest, roofWallSide, candyInMouth, activity, weapon, elapsed, lastHit, carryingCoffee, weatherCreations, weatherEffect };
 }
 
 function bossValue(input: unknown, room: RoomRow, now: number): RoomBossUpdate & { updatedAt: number } {

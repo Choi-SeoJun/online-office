@@ -21,6 +21,24 @@ function player(): RoomPlayer {
     candyInMouth: false, activity: null, weapon: 'punch', elapsed: 20, lastHit: null, carryingCoffee: false };
 }
 
+test('remote snow creations and thrown effects age independently of the viewers weather', () => {
+  const game = createGameEngine().state; game.weatherKind = 'rain';
+  game.weatherCreations = [{ id: 99, kind: 'snowman', x: 3, z: 0, angle: 0, remaining: 20 }];
+  const colleague = player(); colleague.floor = 'rooftop'; colleague.pose = 'snowball';
+  colleague.activity = { kind: 'snowball', duration: 1.6, remaining: .8 };
+  colleague.weatherCreations = [{ id: 1, kind: 'snowduck', x: 0, z: 0, angle: 0, remaining: 5 }];
+  colleague.weatherEffect = { id: 2, kind: 'snowball', x: 0, z: 0, angle: 0, duration: .9, remaining: .8 };
+  const visual = remoteAnimationState(game, colleague, 10_400);
+  assert.equal(visual.weatherKind, 'rain');
+  assert.equal(visual.weatherCreations[0].id, 1); assert.equal(visual.weatherCreations[0].remaining, 4.6);
+  assert.equal(visual.weatherEffect?.remaining, .4);
+  assert.equal(colleague.weatherCreations[0].remaining, 5);
+  const expired = remoteAnimationState(game, colleague, 131_000);
+  assert.deepEqual(expired.weatherCreations, []); assert.equal(expired.weatherEffect, null); assert.equal(expired.player.pose, 'idle');
+  const legacy = remoteAnimationState(game, player(), 10_000);
+  assert.deepEqual(legacy.weatherCreations, []); assert.equal(legacy.weatherEffect, null);
+});
+
 test('colleague animation advances visible activity without copying private work or inventory', () => {
   const game = createGameEngine().state; game.inventory.cookie = 5; game.inventory.coffee = 3;
   const colleague = player(); colleague.pose = 'eat'; colleague.activity = { kind: 'eat', duration: 1.5, remaining: 1.4, snack: 'choco' };

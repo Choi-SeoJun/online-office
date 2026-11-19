@@ -4,7 +4,7 @@ import { CloudSun, LocateFixed, RefreshCw, Sunrise, Sunset, X } from 'lucide-rea
 import { useMemo, useRef, useState } from 'react';
 import { Dialog } from 'radix-ui';
 import { localDate, sunTimes, forecastLabel } from '@/game/environment';
-import { KOREA_PROVINCES, koreaRegionById, koreaRegionPath, koreaRegionOptions, koreaChildLabel, searchKoreaRegions } from '@/game/korea-regions';
+import { KOREA_PROVINCES, koreaRegionById, koreaRegionPath, koreaRegionOptions, koreaChildLabel, searchKoreaRegions, regionCatalogInfo } from '@/game/korea-regions';
 import type { useLocalWeather } from '@/hooks/use-local-weather';
 import './weather-control.css';
 import { restoreCollapsedMenuFocus } from './office-dialog-focus';
@@ -21,12 +21,13 @@ export function WeatherControl({ weather, onOpenChange }: {
   weather: ReturnType<typeof useLocalWeather>;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { frame, region, forecast, status, error, locating, selectRegion, useCurrentLocation, refresh } = weather;
-  const applied = koreaRegionById(region.id) ?? KOREA_PROVINCES[0].regions[0];
-  const path = koreaRegionPath(applied.id);
+  const { frame, region, pendingRegionName, forecast, status, error, locating, selectRegion, useCurrentLocation, refresh } = weather;
+  const applied = pendingRegionName ? null : koreaRegionById(region.id) ?? koreaRegionById('1100000000')!;
+  const catalog = regionCatalogInfo();
+  const path = applied ? koreaRegionPath(applied.id) : [];
   const [query, setQuery] = useState('');
   const searchInput = useRef<HTMLInputElement>(null);
-  const results = useMemo(() => searchKoreaRegions(query), [query]);
+  const results = useMemo(() => searchKoreaRegions(query), [query,catalog.revision]);
   const showForecast = forecast && (status === 'live' || status === 'cached');
   const timezone = forecast?.timezone ?? region.timezone;
   const { date, clock } = useMemo(() => ({
@@ -57,16 +58,16 @@ export function WeatherControl({ weather, onOpenChange }: {
         <div className="weather-summary">
           <CloudSun size={30} aria-hidden="true"/>
           <div>
-            <strong>{region.name}{region.source === 'default' && ' (기본)'}</strong>
+            <strong>{pendingRegionName ?? region.name}{!pendingRegionName && region.source === 'default' && ' (기본)'}</strong>
             {showForecast && <span>{forecastLabel(forecast)} · {Math.round(forecast.temperature)}°C</span>}
             {showForecast && <span>{forecast.source === 'kma' ? '기상청 초단기실황' : '보조 예보 · Open-Meteo'}</span>}
-            {messages[status] && <span role="status">{messages[status]}</span>}
+            {pendingRegionName ? <span role="status">{status==='unavailable'?'저장한 지역의 최신 목록을 확인할 수 없어요.':'저장한 지역의 최신 목록을 확인하고 있어요.'}</span> : messages[status] && <span role="status">{messages[status]}</span>}
           </div>
         </div>
-        <dl className="weather-sun">
+        {!pendingRegionName && <dl className="weather-sun">
           <div><dt><Sunrise size={16}/>일출</dt><dd>{today.sunrise === null ? '오늘 없음' : clock.format(today.sunrise)}</dd></div>
           <div><dt><Sunset size={16}/>일몰</dt><dd>{today.sunset === null ? '오늘 없음' : clock.format(today.sunset)}</dd></div>
-        </dl>
+        </dl>}
         {showForecast && <p className="weather-note">날씨 자료 기준 · {date.format(forecast.observedAt)} {clock.format(forecast.observedAt)}<br/>마지막 확인 · {clock.format(forecast.fetchedAt)}</p>}
         <p className="weather-note">약 5분마다 새 날씨를 확인해요. 비·눈과 빗소리도 자동으로 바뀌어요.</p>
         <div className="weather-settings">
@@ -87,10 +88,11 @@ export function WeatherControl({ weather, onOpenChange }: {
           </div>
           <div className="weather-region-fields">
           <label>시·도
-            <select value={applied.provinceId} onChange={event => {
+            <select value={applied?.provinceId ?? ''} onChange={event => {
               const next = koreaRegionById(event.currentTarget.value);
               if (next) selectRegion(next);
             }}>
+              {pendingRegionName && <option value="" disabled>지역 목록 확인 중</option>}
               {KOREA_PROVINCES.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
@@ -109,8 +111,8 @@ export function WeatherControl({ weather, onOpenChange }: {
             </label>;
           })}
           </div>
-          {applied.retired && <p className="weather-note">행정구역이 변경된 이전 설정이에요. 고덕1동 또는 고덕2동을 다시 골라 주세요.</p>}
-          {applied.representativePoint && <p className="weather-note">이 지역의 별도 기상청 지점이 아직 없어 {applied.representativePoint} 대표 지점의 날씨를 사용해요.</p>}
+          {applied?.retired && <p className="weather-note">행정구역이 변경된 이전 설정이에요. 현재 주소에 맞는 읍·면·동을 다시 골라 주세요.</p>}
+          {applied?.representativePoint && <p className="weather-note">이 지역의 별도 기상청 지점이 아직 없어 {applied.representativePoint} 대표 지점의 날씨를 사용해요.</p>}
           <button type="button" className="weather-action" disabled={locating} onClick={useCurrentLocation}>
             <LocateFixed size={16}/>{locating ? '위치 확인 중…' : '현재 위치 사용'}
           </button>
@@ -121,7 +123,7 @@ export function WeatherControl({ weather, onOpenChange }: {
         <p className="weather-note">현재 위치를 사용하면 가장 가까운 읍·면·동 지점의 기상청 격자 날씨를 적용해요. 약 5km 격자라 이웃 동네는 같은 날씨일 수 있어요. 선택한 지역은 내 브라우저에만 기억하고 동료에게 공유하지 않아요.</p>
         {error && <p className="weather-error" role="alert">{error}</p>}
         <footer>
-          <div className="weather-sources"><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">날씨·지점 · 기상청</a><a href="https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=131063" target="_blank" rel="noreferrer">주소·행정구역 · 행정안전부 (2026.11.11)</a>{forecast?.source !== 'kma' && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">보조 예보 · Open-Meteo</a>}</div>
+          <div className="weather-sources"><a href="https://www.data.go.kr/data/15084084/openapi.do" target="_blank" rel="noreferrer">날씨·지점 · 기상청</a><a href={catalog.sourceUrl} target="_blank" rel="noreferrer">주소·행정구역 · 행정안전부 ({catalog.sourceDate.replaceAll('-','.')})</a><span className="weather-note">행정구역 자료는 매일 자동으로 확인해요.</span>{forecast?.source !== 'kma' && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">보조 예보 · Open-Meteo</a>}</div>
           <button type="button" className="weather-action" disabled={status === 'loading'} onClick={refresh}><RefreshCw size={14}/>새로고침</button>
         </footer>
       </Dialog.Content>

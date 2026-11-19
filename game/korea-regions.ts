@@ -2,6 +2,7 @@ import { KOREA_REGION_POINTS } from './korea-region-points.ts';
 import { KOREA_LOCAL_POINTS } from './korea-local-points.ts';
 import { KOREA_ADMIN_ADDITIONS, KOREA_ADMIN_RENAMES, KOREA_RETIRED_ADMIN_IDS, KOREA_ADDRESS_LINKS } from './korea-address-data.ts';
 import type { WeatherRegion } from './environment-types.ts';
+import { parseRegionCatalog, type RegionCatalog } from './region-catalog.ts';
 
 export type KoreaRegion = WeatherRegion & {
   id: string; provinceId: string; district: string | null;
@@ -81,6 +82,38 @@ for (const options of selectableChildren.values()) options.sort((a, b) => nameOr
 export const koreaRegionOptions = (id: string): readonly KoreaRegion[] => selectableChildren.get(id) ?? [];
 const searchIndex = [...KOREA_REGIONS, ...KOREA_ADDRESS_REGIONS].map(region => ({ region, text: normalizedName(region.name).replace(/\s/g, ''), label: normalizedName(region.district ?? region.label) }));
 searchIndex.sort((a, b) => nameOrder.compare(a.region.name, b.region.name));
+
+let catalogRevision = 'mois-20261111';
+let catalogDate = '2026-11-11';
+let catalogSource = 'https://www.mois.go.kr/frt/bbs/type001/commonSelectBoardArticle.do?bbsId=BBSMSTR_000000000052&nttId=131063';
+export const regionCatalogInfo = () => ({ revision:catalogRevision, sourceDate:catalogDate, sourceUrl:catalogSource });
+export function regionCatalogSnapshot(): RegionCatalog {
+  return {schema:1, revision:catalogRevision, sourceDate:catalogDate, sourceUrl:catalogSource,
+    regions:[...byId.values()].map(({name:_name,district:_district,timezone:_timezone,source:_source,...point}) => point)};
+}
+
+/** Browser catalog replacement is atomic; exported arrays keep stable references. */
+export function applyRegionCatalog(value: unknown, now = Date.now()): boolean {
+  const catalog = parseRegionCatalog(value, now);
+  if (!catalog || catalog.sourceDate < catalogDate) return false;
+  byId.clear(); children.clear(); selectableChildren.clear();
+  for (const point of catalog.regions) byId.set(point.id, {...point, name:point.label, district:point.level === 'province' ? null : point.label.split(' (')[0], timezone:'Asia/Seoul', source:'manual'});
+  for (const region of byId.values()) region.name = koreaRegionPath(region.id).map(p=>p.label).join(' ');
+  KOREA_REGIONS.splice(0, KOREA_REGIONS.length, ...[...byId.values()].filter(r=>!r.addressId && !r.retired));
+  KOREA_ADDRESS_REGIONS.splice(0, KOREA_ADDRESS_REGIONS.length, ...[...byId.values()].filter(r=>!!r.addressId && !r.retired));
+  neighborhoods.splice(0, neighborhoods.length, ...KOREA_REGIONS.filter(r=>r.level === 'neighborhood' && !r.representativePoint));
+  for (const region of [...KOREA_REGIONS, ...KOREA_ADDRESS_REGIONS]) {
+    if (!region.parentId) continue;
+    const options = selectableChildren.get(region.parentId) ?? []; options.push(region); selectableChildren.set(region.parentId, options);
+    if (!region.addressId) { const options = children.get(region.parentId) ?? []; options.push(region); children.set(region.parentId, options); }
+  }
+  for (const options of selectableChildren.values()) options.sort((a,b)=>nameOrder.compare(a.label,b.label));
+  KOREA_PROVINCES.splice(0, KOREA_PROVINCES.length, ...KOREA_REGIONS.filter(r=>r.level === 'province').map(r=>({id:r.id,name:r.label,direct:!r.label.endsWith('도'),regions: children.get(r.id) ?? [r]})));
+  searchIndex.splice(0, searchIndex.length, ...[...KOREA_REGIONS,...KOREA_ADDRESS_REGIONS].map(region=>({region,text:normalizedName(region.name).replace(/\s/g,''),label:normalizedName(region.district ?? region.label)})));
+  searchIndex.sort((a,b)=>nameOrder.compare(a.region.name,b.region.name));
+  catalogRevision=catalog.revision; catalogDate=catalog.sourceDate; catalogSource=catalog.sourceUrl;
+  return true;
+}
 
 /** Searches locally; typed addresses are never sent to a geocoding service. */
 export function searchKoreaRegions(query: string): { items: KoreaRegion[]; total: number } {

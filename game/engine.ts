@@ -5,6 +5,7 @@ import { getRoofLean, ROOF_LEAN_DISTANCE } from './roof-rest.ts';
 import { ROOF_BENCH_SEATS, SOLO_LOUNGE_SEATS, restSeatById, type RestSeat } from './rest-seats.ts';
 import { bossName, normalizeRank } from './ranks.ts';
 import { SOLO_OFFICE_PLAN } from './office-plan.ts';
+import { isWeatherPlay, isWeatherCraftPointFree, weatherAllowsPlay, weatherPlayPoint, weatherCraftPoint, WEATHER_CREATION_LIMIT, WEATHER_CREATION_LIFETIME, WEATHER_PLAY_DURATIONS } from './weather-play.ts';
 
 const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
 const BOSS_WORK_SECONDS = 10 * 60, BOSS_PATROL_SECONDS = 15;
@@ -20,7 +21,7 @@ export type OfficeEnvironment = {
 export type GameEnvironment = {
   getOffice(): OfficeEnvironment; coworkers?: boolean;
   bossAuthority?: () => boolean; continueBossOnRoof?: boolean;
-  getPeers?: () => { actor: Actor; floor: Floor; seat: GameState['seat']; restSeatId?: string | null; deskMode: GameState['deskMode'] }[];
+  getPeers?: () => { actor: Actor; floor: Floor; seat: GameState['seat']; restSeatId?: string | null; deskMode: GameState['deskMode']; weatherCreations?: GameState['weatherCreations']; activity?: GameState['activity'] }[];
 };
 const SOLO_OFFICE: OfficeEnvironment = { bounds: BOUNDS, obstacles: OBSTACLES, start: START, targets: TARGETS, deskAngle: Math.PI, loungeAngle: Math.PI,
   bossSeat: { x: SOLO_OFFICE_PLAN.furniture.bossDesk.x - 1.05, z: SOLO_OFFICE_PLAN.furniture.bossDesk.z, angle: Math.PI / 2 },
@@ -181,7 +182,7 @@ function initialState(saved?: PersistedState): GameState {
   const rank = normalizeRank(p?.rank), bossRank = normalizeRank(p?.bossRank, '부장');
   return {
     rank, bossRank, entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원', companyName: p?.companyName ?? '우리 회사',
-    floor: 'office', transition: null,
+    floor: 'office', transition: null, weatherKind: 'none', weatherCreations: [], weatherEffect: null,
     player: { ...actor('player', p?.name ?? '김사원', START), avatar: p?.avatar ?? 'short', rank }, boss: { ...actor('boss', bossName(bossRank), TARGETS.boss.point), rank: bossRank },
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
     target: null, ready: false, destination: null, seat: null, restSeatId: null, deskMode: null, activity: null, roofRest: null, roofWallSide: null, roofLeanPoint: null, candyInMouth: false,
@@ -212,7 +213,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
   let officeReturn: Point = { ...office.start };
   let pendingRest: { place: 'bench' | 'wall'; wall?: RoofWallSide; point: Point } | null = null;
   let selectedRestSeat: RestSeat | null = null;
-  let eventId = 0, lastAttack = -Infinity, attackUntil = 0, hitUntil = 0, recoverUntil = 0, immunityUntil = 0;
+  let eventId = 0, weatherObjectId = 0, lastAttack = -Infinity, attackUntil = 0, hitUntil = 0, recoverUntil = 0, immunityUntil = 0;
   let nextObservation = 10, patrolIndex = 0, patrolWait = 0, coworkerPhase = -1, coworkerPath: Point[] = [];
   let observedPeer: string | null = null, peerObservationUntil = 0;
   let patrol = office.patrol;
@@ -227,6 +228,17 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     state.event = { id: ++eventId, kind, text, at: state.elapsed };
   };
   const currentRestSeat = () => restSeatById(state.restSeatId, office.loungeSeats ?? SOLO_LOUNGE_SEATS);
+  const occupiedSnowPatches = (starting = false): Point[] => [
+    ...state.weatherCreations,
+    ...(environment?.getPeers?.() ?? []).flatMap(peer => [
+      ...(peer.weatherCreations ?? []).filter(creation => creation.remaining > 0),
+      // Existing previews reserve their patch. For simultaneous starts, one
+      // stable participant wins so both clients do not repeatedly move aside.
+      ...(peer.floor === 'rooftop' && peer.activity?.craftPoint && peer.activity.remaining > 0
+        && (peer.activity.kind === 'snowman' || peer.activity.kind === 'snowduck') && (starting || peer.actor.id < state.player.id)
+        ? [peer.activity.craftPoint] : []),
+    ]),
+  ];
   const seatAvailable = (seat: RestSeat) => !(environment?.getPeers?.() ?? []).some(peer =>
     peer.floor === seat.floor && (peer.seat === 'lounge' || peer.seat === 'roof-bench')
     && (peer.restSeatId === seat.id || distance(peer.actor, seat.seat) < .5));
@@ -253,7 +265,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     if (state.seat === 'roof-bench' || state.seat === 'lounge') Object.assign(state.player, currentRestSeat()?.approach ?? (state.seat === 'roof-bench' ? ROOF_REST.bench.point : office.targets.lounge.point));
     state.seat = null; state.restSeatId = null; state.roofRest = null; state.roofWallSide = null; state.deskMode = null; restorePose(); endObservation();
   };
-  const cancel = () => { state.activity = null; path = []; pendingRest = null; selectedRestSeat = null; state.destination = null; state.roofLeanPoint = null; axis = { x: 0, z: 0 }; restorePose(); };
+  const cancel = () => { state.activity = null; state.weatherEffect = null; path = []; pendingRest = null; selectedRestSeat = null; state.destination = null; state.roofLeanPoint = null; axis = { x: 0, z: 0 }; restorePose(); };
   const rest = (place: 'bench' | 'wall', wall: RoofWallSide = 'north', point?: Point) => {
     const seat = place === 'bench' ? selectedRestSeat ?? pickRestSeat('rooftop') : null;
     if (place === 'bench' && (!seat || !seatAvailable(seat))) { cancel(); state.target = null; event('이미 동료가 앉아 있어요. 다른 의자를 골라 주세요.'); return; }
@@ -304,7 +316,9 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     if (kind === 'take') face(state.player, office.snacksFacing);
   };
   const reset = (saved?: PersistedState) => {
+    const weatherKind = state.weatherKind;
     Object.assign(state, initialState(saved)); applyEnvironment(); path = []; bossPath = []; coworkerPath = []; axis = { x: 0, z: 0 };
+    state.weatherKind = weatherKind;
     eventId = 0; lastAttack = -Infinity; attackUntil = hitUntil = recoverUntil = immunityUntil = 0;
     nextObservation = 10; patrolIndex = 0; patrolWait = 0; coworkerPhase = -1; followClock = 0; followedBoss = { ...state.boss };
     officeReturn = { ...office.start }; pendingRest = null;
@@ -314,6 +328,13 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     if (disposed) return;
     if (command.type === 'reset') reset();
     else if (command.type === 'exit') reset(toPersistedState(state));
+    else if (command.type === 'weather') {
+      if (!['none', 'rain', 'snow'].includes(command.precipitation)) return;
+      state.weatherKind = command.precipitation;
+      if (state.activity && isWeatherPlay(state.activity.kind) && !weatherAllowsPlay(state.weatherKind, state.activity.kind)) cancel();
+      if (state.weatherEffect && !weatherAllowsPlay(state.weatherKind, state.weatherEffect.kind)) state.weatherEffect = null;
+      if (state.weatherKind !== 'snow') state.weatherCreations = [];
+    }
     else if (command.type === 'settings') {
       state.settings = readSavedState({ getItem: () => JSON.stringify({ ...toPersistedState(state), settings: { ...state.settings, ...command.value } }) })!.settings;
     } else if (command.type === 'profile') {
@@ -335,6 +356,17 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
     else if (state.entered && !state.paused) {
       if (state.transition) return;
       switch (command.type) {
+        case 'weather-play': {
+          if (state.floor !== 'rooftop' || !isWeatherPlay(command.kind) || !weatherAllowsPlay(state.weatherKind, command.kind) || busy()) break;
+          cancel(); stand(); state.target = null; state.ready = false; state.candyInMouth = false;
+          const crafting = command.kind === 'snowman' || command.kind === 'snowduck';
+          const point = crafting ? weatherCraftPoint(state.player, occupiedSnowPatches(true)) : weatherPlayPoint(state.player);
+          if (!point) { event('조금 더 넓은 곳에서 놀아 볼까요?'); break; }
+          face(state.player, point); begin(command.kind, WEATHER_PLAY_DURATIONS[command.kind]);
+          if (crafting) state.activity!.craftPoint = point;
+          event(command.kind === 'snowman' ? '동글동글, 눈사람을 만들어요.' : command.kind === 'snowduck' ? '꾹 눌러서, 작은 눈오리 하나.' : command.kind === 'snowball' ? '눈뭉치를 뭉쳐서, 휙!' : '첨벙! 빗물 위에 동그라미.');
+          break;
+        }
         case 'travel': {
           if (command.floor === state.floor) break;
           if (state.floor === 'office') officeReturn = state.seat === 'lounge' && currentRestSeat()
@@ -556,6 +588,8 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
   };
   const tick = (dt: number) => {
     state.elapsed += dt;
+    state.weatherCreations = state.weatherCreations.map(creation => ({ ...creation, remaining: creation.remaining - dt })).filter(creation => creation.remaining > 0);
+    if (state.weatherEffect) { state.weatherEffect.remaining -= dt; if (state.weatherEffect.remaining <= 0) state.weatherEffect = null; }
     if (state.transition) {
       const transition = state.transition;
       transition.remaining = Math.max(0, transition.remaining - dt);
@@ -567,8 +601,22 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       if (transition.remaining < 1e-8) { state.transition = null; event(state.floor === 'rooftop' ? '여기서는 잠깐, 회사 생각 내려놓기.' : '다시 사무실. 오늘도 적당히 해요.'); }
       return;
     }
+    if (state.activity?.kind === 'snowman' || state.activity?.kind === 'snowduck') {
+      const occupied = occupiedSnowPatches(), reserved = state.activity.craftPoint;
+      const point = reserved && isWeatherCraftPointFree(reserved, occupied) ? reserved : weatherCraftPoint(state.player, occupied);
+      if (!point) { cancel(); event('눈 작품을 놓을 자리가 없어요. 조금 옮겨 볼까요?'); }
+      else { state.activity.craftPoint = point; face(state.player, point); }
+    }
     if (state.activity) {
+      const previous = state.activity.remaining;
       state.activity.remaining = Math.max(0, state.activity.remaining - dt);
+      const action = state.activity;
+      const releaseRemaining = action.duration * (action.kind === 'splash' ? .65 : .45);
+      if ((action.kind === 'snowball' || action.kind === 'splash') && previous > releaseRemaining && action.remaining <= releaseRemaining) {
+        const point = action.kind === 'splash' ? weatherPlayPoint(state.player, .55) ?? weatherPlayPoint(state.player) : state.player;
+        if (point) state.weatherEffect = { id: ++weatherObjectId, kind: action.kind, x: point.x, z: point.z, angle: state.player.angle,
+          duration: action.kind === 'snowball' ? .9 : 1.1, remaining: action.kind === 'snowball' ? .9 : 1.1 };
+      }
       if (state.activity.remaining < 1e-8) {
         const a = state.activity; state.activity = null;
         if (a.kind === 'brew') { state.inventory.coffee = 3; event('따뜻한 커피가 준비됐어요.', 'coffee'); }
@@ -576,6 +624,11 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
         else if (a.kind === 'take' && a.snack) { state.inventory[a.snack]++; event(`${SNACKS[a.snack]}를 챙겼어요.`, 'snack'); }
         else if (a.kind === 'eat' && a.snack) { state.inventory[a.snack] = Math.max(0, state.inventory[a.snack] - 1); event('맛있는 휴식이었어요.', 'snack'); }
         else if (a.kind === 'candy') { state.candyInMouth = true; event('사탕 하나 물고, 잠깐 아무 생각 없이.', 'sip'); }
+        else if (a.kind === 'snowman' || a.kind === 'snowduck') {
+          const point = a.craftPoint;
+          if (point) state.weatherCreations = [...state.weatherCreations.slice(-(WEATHER_CREATION_LIMIT - 1)),
+            { ...point, id: ++weatherObjectId, kind: a.kind, angle: state.player.angle, remaining: WEATHER_CREATION_LIFETIME }];
+        }
         restorePose();
       }
     }

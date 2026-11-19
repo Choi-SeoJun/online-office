@@ -4,6 +4,7 @@ import type { RoomPlayer } from './multi-types.ts';
 /** Reconstruct only what a colleague can see, without sharing their inventory or work. */
 export function remoteAnimationState(game: GameState, player: RoomPlayer, serverNow: number): GameState {
   const age = Math.max(0, Math.min(30, (serverNow - player.lastSeen) / 1000));
+  const weatherAge = Math.max(0, (serverNow - player.lastSeen) / 1000);
   const activity = player.activity ? { ...player.activity, remaining: Math.max(0, player.activity.remaining - age) } : null;
   const actor = { ...player };
   if (activity && activity.remaining === 0) {
@@ -18,6 +19,8 @@ export function remoteAnimationState(game: GameState, player: RoomPlayer, server
     roofLeanPoint: player.roofRest === 'wall' ? { x: player.x, z: player.z } : null,
     candyInMouth: player.candyInMouth || !!(activity?.kind === 'candy' && !activity.remaining),
     activity: activity?.remaining ? activity : null,
+    weatherCreations: (player.weatherCreations ?? []).map(creation => ({ ...creation, remaining: creation.remaining - weatherAge })).filter(creation => creation.remaining > 0),
+    weatherEffect: player.weatherEffect && player.weatherEffect.remaining > weatherAge ? { ...player.weatherEffect, remaining: player.weatherEffect.remaining - weatherAge } : null,
     inventory: { coffee: player.carryingCoffee ? 1 : 0, cookie: 0, choco: 0, cracker: 0 },
     weapon: player.weapon, lastHit: player.lastHit, warning: 0, scold: 0,
     destination: null, event: null, message: '', messageUntil: 0,

@@ -2,6 +2,8 @@
    while their mobile triggers are collapsed. */
 .office-sidebar,.office-sidebar-panel,.office-sidebar-content{display:contents}
 .office-sidebar-toggle{display:none}
+.office-social-tools .rooftop-note-restore{display:none}
+.rooftop-weather-tools{display:flex;flex-direction:column;gap:7px}
 .office-app{--office-header-inset:36px}
 .office-app.multi-room{--office-header-inset:30px}
 .office-header-actions{position:absolute;z-index:10;top:30px;right:36px;pointer-events:auto}
@@ -49,6 +51,9 @@
   .office-app .office-sidebar-content>.floor-travel-button,.office-app .office-sidebar-content>.office-social-tools,.office-app .office-sidebar-content>.location-nav,.office-app .office-sidebar-content>.camera-controls{position:static;inset:auto;transform:none;flex:none;width:100%;max-width:none;box-sizing:border-box;margin:0}
   .office-app .office-sidebar-content>.floor-travel-button{justify-content:center;min-height:44px;font-size:11px;box-shadow:none}
   .office-app .office-sidebar-content>.office-social-tools{display:flex;flex-direction:column;gap:4px}
+  .office-app .office-sidebar-content .rooftop-note-restore{display:flex}
+  .office-app .rooftop-note.is-collapsed{display:none}
+  .rooftop-weather-tools{gap:4px}
   .office-app .office-sidebar-content>.office-social-tools button{min-height:44px;font-size:11px;padding:0 6px;box-shadow:none}
   .office-app .office-sidebar-content>.location-nav{display:flex;flex-direction:column;padding:4px;gap:3px;border-radius:10px;box-shadow:none;background:#edf1e7}
   .office-app .office-sidebar-content>.location-nav button{flex:none;flex-direction:row;justify-content:flex-start;gap:9px;min-width:0;min-height:44px;padding:7px 10px;font-size:11px;border-radius:8px;white-space:nowrap}

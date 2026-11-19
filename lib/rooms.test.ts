@@ -39,6 +39,49 @@ function fixture() {
   return { sql, send, advance, create, beforeNextBatch(query: string, run: () => Promise<void>) { interleaving = { query, run }; } };
 }
 
+test('rooftop weather actions and bounded props roundtrip without sharing local weather', async () => {
+  const f = fixture(), host = await f.create(), controller = createMultiController(host.snapshot.players[0], 4);
+  controller.engine.dispatch({ type: 'travel', floor: 'rooftop' }); controller.step(2);
+  controller.engine.dispatch({ type: 'weather', precipitation: 'snow' });
+  controller.engine.dispatch({ type: 'weather-play', kind: 'snowduck' }); controller.step(3);
+  controller.engine.dispatch({ type: 'weather-play', kind: 'snowman' }); controller.step(.5);
+  const input = controller.serializePlayer();
+  assert.equal(input.activity?.kind, 'snowman'); assert.equal(input.weatherCreations?.length, 1);
+  assert.equal('weatherKind' in input, false);
+  const response = await f.send({ action: 'sync', ...host.session, player: { ...input, weatherKind: 'snow' } });
+  assert.equal(response.status, 200);
+  const player = (response.body as { snapshot: RoomSnapshot }).snapshot.players[0];
+  assert.equal(player.pose, 'snowman'); assert.deepEqual(player.weatherCreations, input.weatherCreations);
+  assert.ok(input.activity?.craftPoint); assert.deepEqual(player.activity?.craftPoint, input.activity.craftPoint);
+  assert.equal('weatherKind' in player, false);
+  controller.engine.dispatch({ type: 'cancel' }); controller.engine.dispatch({ type: 'weather-play', kind: 'snowball' }); controller.step(1);
+  f.advance(300);
+  const thrown = await f.send({ action: 'sync', ...host.session, player: controller.serializePlayer() });
+  assert.equal(thrown.status, 200);
+  assert.equal((thrown.body as { snapshot: RoomSnapshot }).snapshot.players[0].weatherEffect?.kind, 'snowball');
+});
+
+test('room weather payload rejects oversized, unsafe and inconsistent visual objects', async () => {
+  const f = fixture(), host = await f.create(), controller = createMultiController(host.snapshot.players[0], 4);
+  controller.engine.dispatch({ type: 'travel', floor: 'rooftop' }); controller.step(2);
+  const base = controller.serializePlayer();
+  const creation = { id: 1, kind: 'snowman', x: 0, z: 0, angle: 0, remaining: 120 };
+  for (const change of [
+    { weatherCreations: Array.from({ length: 7 }, (_, i) => ({ ...creation, id: i + 1 })) },
+    { weatherCreations: [{ ...creation, x: 50 }] }, { weatherCreations: [{ ...creation, remaining: 121 }] },
+    { weatherCreations: [{ ...creation, angle: Infinity }] }, { weatherCreations: [creation, creation] },
+    { weatherCreations: [{ ...creation, kind: 'unknown' }] },
+    { pose: 'snowman', activity: { kind: 'snowman', duration: 3.2, remaining: 1, craftPoint: { x: 100, z: 0 } } },
+    { pose: 'snowman', activity: { kind: 'snowman', duration: 3.2, remaining: 1, craftPoint: { x: NaN, z: 0 } } },
+    { pose: 'snowman', activity: null },
+    { pose: 'snowman', moving: true, activity: { kind: 'snowman', duration: 3.2, remaining: 1 } },
+    { weatherEffect: { ...creation, kind: 'splash', duration: 1, remaining: 3 } },
+  ]) {
+    const response = await f.send({ action: 'sync', ...host.session, player: { ...base, ...change } });
+    assert.equal(response.status, 400, JSON.stringify(change));
+  }
+});
+
 test('room admission persists personal ranks and one shared boss rank without changing raw names', async () => {
   const f = fixture();
   const created = await f.send({ action: 'create', name: '서준', roomName: '직급 회사', capacity: 4, rank: '대리', bossRank: '상무' });

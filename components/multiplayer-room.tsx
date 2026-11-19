@@ -63,6 +63,7 @@ function RoomGame({initial,onExit,controller}:{initial:JoinedRoom;onExit:()=>voi
   const newsOpen = useRef(false), wallpaperOpen = useRef(false), weatherOpen = useRef(false);
   const weather = useLocalWeather();
   const environmentRef = useRef(weather.frame); environmentRef.current = weather.frame;
+  useEffect(() => { engine.dispatch({ type: 'weather', precipitation: weather.frame.precipitation }); }, [engine, weather.frame.precipitation]);
   const wallpapers = useMonitorWallpapers(session, snapshot.players);
   const ownWallpaperId = snapshot.players.find(player => player.id === session.playerId)?.wallpaperId ?? null;
   const personalWallpaper = usePersonalWallpaperInRoom(session, ownWallpaperId, wallpapers.get(controller.player.seatIndex) ?? null, () => syncNow.current());

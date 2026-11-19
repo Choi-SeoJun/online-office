@@ -99,11 +99,15 @@ export function createRoofSurfaceWeather(roof: THREE.Group) {
     transform.position.set(x, y, z); transform.scale.set(rx, height, rz); transform.updateMatrix(); mesh.setMatrixAt(i, transform.matrix);
   };
   let state: SurfaceState = { snow: 0, wet: 0 }, clock = 0, pending = 0, wasOnRoof = false, lastKind: Precipitation | undefined;
-  let disposed = false;
+  let disposed = false, seededSnow = false, seededWet = false;
   root.visible = false;
   return {
     update(kind: Precipitation, onRoof: boolean, settings: Pick<Settings, 'quality' | 'reducedMotion'>, dt: number) {
       if (disposed) return;
+      // A weather observation describes an already snowy/wet day. Seed each
+      // condition once, then retain the existing gradual buildup and thaw.
+      if (kind === 'snow' && !seededSnow) { state.snow = Math.max(state.snow, .65); seededSnow = true; }
+      if (kind === 'rain' && !seededWet) { state.wet = Math.max(state.wet, .65); seededWet = true; }
       const step = elapsed(dt); state = stepRoofSurfaceWeather(state, kind, step);
       root.visible = onRoof && (state.snow > .002 || state.wet > .002);
       const justReturned = onRoof && !wasOnRoof; wasOnRoof = onRoof;

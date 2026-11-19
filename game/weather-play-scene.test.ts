@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import { createGameEngine } from './engine.ts';
+import { createWeatherPlayScene } from './weather-play-scene.ts';
+import { isPointerEligible } from './scene.ts';
+
+test('craft preview uses the room-visible reserved point instead of recalculating from private props', () => {
+  const roof = new THREE.Group(), scene = createWeatherPlayScene(roof), state = createGameEngine().state;
+  state.floor = 'rooftop'; state.player.x = state.player.z = 0;
+  state.activity = { kind: 'snowman', duration: 3.2, remaining: 2, craftPoint: { x: -1.8, z: 0 } };
+  scene.update([state], state.settings);
+  const preview = roof.getObjectByName('weather-play-preview')!;
+  assert.equal(preview.position.x, -1.8); assert.equal(preview.position.z, 0);
+  scene.dispose();
+});
+
+test('snow sculptures, a visible throw arc, and splash ripples are bounded and pointer transparent', () => {
+  const roof = new THREE.Group(), scene = createWeatherPlayScene(roof), state = createGameEngine().state;
+  state.floor = 'rooftop'; state.player.x = state.player.z = 0; state.player.angle = 0;
+  state.weatherCreations = [{ id: 1, kind: 'snowman', x: 1, z: 1, angle: 0, remaining: 120 }, { id: 2, kind: 'snowduck', x: 2, z: 1, angle: 0, remaining: 120 }];
+  scene.update([state], state.settings);
+  const snowman = roof.getObjectByName('snowman-1')!, duck = roof.getObjectByName('snowduck-2')!;
+  assert.ok(snowman && duck); assert.ok(new THREE.Box3().setFromObject(snowman).max.y > .9);
+  assert.equal(isPointerEligible(snowman.children[0]), false);
+  state.weatherEffect = { id: 3, kind: 'snowball', x: 0, z: 0, angle: 0, duration: 1, remaining: .7 };
+  scene.update([state], state.settings);
+  const ball = roof.getObjectByName('weather-snowball')!;
+  const first = ball.position.clone(); assert.ok(first.y > 1 && first.z > .5);
+  state.weatherEffect.remaining = .25; scene.update([state], state.settings);
+  assert.ok(ball.position.z > first.z && ball.position.y < first.y);
+  state.weatherEffect = { id: 4, kind: 'splash', x: 0, z: 1, angle: 0, duration: 1, remaining: .6 };
+  scene.update([state], state.settings);
+  const splash = roof.getObjectByName('weather-splash')!;
+  assert.equal(ball.visible, false); assert.equal(splash.visible, true);
+  const particles = splash.getObjectByName('splash-droplets')!;
+  assert.ok(particles.children.some(particle => particle.visible));
+  scene.update([state], { ...state.settings, quality: 'low' });
+  assert.ok(particles.children.filter(particle => particle.visible).length <= 4);
+  scene.update([state], { ...state.settings, reducedMotion: true });
+  assert.equal(particles.visible, false);
+  const ring = splash.getObjectByName('splash-ring-0')!, scale = ring.scale.clone();
+  state.weatherEffect.remaining = .2; scene.update([state], { ...state.settings, reducedMotion: true });
+  assert.deepEqual(ring.scale, scale);
+  state.weatherCreations = []; state.weatherEffect = null; scene.update([state], state.settings);
+  assert.equal(roof.getObjectByName('snowman-1'), undefined); assert.equal(splash.visible, false);
+  let disposal = 0;
+  (ball as THREE.Mesh).geometry.addEventListener('dispose', () => disposal++);
+  scene.dispose(); scene.dispose(); assert.equal(disposal, 1); assert.equal(roof.children.length, 0);
+});

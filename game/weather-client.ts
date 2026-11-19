@@ -35,6 +35,22 @@ function write(key: string, value: unknown) {
 
 export const readRegion = () => normalizeRegion(read(REGION_KEY)) ?? DEFAULT_REGION;
 
+/** An installed older bundle may not yet know a previously saved new code.
+ * Keep its display name while loading the catalog, never use unverified coordinates. */
+export function readRegionPreference(): {region:WeatherRegion|null;pendingName:string|null} {
+  const value=read(REGION_KEY);
+  const known=normalizeRegion(value);
+  if(known)return {region:known,pendingName:null};
+  if(value && typeof value==='object') {
+    const {id,name,source}=value as Partial<WeatherRegion>;
+    if(typeof id==='string' && /^(?:\d{10}|address:\d{10}:\d{10})$/.test(id) &&
+        (source==='manual'||source==='location') && typeof name==='string' && name.length>0 && name.length<=160 && !/[\u0000-\u001f<>]/.test(name)) {
+      return {region:null,pendingName:name};
+    }
+  }
+  return {region:DEFAULT_REGION,pendingName:null};
+}
+
 export function saveRegion(region: WeatherRegion) {
   const normalized = normalizeRegion(region);
   if (normalized) write(REGION_KEY, normalized);
