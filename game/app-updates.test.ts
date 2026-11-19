@@ -5,10 +5,10 @@ import { watchAppVersion, appUpdateUrl, canAutoApplyUpdate } from './app-updates
 const oldVersion = 'aaaaaaaa-1111-4111-8111-111111111111';
 const newVersion = 'bbbbbbbb-2222-4222-8222-222222222222';
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function setup(t: TestContext, options: { result?: () => Promise<Response> } = {}) {
+function setup(t: TestContext, options: { result?: () => Promise<Response>; hidden?: boolean; online?: boolean } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: 1_000_000 });
-  const window = Object.assign(new EventTarget(), { navigator: { onLine: true } });
-  const document = Object.assign(new EventTarget(), { hidden: false });
+  const window = Object.assign(new EventTarget(), { navigator: { onLine: options.online ?? true } });
+  const document = Object.assign(new EventTarget(), { hidden: options.hidden ?? false });
   const calls: { url: string; init?: RequestInit }[] = [], updates: { version: string | null; initial: boolean }[] = [];
   let latest = oldVersion;
   const stop = watchAppVersion({ version: oldVersion, url: 'https://game.test/online-office/app-version.json', window, document,
@@ -34,6 +34,27 @@ test('checks at startup and every five visible minutes with uncached requests', 
 test('a newer first response is marked as boot-only', async t => {
   const w = setup(t, { result: async () => Response.json({ version: newVersion }) }); await flush();
   assert.deepEqual(w.updates, [{ version: newVersion, initial: true }]);
+});
+
+for (const initiallyUnavailable of ['hidden', 'offline']) {
+  test(`starting ${initiallyUnavailable} never auto-applies an update on return`, async t => {
+    const w = setup(t, { hidden: initiallyUnavailable === 'hidden', online: initiallyUnavailable !== 'offline' });
+    await flush(); assert.equal(w.calls.length, 0);
+    w.setVersion(newVersion); w.advance(5 * 60_000);
+    w.document.hidden = false; w.window.navigator.onLine = true;
+    w.document.dispatchEvent(new Event('visibilitychange'));
+    w.window.dispatchEvent(new Event('online')); await flush();
+    assert.deepEqual(w.updates, [{ version: newVersion, initial: false }]);
+  });
+}
+
+test('a startup response loses automatic eligibility after a background round trip', async t => {
+  let finish!: (value: Response) => void;
+  const w = setup(t, { result: () => new Promise(resolve => { finish = resolve; }) });
+  w.document.hidden = true; w.document.dispatchEvent(new Event('visibilitychange'));
+  w.document.hidden = false; w.document.dispatchEvent(new Event('visibilitychange'));
+  finish(Response.json({ version: newVersion })); await flush();
+  assert.deepEqual(w.updates, [{ version: newVersion, initial: false }]);
 });
 
 test('rollback to the loaded version clears a previously shown notice', async t => {

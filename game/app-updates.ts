@@ -22,13 +22,13 @@ export function watchAppVersion({ version, url, window, document, onUpdate, fetc
   onUpdate(version: string | null, initial: boolean): void;
   fetcher?: typeof fetch;
 }) {
-  let stopped = false, first = true, lastAttempt = -Infinity, announced: string | null = null;
+  let stopped = false, bootEligible = true, lastAttempt = -Infinity, announced: string | null = null;
   let active: AbortController | null = null, timeout: ReturnType<typeof setTimeout> | null = null;
-  async function check(foreground = false) {
+  async function check(foreground = false, initial = false) {
     if (stopped || active || document.hidden || !window.navigator.onLine) return;
     const now = Date.now();
     if (now >= lastAttempt && now - lastAttempt < (foreground ? 60_000 : APP_VERSION_INTERVAL)) return;
-    const initial = first; first = false; lastAttempt = now;
+    lastAttempt = now;
     const request = new AbortController(); active = request;
     timeout = setTimeout(() => request.abort(), 8000);
     try {
@@ -38,7 +38,7 @@ export function watchAppVersion({ version, url, window, document, onUpdate, fetc
       const data: unknown = await response.json();
       if (stopped || request.signal.aborted || !data || typeof data !== 'object' || !('version' in data) || !validVersion(data.version)) return;
       const next = data.version === version ? null : data.version;
-      if (next !== announced) { announced = next; onUpdate(next, initial); }
+      if (next !== announced) { announced = next; onUpdate(next, initial && bootEligible); }
     } catch { /* Updates are optional while offline; never block the game. */ }
     finally {
       if (timeout !== null) clearTimeout(timeout);
@@ -47,12 +47,14 @@ export function watchAppVersion({ version, url, window, document, onUpdate, fetc
     }
   }
   const tick = () => { void check(); };
-  const foreground = () => { void check(true); };
+  // A delayed first check, or a boot request that crosses a background trip,
+  // must never replace a resumed game. Only the mount-time request can auto-apply.
+  const foreground = () => { bootEligible = false; void check(true); };
   window.addEventListener('focus', foreground);
   window.addEventListener('online', foreground);
   document.addEventListener('visibilitychange', foreground);
   const timer = setInterval(tick, 30_000);
-  tick();
+  void check(false, true);
   return () => {
     stopped = true; active?.abort();
     if (timeout !== null) clearTimeout(timeout);

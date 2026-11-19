@@ -21,6 +21,8 @@
 - [x] Test version comparison, interval/foreground scheduling, cancellation, failures, boot-only reload policy and cache-busting URL preservation.
 - [x] Add shared build plugin, version watcher, root update notice and integration.
 - [x] Add weather valid-time/source wording and document the actual Cheonan API sample.
-- [x] Typecheck, all 395 tests, Pages/Sites builds and local old/new version UI checks.
+- [x] Typecheck, full test suite, Pages/Sites builds and local old/new version UI checks.
 - [ ] Read-only reviewer, fix material findings, publish same source to GitHub and Sites.
 - [ ] Verify version JSON matches deployed bundles, public notice/metadata and explain physical-device verification limit.
+
+Review fix: an initially hidden/offline page or a delayed startup response after a background round trip must show an update notice without automatically navigating. Three regression tests reproduced the problem; auto-apply eligibility is now limited to the mount-time request and revoked on foreground/visibility events.
