@@ -35,6 +35,7 @@ test('KMA attribution requires valid metadata and does not describe unknown sky 
   const kma = { ...raw, source: 'kma', kmaPty: 0, skyKnown: false };
   assert.equal(forecastLabel(parseWeatherForecast(kma, noon)!), '강수 없음');
   assert.equal(forecastLabel(parseWeatherForecast({ ...kma, kmaPty: 2 }, noon)!), '비·눈');
+  assert.equal(forecastLabel(parseWeatherForecast({ ...kma, skyKnown: true, current: { ...raw.current, weather_code: 2 } }, noon)!), '구름많음');
   for (const altered of [{ source: 'other' }, { kmaPty: null }, { kmaPty: 8 }, { kmaPty: 1.5 }, { skyKnown: null }]) {
     assert.equal(parseWeatherForecast({ ...kma, ...altered }, noon), null);
   }

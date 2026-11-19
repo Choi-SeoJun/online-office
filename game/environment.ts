@@ -19,7 +19,7 @@ const rain = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96
 export const weatherLabel = (code: number) => labels.get(code) ?? '알 수 없음';
 export function forecastLabel(forecast: WeatherForecast) {
   if (forecast.source === 'kma') {
-    if (forecast.kmaPty === 0) return forecast.skyKnown ? weatherLabel(forecast.code) : '강수 없음';
+    if (forecast.kmaPty === 0) return forecast.skyKnown ? forecast.code === 2 ? '구름많음' : weatherLabel(forecast.code) : '강수 없음';
     return ['강수 없음', '비', '비·눈', '눈', '소나기', '빗방울', '빗방울·눈날림', '눈날림'][forecast.kmaPty ?? -1] ?? weatherLabel(forecast.code);
   }
   return weatherLabel(forecast.code);

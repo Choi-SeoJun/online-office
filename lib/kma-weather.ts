@@ -73,7 +73,13 @@ function rows(raw: unknown, cycle: Cycle, grid: Grid, sky: boolean): Row[] | nul
 }
 
 function observation(items: Row[], cycle: Cycle, now: number) {
-  const values = new Map(items.map(item => [item.category, numeric(item.obsrValue)]));
+  const values = new Map<string, number>();
+  for (const item of items) {
+    if (typeof item.category !== 'string' || !['PTY','T1H','WSD'].includes(item.category)) continue;
+    const value = numeric(item.obsrValue);
+    if (values.has(item.category) && values.get(item.category) !== value) throw new Error('Conflicting KMA observations');
+    values.set(item.category, value);
+  }
   const pty = values.get('PTY')!, temperature = values.get('T1H')!, wind = values.get('WSD')!;
   const observed = timestamp(cycle.date, cycle.time);
   if (!Number.isInteger(pty) || !range(pty, 0, 7) || !range(temperature, -80, 60) || !range(wind, 0, 150) ||

@@ -78,6 +78,20 @@ test('accepts KMA sky response normalized to the hour while preserving strict ob
   assert.equal(forecast.skyKnown, true);
   assert.equal(forecast.cloud, 100);
 });
+test('conflicting observation rows never turn reported snow into dry weather in either order', async () => {
+  for (const reverse of [false, true]) {
+    const load = createKmaWeather({ now: () => now, fetcher: async input => {
+      const url = new URL(input), data = payload(url, 3, 1);
+      if (url.pathname.endsWith('getUltraSrtNcst')) {
+        const items: Array<Record<string, unknown>> = data.response.body.items.item;
+        items.push({ ...items[0], obsrValue: '0' });
+        if (reverse) items.reverse();
+      }
+      return Response.json(data);
+    } });
+    await assert.rejects(load(region, key));
+  }
+});
 for (const kind of ['missing', 'sentinel', 'old', 'wrong-grid', 'oversize', 'denied'] as const) {
   test(`rejects ${kind} observations without inventing current weather or leaking provider data`, async () => {
     let obs = 0;
