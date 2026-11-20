@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { RoofWallSide } from './types.ts';
 
-type SnowSurface = { x: number; y: number; z: number; rx: number; rz: number; leaf: boolean; wall?: RoofWallSide };
+type SnowSurface = { x: number; y: number; z: number; rx: number; rz: number; leaf: boolean; wall?: RoofWallSide; height?: number };
+const variation = (n: number) => THREE.MathUtils.euclideanModulo(Math.sin(n * 127.1 + 3) * 43758.5453, 1);
 
 /** Preserve small receiver footprints before static architecture is merged. */
 export function captureRoofSnowSurfaces(roof: THREE.Group) {
@@ -13,9 +14,25 @@ export function captureRoofSnowSurfaces(roof: THREE.Group) {
     const bounds = object.geometry.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, object.matrixWorld));
     const center = bounds.getCenter(new THREE.Vector3()), size = bounds.getSize(new THREE.Vector3());
     const leaf = object.userData.snowReceiver === 'leaf';
+    const wall = object.userData.cutawaySide as RoofWallSide | undefined;
+    if (wall) {
+      const alongX = size.x > size.z, length = alongX ? size.x : size.z;
+      const count = Math.max(2, Math.floor(length / 1.5)), spacing = length / count;
+      const wallSeed = ['north', 'south', 'east', 'west'].indexOf(wall) * 31;
+      // Separate, repeatable drifts leave bare coping visible even at full snow.
+      for (let i = 0; i < count; i++) {
+        const seed = wallSeed + i * 4;
+        const offset = -length / 2 + spacing * (i + .5 + (variation(seed) - .5) * .28);
+        const radius = spacing * (.20 + variation(seed + 1) * .11);
+        const width = (alongX ? size.z : size.x) * (.42 + variation(seed + 2) * .08);
+        surfaces.push({ x: center.x + (alongX ? offset : 0), y: bounds.max.y + .003,
+          z: center.z + (alongX ? 0 : offset), rx: alongX ? radius : width, rz: alongX ? width : radius,
+          leaf: false, wall, height: .11 + variation(seed + 3) * .07 });
+      }
+      return;
+    }
     surfaces.push({ x: center.x, y: bounds.max.y + .003, z: center.z,
-      rx: size.x * (leaf ? .40 : .54), rz: size.z * (leaf ? .43 : .54), leaf,
-      ...(object.userData.cutawaySide ? { wall: object.userData.cutawaySide } : {}) });
+      rx: size.x * (leaf ? .40 : .54), rz: size.z * (leaf ? .43 : .54), leaf });
   });
   roof.userData.snowSurfaces = surfaces;
 }
@@ -44,7 +61,7 @@ export function createRoofSnowCover(parent: THREE.Group, roof: THREE.Group, geom
       points.forEach((p, i) => {
         if (low && p.leaf && i % 2) return;
         transform.position.set(p.x, p.y, p.z);
-        transform.scale.set(p.rx * (.8 + snow * .2), .012 + snow * (p.leaf ? .055 : .09), p.rz * (.8 + snow * .2));
+        transform.scale.set(p.rx * (.8 + snow * .2), .012 + snow * (p.height ?? (p.leaf ? .055 : .09)), p.rz * (.8 + snow * .2));
         transform.updateMatrix(); mesh.setMatrixAt(index++, transform.matrix);
       });
       mesh.count = index; mesh.instanceMatrix.needsUpdate = true;
