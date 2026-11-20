@@ -39,12 +39,18 @@ test('held snowball is visible while walking, takes priority over coffee, and di
   assert.equal(rig.heldSnowball.visible, false);
 });
 
-test('splash hops lift the whole body and both feet; reduced motion keeps feet grounded', () => {
+test('splash hops raise both arms outward and both feet; reduced motion keeps feet grounded', () => {
   const { state, rig } = setup(); state.player.pose = 'splash';
   state.activity = { kind: 'splash', duration: 2.7, remaining: 2.7 * .85 };
   animateActor(rig, state.player, state, 0);
   assert.ok(rig.body.position.y > .12, 'a playful hop lifts the body, not just one foot');
   assert.ok(rig.calves.every(leg => leg.rotation.x > .1), 'both knees bend in the air');
+  rig.root.updateMatrixWorld(true);
+  for (const [side, arm, hand] of [[-1, rig.leftArm, rig.leftHand], [1, rig.rightArm, rig.hand]] as const) {
+    const wrist = rig.body.worldToLocal(hand.getWorldPosition(new THREE.Vector3()));
+    assert.ok(side * (wrist.x - arm.position.x) > .2, 'hands spread outside their shoulders, never across the chest');
+    assert.ok(wrist.y > arm.position.y + .1, 'hands rise above shoulder height during the hop');
+  }
   state.settings.reducedMotion = true; animateActor(rig, state.player, state, 0);
   assert.equal(rig.body.position.y, 0);
 });

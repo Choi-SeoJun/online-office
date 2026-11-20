@@ -422,8 +422,9 @@ export function animateActor(r: Rig, a: Actor, state: GameState, time: number) {
       const hop = reduced ? 0 : splashHop(progress), sway = reduced ? 0 : Math.sin(progress * Math.PI * 6);
       r.body.position.y = hop * .23; r.body.position.x = sway * .065;
       r.body.rotation.z = sway * .07; r.head.rotation.x = -.08;
-      r.leftArm.rotation.set(-.45 - hop * .5, -.1, .55 + hop * .25);
-      r.rightArm.rotation.set(-.45 - hop * .5, .1, -.55 - hop * .25);
+      const cheer = reduced ? 1.75 : 1.4 + hop * .78;
+      r.leftArm.rotation.set(-.08, 0, -cheer);
+      r.rightArm.rotation.set(-.08, 0, cheer);
       r.legs.forEach((leg, i) => { leg.rotation.x = -hop * (.23 + (i ? .15 : 0)) + sway * (i ? -.1 : .1); r.calves[i].rotation.x = hop * .55; });
     }
   }
