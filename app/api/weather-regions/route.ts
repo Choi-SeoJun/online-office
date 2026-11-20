@@ -1,7 +1,14 @@
 import {waitUntil} from 'cloudflare:workers';
 import {hostedRegionCatalog} from '../../../lib/hosted-region-catalog.ts';
 
-export async function GET(request:Request){
+export function GET(request:Request){
+  const job=handle(request);
+  // Other requests share this catalog read/refresh, even if its client leaves.
+  waitUntil(job.then(()=>{},()=>{}));
+  return job;
+}
+
+async function handle(request:Request){
   const url=new URL(request.url), origin=request.headers.get('origin');
   const allowed=!origin||origin===url.origin||origin==='https://choi-seojun.github.io';
   const headers=new Headers({'Cache-Control':'no-store','Vary':'Origin','X-Content-Type-Options':'nosniff'});

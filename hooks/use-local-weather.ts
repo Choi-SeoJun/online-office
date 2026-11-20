@@ -59,7 +59,7 @@ export function useLocalWeather() {
     active.current = controller;
     const timer = window.setTimeout(() => controller.abort(), 15000);
     try {
-      const forecast = await requestForecast(next, controller.signal);
+      const forecast = await requestForecast(next, controller.signal, cached);
       if (active.current !== controller) return;
       if (controller.signal.aborted) throw new Error('Weather request timed out');
       resolveTimezone(forecast);

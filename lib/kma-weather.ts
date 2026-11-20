@@ -133,7 +133,11 @@ export function createKmaWeather({ fetcher = fetch, now = Date.now }: { fetcher?
       if (!items) throw new Error('No KMA observation');
       return observation(items, cycle, time);
     })();
-    const [obs, sky] = await Promise.all([obsJob, query('getUltraSrtFcst', skyCycle, grid, serviceKey).then(items => skyValue(items, time)).catch(() => null)]);
+    // Both queries share pending I/O across requests. Do not end the retained
+    // Worker request on an early observation failure and abandon the sky query.
+    const [observed, skyResult] = await Promise.allSettled([obsJob, query('getUltraSrtFcst', skyCycle, grid, serviceKey).then(items => skyValue(items, time))]);
+    if (observed.status === 'rejected') throw observed.reason;
+    const obs = observed.value, sky = skyResult.status === 'fulfilled' ? skyResult.value : null;
     const cloud = sky === 1 ? 10 : sky === 3 ? 70 : sky === 4 ? 100 : 50;
     const dryCode = sky === 1 ? 0 : sky === 3 ? 2 : 3;
     const code = [dryCode,61,73,73,80,51,71,71][obs.pty];

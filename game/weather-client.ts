@@ -109,18 +109,27 @@ async function fetchForecast(url: URL, signal: AbortSignal, timeout: number) {
   }
 }
 
-export async function requestForecast(region: WeatherRegion, signal: AbortSignal) {
+export async function requestForecast(region: WeatherRegion, signal: AbortSignal, cached: WeatherForecast | null = null) {
   const normalized = normalizeRegion(region);
   if (!normalized) throw new Error('Invalid weather region');
   // KMA observations must win over model weather. Its key stays on the Worker.
   const url = new URL('/api/weather', new URL(roomEndpoint(), window.location.href));
   url.searchParams.set('region', normalized.id!);
   try {
-    return await fetchForecast(url, signal, 8500);
+    const forecast=await fetchForecast(url,signal,8500);
+    const previous=usableForecast(cached,Date.now());
+    if(previous?.source==='kma' && (forecast.source!=='kma' || forecast.observedAt<previous.observedAt)) {
+      throw new Error('Keep the newer official observation');
+    }
+    return forecast;
   } catch (error) {
     signal.throwIfAborted();
     // Respect a server rate limit; ordinary upstream failures are returned as 503.
     if (error instanceof WeatherRateLimitError) throw error;
+    // The caller passes only this region's usable cache and marks it cached on
+    // failure. Do not let a transient outage replace observed rain/snow with a
+    // conflicting forecast model, or extend the original observation's age.
+    if(usableForecast(cached,Date.now())?.source==='kma')throw error;
     return fetchForecast(weatherProviderUrl(normalized.latitude, normalized.longitude), signal, 6000);
   }
 }

@@ -4,6 +4,13 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 // Changes from the previous 04:00 (inclusive) to this 04:00 (exclusive)
 // belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
+  '2026-11-21': {
+    added: [],
+    fixed: [
+      '날씨 연결이 잠시 끊겨도 최근 기상청 관측을 유지해 눈 놀이·물장구 버튼이 갑자기 사라지지 않도록 고쳤어요. 새 관측에서 비·눈이 그친 것이 확인되면 자동으로 반영해요.',
+      '지역을 바꾸거나 날씨 조회가 실패한 뒤 다음 조회까지 멈추던 문제를 고쳤어요.',
+    ],
+  },
   '2026-11-20': {
     added: [
       '행정구역과 주소 동 이름을 매일 공식 자료와 대조해 자동으로 갱신해요. 새 지역이나 이름 변경을 반영하고, 자료 연결이 어려우면 마지막 정상 목록을 유지해요.',

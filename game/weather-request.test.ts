@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { DEFAULT_REGION } from './environment.ts';
+import { DEFAULT_REGION, parseWeatherForecast, MAX_FORECAST_AGE } from './environment.ts';
 import { requestForecast } from './weather-client.ts';
 
 const now = Date.parse('2026-11-19T05:45:00Z');
@@ -102,4 +102,45 @@ test('two unavailable routes fail without inventing a forecast or retrying in a 
   t.mock.method(globalThis, 'fetch', async () => { calls++; return new Response(null, { status: 503 }); });
   await assert.rejects(requestForecast(DEFAULT_REGION, new AbortController().signal));
   assert.equal(calls, 2);
+});
+
+test('a temporary KMA failure preserves usable observed snow instead of replacing it with model cloud',async t=>{
+  setup(t);
+  const observed=parseWeatherForecast({...payload,source:'kma',kmaPty:3,skyKnown:true,current:{...payload.current,weather_code:73}},now)!;
+  let calls=0;
+  t.mock.method(globalThis,'fetch',async()=>++calls===1?new Response(null,{status:503}):Response.json({...payload,current:{...payload.current,weather_code:3}}));
+  await assert.rejects(requestForecast(DEFAULT_REGION,new AbortController().signal,observed));
+  assert.equal(calls,1,'caller retains the original observation without contacting a conflicting model');
+  assert.equal(observed.fetchedAt,now,'failed checks cannot extend the observation lifetime');
+});
+
+test('a model response from the server cannot overwrite a usable KMA observation either',async t=>{
+  setup(t);
+  const observed=parseWeatherForecast({...payload,source:'kma',kmaPty:3,skyKnown:true,current:{...payload.current,weather_code:73}},now)!;
+  t.mock.method(globalThis,'fetch',async()=>Response.json(payload));
+  await assert.rejects(requestForecast(DEFAULT_REGION,new AbortController().signal,observed));
+});
+
+test('older KMA cache responses cannot roll back newer precipitation observations',async t=>{
+  setup(t);
+  const observed=parseWeatherForecast({...payload,source:'kma',kmaPty:3,skyKnown:true,current:{...payload.current,weather_code:73}},now)!;
+  t.mock.method(globalThis,'fetch',async()=>Response.json({...payload,source:'kma',kmaPty:0,skyKnown:true,current:{...payload.current,time:now/1000-600,weather_code:3}}));
+  await assert.rejects(requestForecast(DEFAULT_REGION,new AbortController().signal,observed));
+});
+
+test('newer official dry weather still stops snow immediately, with no artificial snowfall hold',async t=>{
+  setup(t);
+  const observed=parseWeatherForecast({...payload,source:'kma',kmaPty:3,skyKnown:true,current:{...payload.current,time:now/1000-600,weather_code:73}},now-600000)!;
+  t.mock.method(globalThis,'fetch',async()=>Response.json({...payload,source:'kma',kmaPty:0,skyKnown:true,current:{...payload.current,weather_code:3}}));
+  assert.equal((await requestForecast(DEFAULT_REGION,new AbortController().signal,observed)).kmaPty,0);
+});
+
+test('expired observations allow the labelled model fallback instead of preserving snow indefinitely',async t=>{
+  setup(t);
+  const observed=parseWeatherForecast({...payload,source:'kma',kmaPty:3,skyKnown:true,current:{...payload.current,weather_code:73}},now)!;
+  observed.fetchedAt=observed.observedAt=now-MAX_FORECAST_AGE-1;
+  let calls=0;
+  t.mock.method(globalThis,'fetch',async()=>++calls===1?new Response(null,{status:503}):Response.json(payload));
+  assert.equal((await requestForecast(DEFAULT_REGION,new AbortController().signal,observed)).source,'open-meteo');
+  assert.equal(calls,2);
 });

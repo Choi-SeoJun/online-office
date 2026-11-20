@@ -79,6 +79,23 @@ test('missing sky keeps observed precipitation and explicitly marks sky unknown'
   assert.equal(forecast.kmaPty, 0); assert.equal(forecast.skyKnown, false);
   assert.equal(environmentFrame(region, forecast, now).precipitation, 'none');
 });
+test('observation failure waits for the shared sky request before ending the worker request', async () => {
+  let finishSky!: () => void, finished = false, obsCalls = 0, skyCalls = 0;
+  const skyReady = new Promise<void>(resolve => { finishSky = resolve; });
+  const load = createKmaWeather({ now: () => now, fetcher: async input => {
+    const url = new URL(input);
+    if (url.pathname.endsWith('getUltraSrtFcst')) { skyCalls++; await skyReady; }
+    else if (++obsCalls === 1) return new Response('', { status: 503 });
+    return Response.json(payload(url));
+  } });
+  const failed = load(region, key).then(() => { finished = true; }, () => { finished = true; });
+  // Drain the failed observation while the sky response is deliberately pending.
+  await new Promise(resolve => setImmediate(resolve));
+  try { assert.equal(finished, false, 'ending early abandons shared sky I/O in Workers'); }
+  finally { finishSky(); await failed; }
+  assert.equal((await load(region, key)).source, 'kma');
+  assert.equal(obsCalls, 2); assert.equal(skyCalls, 1);
+});
 test('accepts KMA sky response normalized to the hour while preserving strict observation times', async () => {
   const load = createKmaWeather({ now: () => now, fetcher: async input => {
     const url = new URL(input), data = payload(url, 0);
