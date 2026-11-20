@@ -3,7 +3,7 @@ import type { JobRank } from './ranks.ts';
 
 export type RoomPose = Pose;
 /** Only the visible activity crosses the network; inventory and personal work stay private. */
-export type RoomVisualState = Pick<GameState, 'floor' | 'seat' | 'restSeatId' | 'deskMode' | 'roofRest' | 'roofWallSide' | 'candyInMouth' | 'activity' | 'weapon' | 'elapsed' | 'lastHit'> & Partial<Pick<GameState, 'weatherCreations' | 'weatherEffect'>> & { carryingCoffee: boolean };
+export type RoomVisualState = Pick<GameState, 'floor' | 'seat' | 'restSeatId' | 'deskMode' | 'roofRest' | 'roofWallSide' | 'candyInMouth' | 'activity' | 'weapon' | 'elapsed' | 'lastHit'> & Partial<Pick<GameState, 'weatherCreations' | 'weatherEffect' | 'snowballReady'>> & { carryingCoffee: boolean };
 export type RoomPlayer = Actor & RoomVisualState & { seatIndex: number; lastSeen: number; wallpaperId?: string | null };
 export type RoomBossUpdate = { actor: Actor; phase: GameState['bossPhase'] };
 export type RoomBoss = RoomBossUpdate & { lastHit: { id: number; weapon: Weapon; at: number; playerId: string } | null; updatedAt: number };

@@ -61,6 +61,7 @@ test('weather play stands from the bench and release effects clear on cancellati
   const e = rooftop(); e.dispatch({ type: 'weather', precipitation: 'snow' });
   e.dispatch({ type: 'rest', place: 'bench' }); e.step(10);
   assert.equal(e.state.seat, 'roof-bench');
+  e.dispatch({ type: 'weather-play', kind: 'make-snowball' }); e.step(2);
   e.dispatch({ type: 'weather-play', kind: 'snowball' });
   assert.equal(e.state.seat, null); assert.equal(e.state.roofRest, null);
   assert.equal(e.state.weatherEffect, null); e.step(1);
@@ -73,4 +74,35 @@ test('weather play stands from the bench and release effects clear on cancellati
   assert.equal(e.state.weatherEffect, null); assert.equal(e.state.activity, null);
   e.dispose(); e.dispatch({ type: 'weather', precipitation: 'snow' });
   assert.equal(e.state.weatherKind, 'none');
+});
+
+test('snowballs must be made first, survive walking, and are consumed only once at release', () => {
+  const e = rooftop(); e.dispatch({ type: 'weather', precipitation: 'snow' });
+  e.dispatch({ type: 'weather-play', kind: 'snowball' });
+  assert.equal(e.state.activity, null, 'cannot throw before making a ball');
+  e.dispatch({ type: 'weather-play', kind: 'make-snowball' }); e.step(.5);
+  assert.equal(e.state.snowballReady, false); assert.equal(e.state.weatherEffect, null);
+  e.step(2); assert.equal(e.state.snowballReady, true); assert.equal(e.state.weatherEffect, null);
+  e.dispatch({ type: 'weather-play', kind: 'make-snowball' }); assert.equal(e.state.activity, null);
+  e.dispatch({ type: 'move', point: { x: 0, z: 0 } }); e.step(6);
+  assert.equal(e.state.snowballReady, true);
+  e.dispatch({ type: 'weather-play', kind: 'snowball' }); e.step(.2);
+  e.dispatch({ type: 'cancel' }); assert.equal(e.state.snowballReady, true);
+  e.dispatch({ type: 'weather-play', kind: 'snowball' }); e.step(1);
+  assert.equal(e.state.snowballReady, false); assert.equal(e.getSnapshot().weatherEffect?.kind, 'snowball');
+  e.step(2); e.dispatch({ type: 'weather-play', kind: 'snowball' }); assert.equal(e.state.activity, null);
+});
+
+test('unfinished snowballs never appear and held balls clear on weather change, travel and exit', () => {
+  for (const command of [{ type: 'cancel' }, { type: 'move', point: { x: 0, z: 0 } }] as Command[]) {
+    const e = rooftop(); e.dispatch({ type: 'weather', precipitation: 'snow' });
+    e.dispatch({ type: 'weather-play', kind: 'make-snowball' }); e.step(.3); e.dispatch(command); e.step(3);
+    assert.equal(e.state.snowballReady, false);
+  }
+  for (const command of [{ type: 'weather', precipitation: 'none' }, { type: 'travel', floor: 'office' }, { type: 'exit' }] as Command[]) {
+    const e = rooftop(); e.dispatch({ type: 'weather', precipitation: 'snow' });
+    e.dispatch({ type: 'weather-play', kind: 'make-snowball' }); e.step(2);
+    if (command.type === 'weather') e.dispatch({ type: 'pause', value: true });
+    e.dispatch(command); assert.equal(e.state.snowballReady, false);
+  }
 });

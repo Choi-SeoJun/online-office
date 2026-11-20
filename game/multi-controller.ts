@@ -50,6 +50,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
     state.player.pose = 'wallLean'; state.player.angle = ROOF_WALLS[initial.roofWallSide].angle;
   }
   state.candyInMouth = state.floor === 'rooftop' && !!initial.candyInMouth;
+  state.snowballReady = state.floor === 'rooftop' && !!initial.snowballReady;
   if (initial.carryingCoffee) state.inventory.coffee = 1;
   if (state.floor === 'office' && !isMultiWalkable(layout, state.player)) engine.refreshEnvironment();
   engine.dispatch({ type: 'enter', name: initial.name, avatar: initial.avatar, rank: normalizeRank(initial.rank) });
@@ -67,7 +68,7 @@ export function createMultiController(initial: RoomPlayer, capacity: number, sav
     x: player.x, z: player.z, angle: player.angle, pose: player.pose, moving: player.moving,
     floor: state.floor, seat: state.seat, restSeatId: state.restSeatId ?? null, deskMode: state.deskMode, roofRest: state.roofRest, roofWallSide: state.roofWallSide,
     candyInMouth: state.candyInMouth, activity: state.activity ? { ...state.activity, ...(state.activity.craftPoint ? { craftPoint: { ...state.activity.craftPoint } } : {}) } : null, weapon: state.weapon,
-    weatherCreations: state.weatherCreations.map(creation => ({ ...creation })), weatherEffect: state.weatherEffect ? { ...state.weatherEffect } : null,
+    weatherCreations: state.weatherCreations.map(creation => ({ ...creation })), weatherEffect: state.weatherEffect ? { ...state.weatherEffect } : null, snowballReady: state.snowballReady,
     elapsed: state.elapsed, lastHit: state.lastHit ? { ...state.lastHit } : null, carryingCoffee: state.inventory.coffee > 0,
   });
   const dispatch = (command: Command) => { autoInteract = null; engine.dispatch(command); };

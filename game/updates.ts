@@ -5,8 +5,13 @@ export type DailyUpdate = { added: readonly string[]; fixed: readonly string[] }
 // belong together. Keep published entries stable and add work to the next batch.
 export const DAILY_UPDATES: Readonly<Record<string, DailyUpdate>> = {
   '2026-11-21': {
-    added: [],
+    added: [
+      '옥상 난간과 계단실 지붕, 화분과 식물 위에도 눈이 쌓여요. 주변 건물 지붕에도 겨울 풍경을 더했어요.',
+      '눈덩이는 먼저 만든 뒤 손에 들고 다닐 수 있어요. 준비가 끝나면 화면 아래에 던지기 버튼이 나타나요.',
+    ],
     fixed: [
+      '물장구를 폴짝폴짝 뛰며 첨벙거리는 동작으로 바꾸고, 착지에 맞춰 물방울이 튀도록 맞췄어요.',
+      '눈오리 기기를 두 손으로 잡고 꾹꾹 눌러 만드는 동작으로 다듬었어요.',
       '날씨 연결이 잠시 끊겨도 최근 기상청 관측을 유지해 눈 놀이·물장구 버튼이 갑자기 사라지지 않도록 고쳤어요. 새 관측에서 비·눈이 그친 것이 확인되면 자동으로 반영해요.',
       '지역을 바꾸거나 날씨 조회가 실패한 뒤 다음 조회까지 멈추던 문제를 고쳤어요.',
     ],

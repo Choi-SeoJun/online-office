@@ -54,11 +54,21 @@ test('rooftop weather actions and bounded props roundtrip without sharing local 
   assert.equal(player.pose, 'snowman'); assert.deepEqual(player.weatherCreations, input.weatherCreations);
   assert.ok(input.activity?.craftPoint); assert.deepEqual(player.activity?.craftPoint, input.activity.craftPoint);
   assert.equal('weatherKind' in player, false);
-  controller.engine.dispatch({ type: 'cancel' }); controller.engine.dispatch({ type: 'weather-play', kind: 'snowball' }); controller.step(1);
+  controller.engine.dispatch({ type: 'cancel' }); controller.engine.dispatch({ type: 'weather-play', kind: 'make-snowball' }); controller.step(.4);
+  f.advance(300);
+  const making = await f.send({ action: 'sync', ...host.session, player: controller.serializePlayer() });
+  assert.equal(making.status, 200);
+  assert.equal((making.body as { snapshot: RoomSnapshot }).snapshot.players[0].activity?.kind, 'make-snowball');
+  controller.step(2); f.advance(300);
+  const held = await f.send({ action: 'sync', ...host.session, player: controller.serializePlayer() });
+  assert.equal(held.status, 200);
+  assert.equal((held.body as { snapshot: RoomSnapshot }).snapshot.players[0].snowballReady, true);
+  controller.engine.dispatch({ type: 'weather-play', kind: 'snowball' }); controller.step(1);
   f.advance(300);
   const thrown = await f.send({ action: 'sync', ...host.session, player: controller.serializePlayer() });
   assert.equal(thrown.status, 200);
   assert.equal((thrown.body as { snapshot: RoomSnapshot }).snapshot.players[0].weatherEffect?.kind, 'snowball');
+  assert.equal((thrown.body as { snapshot: RoomSnapshot }).snapshot.players[0].snowballReady, false);
 });
 
 test('room weather payload rejects oversized, unsafe and inconsistent visual objects', async () => {

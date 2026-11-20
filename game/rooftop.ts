@@ -3,6 +3,7 @@ import { prepareSeasonalPlant } from './environment-scene.ts';
 import { box, cylinder, paintedWallText, plant, plaque, sphere } from './models.ts';
 import { ROOF_BENCH_SEATS } from './rest-seats.ts';
 import { ROOF_BIN, ROOF_PLANTERS, ROOF_REST, ROOF_STAIRS, ROOF_WALLS } from './layout.ts';
+import { captureRoofSnowSurfaces } from './roof-snow-cover.ts';
 
 /** Uses simulation progress, so hidden tabs and paused games freeze the turn. */
 export function transitionOrbit(transition: { remaining: number; duration: number } | null, reducedMotion: boolean) {
@@ -38,6 +39,7 @@ export function createRooftop(parent: THREE.Object3D, enableWeather = false) {
     const upper = box(wall, dimensions.width, dimensions.height - .55, dimensions.depth, '#e9e0cb', 0, .55 + (dimensions.height - .55) / 2, 0, .015);
     upper.name = `${side}-wall-upper`;
     const cap = box(wall, dimensions.width + .08, .085, dimensions.depth + .08, '#a9b9a7', 0, dimensions.height + .025, 0, .018);
+    cap.name = `roof-parapet-cap-${side}`; cap.userData.snowReceiver = 'wall';
     upper.userData.cutawaySide = side; cap.userData.cutawaySide = side;
     if (side === 'south' || side === 'east') {
       const cutaway = new THREE.MeshStandardMaterial({ color: '#e9e0cb', transparent: true, opacity: .18, depthWrite: false, roughness: .8 });
@@ -50,7 +52,7 @@ export function createRooftop(parent: THREE.Object3D, enableWeather = false) {
   // Leave a walking and resting strip behind and beside the stairwell.
   const stairs = new THREE.Group(); stairs.name = 'rooftop-stairs'; stairs.position.set(ROOF_STAIRS.x, 0, ROOF_STAIRS.z); roof.add(stairs);
   box(stairs, 1.65, 2.8, 1.60, '#ddd5c1', 0, 1.4, 0, .035);
-  box(stairs, 1.78, .13, 1.74, '#a7b7a6', 0, 2.86, 0, .04);
+  box(stairs, 1.78, .13, 1.74, '#a7b7a6', 0, 2.86, 0, .04).userData.snowReceiver = 'roof';
   box(stairs, 1.03, 2.15, .05, '#64877c', 0, 1.1, .82, .02);
   box(stairs, .69, .46, .012, '#bbd6d0', 0, 1.63, .85, .02);
   box(stairs, .13, .045, .09, '#ddc896', .34, 1.02, .87, .01);
@@ -97,8 +99,9 @@ export function createRooftop(parent: THREE.Object3D, enableWeather = false) {
   for (const { x, z } of ROOF_PLANTERS) {
     const planter = new THREE.Group(); planter.name = 'rooftop-planter'; planter.position.set(x,0,z); roof.add(planter);
     box(planter, .83, .45, 1.03, '#bb9b76', 0, .24, 0, .045);
-    box(planter, .76, .035, .96, '#554b35', 0, .48, 0, .015);
+    box(planter, .76, .035, .96, '#554b35', 0, .48, 0, .015).userData.snowReceiver = 'planter';
     const greenery = plant(planter, 0, 0, .90); greenery.position.y = .25;
+    greenery.children.forEach((leaf, index) => { if (index >= 2) leaf.userData.snowReceiver = 'leaf'; });
     if (enableWeather) prepareSeasonalPlant(greenery);
   }
   // Small buildings below the roof line make this feel like a roof, not a room.
@@ -113,7 +116,7 @@ export function createRooftop(parent: THREE.Object3D, enableWeather = false) {
     const y = -8 + h / 2;
     const color = ['#b5c0bc', '#b7bcbc', '#b8c7c3', '#bcc3bd'][index % 4];
     box(skyline, w, h, d, color, x, y, z, .03);
-    box(skyline, w + .14, .14, d + .14, '#c9cfc3', x, -8 + h, z, .02);
+    box(skyline, w + .14, .14, d + .14, '#c9cfc3', x, -8 + h, z, .02).userData.snowReceiver = 'roof';
     for (let row = 0; row < Math.floor(h / 1.1); row++) for (let col = 0; col < 3; col++) {
       box(skyline, .37, .51, .015, index % 2 ? '#d1d6c9' : '#9cafa9', x - w * .29 + col * w * .29, -7.3 + row * 1.05, z + d / 2 + .015, 0);
     }
@@ -123,5 +126,6 @@ export function createRooftop(parent: THREE.Object3D, enableWeather = false) {
     const cloud = new THREE.Group(); cloud.position.set(x, 7.5, z); cloud.scale.setScalar(scale); roof.add(cloud);
     for (let i = 0; i < 3; i++) { const puff = sphere(cloud, .8, '#f4e6ce', (i - 1) * .8, i === 1 ? .25 : 0, 0, 1.3, .5, .6); puff.castShadow = false; }
   }
+  captureRoofSnowSurfaces(roof);
   return roof;
 }

@@ -9,7 +9,7 @@ export type TargetId = 'desk' | 'boss' | 'coffee' | 'snacks' | 'lounge' | 'copie
 export type Weapon = 'punch' | 'hammer' | 'fan';
 export type Snack = 'cookie' | 'choco' | 'cracker';
 export type DeskMode = 'work' | 'shopping' | 'game' | 'sleep';
-export type WeatherPlayKind = 'snowman' | 'snowduck' | 'snowball' | 'splash';
+export type WeatherPlayKind = 'snowman' | 'snowduck' | 'make-snowball' | 'snowball' | 'splash';
 export type WeatherCreation = Point & { id: number; kind: 'snowman' | 'snowduck'; angle: number; remaining: number };
 export type WeatherEffect = Point & { id: number; kind: 'snowball' | 'splash'; angle: number; remaining: number; duration: number };
 export type Pose = 'idle' | 'walk' | 'sit' | 'type' | 'sleep' | 'drink' | 'eat' | 'brew' | 'take' | 'spin' | 'lean' | 'wallLean' | 'hit' | 'watch' | 'scold' | 'candy' | 'dance' | WeatherPlayKind;
@@ -27,7 +27,7 @@ export type GameState = {
   seat: 'desk' | 'lounge' | 'roof-bench' | null; restSeatId?: string | null; deskMode: DeskMode | null;
   roofRest: 'bench' | 'wall' | null; roofWallSide: RoofWallSide | null; roofLeanPoint: Point | null; candyInMouth: boolean;
   activity: Activity | null; inventory: Inventory; weapon: Weapon; settings: Settings;
-  weatherKind: Precipitation; weatherCreations: WeatherCreation[]; weatherEffect: WeatherEffect | null;
+  weatherKind: Precipitation; weatherCreations: WeatherCreation[]; weatherEffect: WeatherEffect | null; snowballReady: boolean;
   warning: number; scold: number; bossPhase: 'routine' | 'watch' | 'scold' | 'hit' | 'recover';
   lastHit: { id: number; weapon: Weapon; at: number } | null;
   bossHit?: { id: number; weapon: Weapon; at: number } | null;

@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ROOF_BOUNDS, ROOF_OBSTACLES, ROOF_REST } from './layout.ts';
 import type { Precipitation } from './environment-types.ts';
 import type { Settings } from './types.ts';
+import { createRoofSnowCover } from './roof-snow-cover.ts';
 
 type SurfaceState = { snow: number; wet: number };
 const elapsed = (dt: number) => Number.isFinite(dt) ? Math.min(.1, Math.max(0, dt)) : 0;
@@ -57,6 +58,7 @@ export function createRoofSurfaceWeather(roof: THREE.Group) {
   root.userData.pointerPassthrough = true; root.userData.dynamic = true; roof.add(root);
   const patch = patchGeometry(), spots = floorPatches(), pools = spots.filter((_, i) => i % 3 === 1);
   const snowMaterial = new THREE.MeshStandardMaterial({ color: '#f1f5f5', roughness: .94, transparent: true, opacity: 0, depthWrite: false });
+  const updateObjectSnow = createRoofSnowCover(root, roof, patch, snowMaterial);
   const snowFloor = new THREE.InstancedMesh(patch, snowMaterial, spots.length); snowFloor.name = 'roof-snow-floor';
   const snowBench = new THREE.InstancedMesh(patch, snowMaterial, 7); snowBench.name = 'roof-snow-bench';
   const waterMaterial = new THREE.MeshStandardMaterial({ color: '#9dbdc8', roughness: .14, metalness: .17, transparent: true, opacity: 0, depthWrite: false });
@@ -109,9 +111,11 @@ export function createRoofSurfaceWeather(roof: THREE.Group) {
       if (kind === 'snow' && !seededSnow) { state.snow = Math.max(state.snow, .65); seededSnow = true; }
       if (kind === 'rain' && !seededWet) { state.wet = Math.max(state.wet, .65); seededWet = true; }
       const step = elapsed(dt); state = stepRoofSurfaceWeather(state, kind, step);
+      snowMaterial.opacity = Math.min(1, state.snow * 1.8);
       root.visible = onRoof && (state.snow > .002 || state.wet > .002);
       const justReturned = onRoof && !wasOnRoof; wasOnRoof = onRoof;
       if (!onRoof) return;
+      updateObjectSnow(state.snow, settings.quality === 'low');
       pending += step;
       if (kind === 'rain' && !settings.reducedMotion) clock += step;
       ripples.visible = kind === 'rain' && state.wet > .12 && !settings.reducedMotion;

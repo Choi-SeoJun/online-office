@@ -6,6 +6,7 @@ import { ROOF_BENCH_SEATS, SOLO_LOUNGE_SEATS, restSeatById, type RestSeat } from
 import { bossName, normalizeRank } from './ranks.ts';
 import { SOLO_OFFICE_PLAN } from './office-plan.ts';
 import { isWeatherPlay, isWeatherCraftPointFree, weatherAllowsPlay, weatherPlayPoint, weatherCraftPoint, WEATHER_CREATION_LIMIT, WEATHER_CREATION_LIFETIME, WEATHER_PLAY_DURATIONS } from './weather-play.ts';
+import { SPLASH_LANDINGS } from './weather-play-motion.ts';
 
 const BOSS_DISTANCE = 1.4, BOSS_CLEARANCE = 1.12, BOSS_REACH = 1.5 + 1e-6;
 const BOSS_WORK_SECONDS = 10 * 60, BOSS_PATROL_SECONDS = 15;
@@ -182,7 +183,7 @@ function initialState(saved?: PersistedState): GameState {
   const rank = normalizeRank(p?.rank), bossRank = normalizeRank(p?.bossRank, '부장');
   return {
     rank, bossRank, entered: false, paused: false, elapsed: 0, name: p?.name ?? '김사원', companyName: p?.companyName ?? '우리 회사',
-    floor: 'office', transition: null, weatherKind: 'none', weatherCreations: [], weatherEffect: null,
+    floor: 'office', transition: null, weatherKind: 'none', weatherCreations: [], weatherEffect: null, snowballReady: false,
     player: { ...actor('player', p?.name ?? '김사원', START), avatar: p?.avatar ?? 'short', rank }, boss: { ...actor('boss', bossName(bossRank), TARGETS.boss.point), rank: bossRank },
     coworkers: DESKS.filter(d => d.owner?.startsWith('colleague')).map((d, i) => actor(d.owner!, ['이대리', '최주임', '정사원'][i], { x: d.x, z: d.z + 1.05 }, i === 1 ? 'sleep' : 'type')),
     target: null, ready: false, destination: null, seat: null, restSeatId: null, deskMode: null, activity: null, roofRest: null, roofWallSide: null, roofLeanPoint: null, candyInMouth: false,
@@ -333,7 +334,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       state.weatherKind = command.precipitation;
       if (state.activity && isWeatherPlay(state.activity.kind) && !weatherAllowsPlay(state.weatherKind, state.activity.kind)) cancel();
       if (state.weatherEffect && !weatherAllowsPlay(state.weatherKind, state.weatherEffect.kind)) state.weatherEffect = null;
-      if (state.weatherKind !== 'snow') state.weatherCreations = [];
+      if (state.weatherKind !== 'snow') { state.weatherCreations = []; state.snowballReady = false; }
     }
     else if (command.type === 'settings') {
       state.settings = readSavedState({ getItem: () => JSON.stringify({ ...toPersistedState(state), settings: { ...state.settings, ...command.value } }) })!.settings;
@@ -358,17 +359,20 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       switch (command.type) {
         case 'weather-play': {
           if (state.floor !== 'rooftop' || !isWeatherPlay(command.kind) || !weatherAllowsPlay(state.weatherKind, command.kind) || busy()) break;
+          if (command.kind === 'snowball' && !state.snowballReady) { event('먼저 눈덩이를 만들어 주세요.'); break; }
+          if (command.kind === 'make-snowball' && state.snowballReady) { event('손에 든 눈덩이를 먼저 던져 보세요.'); break; }
           cancel(); stand(); state.target = null; state.ready = false; state.candyInMouth = false;
           const crafting = command.kind === 'snowman' || command.kind === 'snowduck';
           const point = crafting ? weatherCraftPoint(state.player, occupiedSnowPatches(true)) : weatherPlayPoint(state.player);
           if (!point) { event('조금 더 넓은 곳에서 놀아 볼까요?'); break; }
           face(state.player, point); begin(command.kind, WEATHER_PLAY_DURATIONS[command.kind]);
           if (crafting) state.activity!.craftPoint = point;
-          event(command.kind === 'snowman' ? '동글동글, 눈사람을 만들어요.' : command.kind === 'snowduck' ? '꾹 눌러서, 작은 눈오리 하나.' : command.kind === 'snowball' ? '눈뭉치를 뭉쳐서, 휙!' : '첨벙! 빗물 위에 동그라미.');
+          event(command.kind === 'snowman' ? '동글동글, 눈사람을 만들어요.' : command.kind === 'snowduck' ? '두 손으로 꾹, 작은 눈오리 하나.' : command.kind === 'make-snowball' ? '눈을 모아 동글동글 뭉쳐요.' : command.kind === 'snowball' ? '준비한 눈덩이를, 휙!' : '폴짝폴짝, 첨벙첨벙!');
           break;
         }
         case 'travel': {
           if (command.floor === state.floor) break;
+          state.snowballReady = false;
           if (state.floor === 'office') officeReturn = state.seat === 'lounge' && currentRestSeat()
             ? { ...currentRestSeat()!.approach } : { x: state.player.x, z: state.player.z };
           cancel(); stand(); state.target = null; state.ready = false; state.lastHit = null; state.candyInMouth = false;
@@ -611,11 +615,15 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
       const previous = state.activity.remaining;
       state.activity.remaining = Math.max(0, state.activity.remaining - dt);
       const action = state.activity;
-      const releaseRemaining = action.duration * (action.kind === 'splash' ? .65 : .45);
-      if ((action.kind === 'snowball' || action.kind === 'splash') && previous > releaseRemaining && action.remaining <= releaseRemaining) {
-        const point = action.kind === 'splash' ? weatherPlayPoint(state.player, .55) ?? weatherPlayPoint(state.player) : state.player;
-        if (point) state.weatherEffect = { id: ++weatherObjectId, kind: action.kind, x: point.x, z: point.z, angle: state.player.angle,
-          duration: action.kind === 'snowball' ? .9 : 1.1, remaining: action.kind === 'snowball' ? .9 : 1.1 };
+      if (action.kind === 'snowball' || action.kind === 'splash') {
+        const releases = action.kind === 'splash' ? SPLASH_LANDINGS : [.55];
+        for (const progress of releases) {
+          const threshold = action.duration * (1 - progress);
+          if (previous <= threshold || action.remaining > threshold) continue;
+          if (action.kind === 'snowball') state.snowballReady = false;
+          state.weatherEffect = { id: ++weatherObjectId, kind: action.kind, x: state.player.x, z: state.player.z, angle: state.player.angle,
+            duration: action.kind === 'snowball' ? .9 : .65, remaining: action.kind === 'snowball' ? .9 : .65 };
+        }
       }
       if (state.activity.remaining < 1e-8) {
         const a = state.activity; state.activity = null;
@@ -624,6 +632,7 @@ export function createGameEngine(initial?: PersistedState, environment?: GameEnv
         else if (a.kind === 'take' && a.snack) { state.inventory[a.snack]++; event(`${SNACKS[a.snack]}를 챙겼어요.`, 'snack'); }
         else if (a.kind === 'eat' && a.snack) { state.inventory[a.snack] = Math.max(0, state.inventory[a.snack] - 1); event('맛있는 휴식이었어요.', 'snack'); }
         else if (a.kind === 'candy') { state.candyInMouth = true; event('사탕 하나 물고, 잠깐 아무 생각 없이.', 'sip'); }
+        else if (a.kind === 'make-snowball') { state.snowballReady = true; event('눈덩이 준비 완료! 아래에서 던져 보세요.'); }
         else if (a.kind === 'snowman' || a.kind === 'snowduck') {
           const point = a.craftPoint;
           if (point) state.weatherCreations = [...state.weatherCreations.slice(-(WEATHER_CREATION_LIMIT - 1)),

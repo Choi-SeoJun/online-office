@@ -21,6 +21,33 @@ function player(): RoomPlayer {
     candyInMouth: false, activity: null, weapon: 'punch', elapsed: 20, lastHit: null, carryingCoffee: false };
 }
 
+test('remote splash footfalls remain visible between slower room snapshots', () => {
+  const game = createGameEngine().state; game.weatherKind = 'snow';
+  const peer = player(); peer.floor = 'rooftop'; peer.pose = 'splash';
+  peer.activity = { kind: 'splash', duration: 2.7, remaining: 2.7 };
+  for (const elapsed of [.8, 1.65, 2.5, 2.8]) {
+    const remote = remoteAnimationState(game, peer, 10000 + elapsed * 1000);
+    assert.equal(remote.weatherEffect?.kind, 'splash');
+    assert.ok(remote.weatherEffect.remaining > 0 && remote.weatherEffect.remaining <= .65);
+    assert.equal(remote.weatherKind, 'snow', 'peers do not replace the viewers local weather');
+  }
+  assert.equal(remoteAnimationState(game, peer, 13500).weatherEffect, null);
+});
+
+test('remote held snowballs track crafting completion and throw release between snapshots', () => {
+  const game = createGameEngine().state; game.snowballReady = true;
+  const peer = player(); peer.floor = 'rooftop'; peer.pose = 'make-snowball'; peer.snowballReady = false;
+  peer.activity = { kind: 'make-snowball', duration: 1.8, remaining: .3 };
+  assert.equal(remoteAnimationState(game, peer, 10200).snowballReady, false);
+  const ready = remoteAnimationState(game, peer, 10400);
+  assert.equal(ready.snowballReady, true); assert.equal(ready.player.pose, 'idle');
+  peer.pose = 'snowball'; peer.snowballReady = true; peer.activity = { kind: 'snowball', duration: 1.6, remaining: 1.6 };
+  assert.equal(remoteAnimationState(game, peer, 10200).snowballReady, true);
+  const thrown = remoteAnimationState(game, peer, 11000);
+  assert.equal(thrown.snowballReady, false); assert.equal(thrown.weatherEffect?.kind, 'snowball');
+  assert.equal(remoteAnimationState(game, player(), 11000).snowballReady, false, 'legacy peers cannot inherit local held balls');
+});
+
 test('remote snow creations and thrown effects age independently of the viewers weather', () => {
   const game = createGameEngine().state; game.weatherKind = 'rain';
   game.weatherCreations = [{ id: 99, kind: 'snowman', x: 3, z: 0, angle: 0, remaining: 20 }];

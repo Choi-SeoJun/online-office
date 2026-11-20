@@ -4,9 +4,9 @@ import type { Precipitation } from './environment-types.ts';
 
 export const WEATHER_CREATION_LIMIT = 6;
 export const WEATHER_CREATION_LIFETIME = 120;
-export const WEATHER_PLAY_DURATIONS: Record<WeatherPlayKind, number> = { snowman: 3.2, snowduck: 2.4, snowball: 1.6, splash: 1.5 };
+export const WEATHER_PLAY_DURATIONS: Record<WeatherPlayKind, number> = { snowman: 3.2, snowduck: 2.4, 'make-snowball': 1.8, snowball: 1.6, splash: 2.7 };
 export function isWeatherPlay(kind: unknown): kind is WeatherPlayKind {
-  return kind === 'snowman' || kind === 'snowduck' || kind === 'snowball' || kind === 'splash';
+  return kind === 'snowman' || kind === 'snowduck' || kind === 'make-snowball' || kind === 'snowball' || kind === 'splash';
 }
 export const weatherAllowsPlay = (weather: Precipitation, kind: WeatherPlayKind) => weather === (kind === 'splash' ? 'rain' : 'snow');
 export function isWeatherPlayPoint(point: Point) {

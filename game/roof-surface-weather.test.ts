@@ -4,12 +4,51 @@ import * as THREE from 'three';
 import { createRoofSurfaceWeather, stepRoofSurfaceWeather } from './roof-surface-weather.ts';
 import { isPointerEligible } from './scene.ts';
 import { ROOF_BOUNDS, ROOF_REST } from './layout.ts';
+import { createRooftop } from './rooftop.ts';
+import { prepareCameraCutaways } from './camera-cutaway.ts';
+import { batchArchitecture } from './scene.ts';
+
+Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+  createElement: () => ({ width: 0, height: 0, getContext: () => ({ beginPath() {}, roundRect() {}, fill() {}, fillText() {} }) }),
+} });
 
 const settings = { quality: 'high' as const, reducedMotion: false };
 const advance = (kind: 'none' | 'rain' | 'snow', seconds: number, state = { snow: 0, wet: 0 }) => {
   for (let i = 0; i < seconds * 10; i++) state = stepRoofSurfaceWeather(state, kind, .1);
   return state;
 };
+
+test('snow covers real parapets, stair roof and plants after batching, without obscuring cutaway walls', () => {
+  const roof = createRooftop(new THREE.Group(), true), cutaways = prepareCameraCutaways(roof);
+  batchArchitecture(roof);
+  const effect = createRoofSurfaceWeather(roof);
+  cutaways({ x: 12, z: 18 }); effect.update('snow', true, settings, .1);
+  for (const side of ['north', 'south', 'east', 'west']) {
+    const cap = roof.getObjectByName(`roof-snow-${side}`) as THREE.InstancedMesh;
+    assert.ok(cap?.visible && cap.count > 0, `snow covers ${side} parapet`);
+    assert.equal(isPointerEligible(cap), false);
+  }
+  const caps = roof.getObjectByName('roof-snow-objects') as THREE.InstancedMesh;
+  assert.ok(caps?.count > 15, 'stairwell, planters and leaf crowns receive snow');
+  const fullCount = caps.count;
+  const matrix = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), scale = new THREE.Vector3();
+  let stair = false, plant = false;
+  for (let i = 0; i < caps.count; i++) {
+    caps.getMatrixAt(i, matrix); matrix.decompose(p, q, scale);
+    if (p.y > 2.92 && p.y < 2.96) stair = true;
+    if (p.y > 1.3 && p.y < 1.8 && scale.x < .5) plant = true;
+    assert.ok(scale.y <= .16, 'shallow caps must not turn objects into snow walls');
+  }
+  assert.ok(stair && plant);
+  const south = roof.getObjectByName('roof-snow-south') as THREE.Mesh;
+  const material = south.material as THREE.MeshStandardMaterial;
+  const faded = material.opacity; assert.ok(faded < .2);
+  cutaways({ x: -12, z: -18 }); effect.update('snow', true, { ...settings, quality: 'low' }, .1);
+  assert.ok(material.opacity > faded * 3); assert.ok(caps.count < fullCount);
+  for (let i = 0; i < 1300; i++) effect.update('none', true, settings, .1);
+  assert.equal(caps.visible, false);
+  effect.dispose(); assert.equal(roof.getObjectByName('roof-snow-objects'), undefined);
+});
 
 test('first snowy or rainy frame already has visible cosmetic coverage', () => {
   for (const kind of ['snow', 'rain'] as const) {
